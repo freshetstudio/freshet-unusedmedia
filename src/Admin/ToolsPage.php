@@ -102,9 +102,9 @@ final class ToolsPage
             <div class="frst-header__row">
                 <svg class="frst-header__mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
                     <rect width="32" height="32" rx="7" fill="#1122ff"/>
-                    <circle cx="10" cy="22" r="3" fill="#fff"/>
-                    <path d="M7 13a12 12 0 0 1 12 12" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
-                    <path d="M7 6a19 19 0 0 1 19 19" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity=".55"/>
+                    <rect x="7.5" y="9.5" width="17" height="13" rx="2.5" stroke="#fff" stroke-width="2.5"/>
+                    <circle cx="12.25" cy="13.75" r="1.75" fill="#fff"/>
+                    <path d="M10.5 19.75l4-3.75 3.25 3 2.25-2 3.5 3.25" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
                 <h1 class="frst-header__title"><?php esc_html_e('Freshet Unused Media', 'freshet-unusedmedia'); ?></h1>
                 <span class="frst-header__version"><?php echo esc_html('v' . FRESHET_UNUSEDMEDIA_VERSION); ?></span>
@@ -114,7 +114,7 @@ final class ToolsPage
                 </div>
             </div>
         </div>
-        <hr class="wp-header-end" hidden>
+        <hr class="wp-header-end">
         <?php
     }
 

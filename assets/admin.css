@@ -1,0 +1,94 @@
+/* Freshet Unused Media — admin styles */
+
+.freshet-unusedmedia-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.6;
+    white-space: nowrap;
+}
+
+.freshet-unusedmedia-badge--used {
+    background: #edfaef;
+    color: #00832a;
+}
+
+.freshet-unusedmedia-badge--unused {
+    background: #fcf0f1;
+    color: #b32d2e;
+}
+
+.freshet-unusedmedia-badge--unknown {
+    background: #f0f0f1;
+    color: #50575e;
+}
+
+.freshet-unusedmedia-card {
+    background: #fff;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+    padding: 16px 20px;
+    margin-top: 16px;
+    max-width: 1100px;
+}
+
+.freshet-unusedmedia-card h2 {
+    margin-top: 0;
+}
+
+.freshet-unusedmedia-warning {
+    background: #fcf9e8;
+    border-left: 4px solid #dba617;
+    padding: 8px 12px;
+}
+
+.freshet-unusedmedia-progress {
+    max-width: 480px;
+    margin: 12px 0;
+}
+
+.freshet-unusedmedia-progress__bar {
+    background: #f0f0f1;
+    border-radius: 8px;
+    height: 12px;
+    overflow: hidden;
+}
+
+.freshet-unusedmedia-progress__bar span {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: #1122ff;
+    border-radius: 8px;
+    transition: width 0.3s ease;
+}
+
+.freshet-unusedmedia-progress__label {
+    display: inline-block;
+    margin-top: 4px;
+    color: #646970;
+    font-size: 12px;
+}
+
+.freshet-unusedmedia-table .freshet-unusedmedia-file img {
+    vertical-align: middle;
+    margin-right: 8px;
+    border-radius: 3px;
+    object-fit: cover;
+}
+
+.freshet-unusedmedia-refs {
+    margin: 8px 0;
+    padding-left: 16px;
+    list-style: disc;
+}
+
+.freshet-unusedmedia-refs li {
+    margin-bottom: 4px;
+}
+
+.column-freshet_unusedmedia {
+    width: 130px;
+}

@@ -243,7 +243,14 @@ final class ToolsPage
     private function renderUnusedRow(int $id): void
     {
         $file = get_attached_file($id);
-        $size = $file !== false && file_exists($file) ? size_format((int) filesize($file)) : '—';
+
+        // Local file first; fall back to the filesize recorded in attachment
+        // metadata (WP 6.0+) — covers offloaded media with local copies removed.
+        $bytes = $file !== false && file_exists($file)
+            ? (int) filesize($file)
+            : (int) (wp_get_attachment_metadata($id)['filesize'] ?? 0);
+
+        $size = $bytes > 0 ? size_format($bytes) : '—';
         $scannedAt = $this->store->scannedAt($id);
         $editLink = get_edit_post_link($id);
         $title = get_the_title($id);

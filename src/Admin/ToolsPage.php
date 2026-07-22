@@ -81,13 +81,41 @@ final class ToolsPage
             return;
         }
 
+        $this->renderHeader();
+
         echo '<div class="wrap freshet-unusedmedia-wrap">';
-        echo '<h1>' . esc_html__('Media Usage', 'freshet-unusedmedia') . '</h1>';
 
         $this->renderScanCard();
         $this->renderUnusedTable();
 
         echo '</div>';
+    }
+
+    /**
+     * Slim brand strip, matching the Freshet Feeds header. Scoped to this
+     * page only — the rest of wp-admin is never touched.
+     */
+    private function renderHeader(): void
+    {
+        ?>
+        <div class="frst-header">
+            <div class="frst-header__row">
+                <svg class="frst-header__mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+                    <rect width="32" height="32" rx="7" fill="#1122ff"/>
+                    <circle cx="10" cy="22" r="3" fill="#fff"/>
+                    <path d="M7 13a12 12 0 0 1 12 12" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+                    <path d="M7 6a19 19 0 0 1 19 19" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity=".55"/>
+                </svg>
+                <h1 class="frst-header__title"><?php esc_html_e('Freshet Unused Media', 'freshet-unusedmedia'); ?></h1>
+                <span class="frst-header__version"><?php echo esc_html('v' . FRESHET_UNUSEDMEDIA_VERSION); ?></span>
+                <div class="frst-header__meta">
+                    <a href="https://freshet.studio/docs" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Docs', 'freshet-unusedmedia'); ?></a>
+                    <a href="mailto:plugins@kristoffbertram.be"><?php esc_html_e('Support', 'freshet-unusedmedia'); ?></a>
+                </div>
+            </div>
+        </div>
+        <hr class="wp-header-end" hidden>
+        <?php
     }
 
     // ------------------------------------------------------------------ scan

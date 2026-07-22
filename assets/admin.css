@@ -1,5 +1,50 @@
 /* Freshet Unused Media — admin styles */
 
+/* Brand strip (matches the Freshet Feeds header) */
+
+.frst-header {
+    background: #fff;
+    border-bottom: 1px solid #dcdcde;
+    margin: 0 0 0 -20px;
+    padding: 16px 20px;
+}
+
+.frst-header__row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.frst-header__mark {
+    width: 28px;
+    height: 28px;
+    flex: none;
+}
+
+.frst-header__title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #1d2327;
+    margin: 0;
+    padding: 0;
+}
+
+.frst-header__version {
+    font-size: 11px;
+    color: #646970;
+    background: #f0f0f1;
+    border-radius: 10px;
+    padding: 2px 8px;
+}
+
+.frst-header__meta {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 13px;
+}
+
 .freshet-unusedmedia-badge {
     display: inline-block;
     padding: 2px 8px;

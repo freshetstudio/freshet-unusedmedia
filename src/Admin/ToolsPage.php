@@ -110,7 +110,7 @@ final class ToolsPage
                 <span class="frst-header__version"><?php echo esc_html('v' . FRESHET_UNUSEDMEDIA_VERSION); ?></span>
                 <div class="frst-header__meta">
                     <a href="https://freshet.studio/docs" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Docs', 'freshet-unusedmedia'); ?></a>
-                    <a href="mailto:plugins@kristoffbertram.be"><?php esc_html_e('Support', 'freshet-unusedmedia'); ?></a>
+                    <a href="mailto:email@freshet.studio"><?php esc_html_e('Support', 'freshet-unusedmedia'); ?></a>
                 </div>
             </div>
         </div>

@@ -35,6 +35,18 @@ final class Plugin
             $deleter->hooks();
         }
 
+        // Translations shipped inside the plugin's own /languages need this
+        // call — without a custom path the textdomain registry only looks in
+        // WP_LANG_DIR, so wp.org-delivered translations load either way but a
+        // bundled .mo never would. On init: nothing here translates earlier.
+        add_action('init', static function (): void {
+            load_plugin_textdomain(
+                'freshet-unusedmedia',
+                false,
+                dirname(plugin_basename(FRESHET_UNUSEDMEDIA_FILE)) . '/languages'
+            );
+        });
+
         // Cheap staleness marker: any content save may change usage.
         add_action('save_post', static function (int $postId): void {
             if (wp_is_post_revision($postId) || wp_is_post_autosave($postId) || get_post_type($postId) === 'attachment') {

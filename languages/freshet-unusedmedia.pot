@@ -1,0 +1,335 @@
+# Copyright (C) 2026 Freshet Studio
+# This file is distributed under the GPL-2.0-or-later.
+msgid ""
+msgstr ""
+"Project-Id-Version: Freshet Unused Media 1.0.0\n"
+"Report-Msgid-Bugs-To: https://freshet.studio\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"POT-Creation-Date: 2026-07-26T00:00:00+00:00\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"X-Domain: freshet-unusedmedia\n"
+
+#. Author of the plugin
+msgid "Freshet Studio"
+msgstr ""
+
+#. Description of the plugin
+msgid "Truly determine whether media is still in use — ACF fields, page builders, options, galleries and raw URLs included — and safely delete what isn't."
+msgstr ""
+
+#. URI of the plugin
+#. Author URI of the plugin
+msgid "https://freshet.studio"
+msgstr ""
+
+#. translators: %s: current PHP version
+#: freshet-unusedmedia.php:33
+msgid "Freshet Unused Media requires PHP 8.2 or newer. This site runs PHP %s — the plugin is inactive."
+msgstr ""
+
+#: src/Admin/Ajax.php:43
+#: src/Admin/Ajax.php:66
+#: src/Admin/Ajax.php:87
+#: src/Admin/Ajax.php:139
+#: src/Admin/Ajax.php:152
+#: src/Admin/DeleteController.php:33
+msgid "Not allowed."
+msgstr ""
+
+#: src/Admin/Ajax.php:49
+msgid "Unknown attachment."
+msgstr ""
+
+#: src/Admin/Assets.php:38
+msgid "Checking…"
+msgstr ""
+
+#: src/Admin/Assets.php:39
+msgid "Request failed — try again."
+msgstr ""
+
+#: src/Admin/Assets.php:40
+msgid "Scanning…"
+msgstr ""
+
+#: src/Admin/Assets.php:41
+msgid "Deleting…"
+msgstr ""
+
+#. translators: 1: deleted count, 2: skipped count
+#: src/Admin/Assets.php:43
+msgid "Done: %1$s deleted, %2$s skipped (found in use on re-check)."
+msgstr ""
+
+#. translators: %d: number of additional references
+#: src/Admin/AttachmentMetaBox.php:106
+msgid "…and %d more."
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:121
+msgid "record only — not a content reference"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:122
+msgid "possible"
+msgstr ""
+
+#. translators: %d: term ID
+#: src/Admin/AttachmentMetaBox.php:159
+msgid "term #%d"
+msgstr ""
+
+#. translators: %d: user ID
+#: src/Admin/AttachmentMetaBox.php:167
+msgid "user #%d"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:174
+msgid "Customizer"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:184
+msgid "ACF field"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:185
+msgid "Featured image"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:186
+msgid "Product gallery"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:187
+msgid "Elementor content"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:188
+msgid "Block attribute"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:189
+msgid "Image in content"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:190
+msgid "Gallery"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:191
+msgid "File URL"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:192
+msgid "Widget"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:193
+msgid "Customizer setting"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:194
+msgid "Site setting"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:195
+msgid "Stored data"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:196
+msgid "ID list"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:197
+msgid "Uploaded to"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:198
+msgid "ID value"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:38
+#: src/Admin/MediaColumn.php:48
+#: src/Admin/ToolsPage.php:39
+msgid "Usage"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:55
+#: src/Admin/MediaColumn.php:84
+msgid "Check usage"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:56
+msgid "Rescan"
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:72
+msgid "Not scanned yet."
+msgstr ""
+
+#. translators: %s: human time diff
+#: src/Admin/AttachmentMetaBox.php:78
+msgid "Scanned %s ago."
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:85
+msgid "Content has changed since — result may be stale."
+msgstr ""
+
+#: src/Admin/AttachmentMetaBox.php:92
+msgid "No references found anywhere."
+msgstr ""
+
+#: src/Admin/MediaColumn.php:100
+#: src/Admin/StatusBadge.php:26
+msgid "Used"
+msgstr ""
+
+#: src/Admin/MediaColumn.php:101
+#: src/Admin/StatusBadge.php:32
+msgid "Unused"
+msgstr ""
+
+#: src/Admin/MediaColumn.php:102
+#: src/Admin/StatusBadge.php:35
+msgid "Not scanned"
+msgstr ""
+
+#: src/Admin/MediaColumn.php:99
+msgid "Any usage status"
+msgstr ""
+
+#. translators: %d: number of references found
+#: src/Admin/StatusBadge.php:23
+msgid "Used (%d reference)"
+msgid_plural "Used (%d references)"
+msgstr[0] ""
+msgstr[1] ""
+
+#. Name of the plugin
+#: src/Admin/ToolsPage.php:109
+msgid "Freshet Unused Media"
+msgstr ""
+
+#: src/Admin/ToolsPage.php:112
+msgid "Docs"
+msgstr ""
+
+#: src/Admin/ToolsPage.php:113
+msgid "Support"
+msgstr ""
+
+#: src/Admin/ToolsPage.php:130
+msgid "Scan"
+msgstr ""
+
+#. translators: %s: number of used attachments
+#: src/Admin/ToolsPage.php:137
+msgid "Used: %s"
+msgstr ""
+
+#. translators: %s: number of unused attachments
+#: src/Admin/ToolsPage.php:142
+msgid "Unused: %s"
+msgstr ""
+
+#. translators: %s: number of unscanned attachments
+#: src/Admin/ToolsPage.php:147
+msgid "Not scanned: %s"
+msgstr ""
+
+#. translators: 1: human time diff, 2: number of attachments scanned
+#: src/Admin/ToolsPage.php:156
+msgid "Last full scan finished %1$s ago (%2$s files)."
+msgstr ""
+
+#: src/Admin/ToolsPage.php:164
+msgid "Content has changed since — results may be stale."
+msgstr ""
+
+#. translators: 1: scanned count, 2: total count
+#: src/Admin/ToolsPage.php:180
+msgid "Resume scan (%1$s / %2$s)"
+msgstr ""
+
+#: src/Admin/ToolsPage.php:184
+msgid "Start full scan"
+msgstr ""
+
+#: src/Admin/ToolsPage.php:185
+msgid "Stop"
+msgstr ""
+
+#: src/Admin/ToolsPage.php:187
+msgid "Reset scan"
+msgstr ""
+
+#. translators: %s: number of unused attachments
+#: src/Admin/ToolsPage.php:209
+msgid "Unused files (%s)"
+msgstr ""
+
+#. translators: 1: MEDIA_TRASH constant name, 2: the PHP line to add to wp-config.php
+#: src/Admin/ToolsPage.php:216
+msgid "%1$s is not enabled — deletions are permanent. Add %2$s to wp-config.php to get a trash safety net."
+msgstr ""
+
+#: src/Admin/ToolsPage.php:223
+msgid "No attachments are currently marked unused. Run a scan first, or enjoy the tidy library."
+msgstr ""
+
+#: src/Admin/ToolsPage.php:235
+msgid "File"
+msgstr ""
+
+#: src/Admin/ToolsPage.php:235
+msgid "Scanned"
+msgstr ""
+
+#: src/Admin/ToolsPage.php:235
+msgid "Size"
+msgstr ""
+
+#: src/Admin/ToolsPage.php:235
+msgid "Type"
+msgstr ""
+
+#: src/Admin/ToolsPage.php:235
+msgid "Uploaded"
+msgstr ""
+
+#: src/Admin/ToolsPage.php:254
+msgid "Delete the selected attachments? Each one is re-checked first; anything still in use is skipped."
+msgstr ""
+
+#: src/Admin/ToolsPage.php:255
+msgid "Delete selected"
+msgstr ""
+
+#. translators: %s: number of unused attachments
+#: src/Admin/ToolsPage.php:259
+msgid "Delete all %s unused attachments? Each one is re-checked first; anything still in use is skipped."
+msgstr ""
+
+#. translators: %s: number of unused attachments
+#: src/Admin/ToolsPage.php:264
+msgid "Delete all unused (%s)"
+msgstr ""
+
+#. translators: %s: human time diff
+#: src/Admin/ToolsPage.php:308
+msgid "%s ago"
+msgstr ""
+
+#: src/Admin/ToolsPage.php:38
+msgid "Media Usage"
+msgstr ""
+
+#. translators: 1: deleted count, 2: skipped count, 3: failed count
+#: src/Admin/ToolsPage.php:70
+msgid "Deleted %1$d, skipped %2$d (found in use on re-check), failed %3$d."
+msgstr ""

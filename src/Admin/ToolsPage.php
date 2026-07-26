@@ -211,10 +211,12 @@ final class ToolsPage
         )) . '</h2>';
 
         if (!(defined('MEDIA_TRASH') && MEDIA_TRASH)) {
-            echo '<p class="freshet-unusedmedia-warning">' . esc_html__(
-                'MEDIA_TRASH is not enabled — deletions are permanent. Add define( \'MEDIA_TRASH\', true ); to wp-config.php to get a trash safety net.',
-                'freshet-unusedmedia'
-            ) . '</p>';
+            echo '<p class="freshet-unusedmedia-warning">' . esc_html(sprintf(
+                /* translators: 1: MEDIA_TRASH constant name, 2: the PHP line to add to wp-config.php */
+                __('%1$s is not enabled — deletions are permanent. Add %2$s to wp-config.php to get a trash safety net.', 'freshet-unusedmedia'),
+                'MEDIA_TRASH',
+                "define( 'MEDIA_TRASH', true );"
+            )) . '</p>';
         }
 
         if ($list['ids'] === []) {

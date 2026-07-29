@@ -18,6 +18,13 @@ declare(strict_types=1);
  * you add a pattern.
  */
 
+// This file ships inside the plugin, so it must not be executable over HTTP.
+// The usual `defined('ABSPATH') || exit` idiom is unavailable here: the file
+// defines ABSPATH itself, on the next line. Guard on the SAPI instead.
+if (PHP_SAPI !== 'cli') {
+    exit;
+}
+
 define('ABSPATH', dirname(__DIR__) . '/');
 
 // --------------------------------------------------------------- WP stubs

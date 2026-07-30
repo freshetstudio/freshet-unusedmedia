@@ -9,6 +9,7 @@
  * Author:            Freshet Studio
  * Author URI:        https://freshet.studio
  * License:           GPL-2.0-or-later
+ * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       freshet-unusedmedia
  * Domain Path:       /languages
  */

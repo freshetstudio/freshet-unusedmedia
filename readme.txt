@@ -52,7 +52,11 @@ Tip: add `define( 'MEDIA_TRASH', true );` to `wp-config.php` so deletions go to 
 
 = Can it be wrong? =
 
-Detection is deliberately conservative: filename and structural matches are boundary-checked (attachment 123 never matches `wp-image-1234`), ambiguous ID matches count as used, and every file is re-verified right before deletion. What it cannot see: references stored outside your database (hard-coded in theme files, external services) or on other sites of a multisite network.
+Detection is deliberately conservative: filename and structural matches are boundary-checked (attachment 123 never matches `wp-image-1234`), ambiguous ID matches count as used, and every file is re-verified right before deletion.
+
+What it cannot see is anything outside the tables it reads — posts, postmeta, options, term meta and user meta. The blind spot most worth knowing about is inside your database, not outside it: **references stored in a plugin's own custom database tables** — form entries, slider or page-builder records, any plugin that keeps attachment IDs or file URLs in a table of its own. No query-based scanner can find a reference in a table whose shape it has never seen. The same applies to references hard-coded in theme or plugin files, references held by an external service, and references on other sites of a multisite network.
+
+So: if a plugin on your site stores media in its own tables, check what it holds before deleting — and add `define( 'MEDIA_TRASH', true );` (see Installation) so a deletion can be undone.
 
 = Does it work with multisite? =
 

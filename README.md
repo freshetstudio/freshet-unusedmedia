@@ -14,16 +14,6 @@ WordPress' "Uploaded to" column only records where a file was first attached. It
 
 ## Dev environment
 
-After cloning, arm the content guard once — `core.hooksPath` lives in
-`.git/config` and so is never cloned:
-
-```bash
-bash .freshet/install-hooks.sh
-```
-
-The same check runs in CI on every push, where it cannot be skipped. See
-`.freshet/README.md`.
-
 Symlink or copy the plugin into a local WordPress install and activate it:
 
 ```bash

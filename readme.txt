@@ -2,13 +2,13 @@
 Contributors: kristoffbertram
 Tags: media, unused media, media library, clean up, attachments
 Requires at least: 6.5
-Tested up to: 7.0
+Tested up to: 7.1
 Requires PHP: 8.2
 Stable tag: 1.0.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Truly determine whether media is still in use — ACF, page builders, options and raw URLs included — and safely delete what isn't.
+Determines whether media is still in use — ACF, page builders, options and raw URLs included — and safely deletes what isn't.
 
 == Description ==
 
@@ -39,6 +39,8 @@ The "Uploaded to" relation itself is shown as informational evidence but never c
 **Extensible**
 
 Site-specific detectors can be added via the `freshet_unusedmedia_detectors` filter; `freshet_unusedmedia_is_used` gets the final say on any status; `freshet_unusedmedia_batch_size` tunes scan batches.
+
+Part of the Freshet plugin suite. Full documentation: [freshet.studio/docs](https://freshet.studio/docs).
 
 == Installation ==
 

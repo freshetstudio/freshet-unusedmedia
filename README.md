@@ -1,6 +1,6 @@
 # Freshet Unused Media
 
-Truly determine whether a WordPress media file is still in use — ACF fields, page builders, options, galleries and raw URLs included — and safely delete what isn't.
+Determines whether a WordPress media file is still in use — ACF fields, page builders, options, galleries and raw URLs included — and safely deletes what isn't.
 
 WordPress' "Uploaded to" column only records where a file was first attached. It misses ACF image/gallery/repeater fields, featured images, block and shortcode galleries, Elementor data, WooCommerce product galleries, the customizer logo/site icon, widgets, term/user meta and plain URLs in content (including resized `-300x200` / `-scaled` variants). This plugin scans all of it.
 

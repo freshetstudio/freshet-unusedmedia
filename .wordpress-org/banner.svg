@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="772" height="250" viewBox="0 0 772 250" role="img" aria-label="Freshet Unused Media">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6E0B2A"/>
+      <stop offset="1" stop-color="#E11D48"/>
+    </linearGradient>
+  </defs>
+  <rect width="772" height="250" fill="url(#bg)"/>
+  <g transform="translate(56,73) scale(4.4)" fill="none" stroke="#ffffff" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 6h18"/>
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
+    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+    <path d="M10 11v6"/>
+    <path d="M14 11v6"/>
+  </g>
+  <text x="196" y="128" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="50" font-weight="800" fill="#ffffff" letter-spacing="-1">Freshet Unused Media</text>
+  <text x="198" y="168" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="23" font-weight="500" fill="#D79AAB">Find the media nothing uses</text>
+  <text x="198" y="198" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="19" font-weight="500" fill="#F2CCD6" letter-spacing="0.5">ACF &#183; Builders &#183; Options &#183; Raw URLs</text>
+</svg>

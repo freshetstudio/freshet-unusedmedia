@@ -1,7 +1,6 @@
 <?php
 /**
  * Plugin Name:       Freshet Unused Media
- * Plugin URI:        https://freshet.studio
  * Description:       Determines whether media is still in use — ACF fields, page builders, options, galleries and raw URLs included — and safely deletes what isn't.
  * Version:           1.0.0
  * Requires at least: 6.5

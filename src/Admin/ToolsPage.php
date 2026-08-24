@@ -35,8 +35,8 @@ final class ToolsPage
     public function registerMenu(): void
     {
         add_media_page(
-            __('Media Usage', 'freshet-unusedmedia'),
-            __('Usage', 'freshet-unusedmedia'),
+            __('Media Usage', 'freshet-unused-media'),
+            __('Usage', 'freshet-unused-media'),
             self::CAP,
             self::SLUG,
             [$this, 'renderPage']
@@ -67,7 +67,7 @@ final class ToolsPage
             $failed > 0 ? 'notice-warning' : 'notice-success',
             esc_html(sprintf(
                 /* translators: 1: deleted count, 2: skipped count, 3: failed count */
-                __('Deleted %1$d, skipped %2$d (found in use on re-check), failed %3$d.', 'freshet-unusedmedia'),
+                __('Deleted %1$d, skipped %2$d (found in use on re-check), failed %3$d.', 'freshet-unused-media'),
                 $deleted,
                 $skipped,
                 $failed
@@ -106,11 +106,11 @@ final class ToolsPage
                     <circle cx="12.25" cy="13.75" r="1.75" fill="#fff"/>
                     <path d="M10.5 19.75l4-3.75 3.25 3 2.25-2 3.5 3.25" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-                <h1 class="frst-header__title"><?php esc_html_e('Freshet Unused Media', 'freshet-unusedmedia'); ?></h1>
+                <h1 class="frst-header__title"><?php esc_html_e('Freshet Unused Media', 'freshet-unused-media'); ?></h1>
                 <span class="frst-header__version"><?php echo esc_html('v' . FRESHET_UNUSEDMEDIA_VERSION); ?></span>
                 <div class="frst-header__meta">
-                    <a href="https://freshet.studio/docs" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Docs', 'freshet-unusedmedia'); ?></a>
-                    <a href="mailto:email@freshet.studio"><?php esc_html_e('Support', 'freshet-unusedmedia'); ?></a>
+                    <a href="https://freshet.studio/docs" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Docs', 'freshet-unused-media'); ?></a>
+                    <a href="mailto:email@freshet.studio"><?php esc_html_e('Support', 'freshet-unused-media'); ?></a>
                 </div>
             </div>
         </div>
@@ -127,24 +127,24 @@ final class ToolsPage
         $last = $this->state->lastScan();
 
         echo '<div class="freshet-unusedmedia-card">';
-        echo '<h2>' . esc_html__('Scan', 'freshet-unusedmedia') . '</h2>';
+        echo '<h2>' . esc_html__('Scan', 'freshet-unused-media') . '</h2>';
 
         echo '<p class="freshet-unusedmedia-counts">';
         printf(
             '%s &nbsp;•&nbsp; %s &nbsp;•&nbsp; %s',
             esc_html(sprintf(
                 /* translators: %s: number of used attachments */
-                __('Used: %s', 'freshet-unusedmedia'),
+                __('Used: %s', 'freshet-unused-media'),
                 number_format_i18n($counts['used'])
             )),
             esc_html(sprintf(
                 /* translators: %s: number of unused attachments */
-                __('Unused: %s', 'freshet-unusedmedia'),
+                __('Unused: %s', 'freshet-unused-media'),
                 number_format_i18n($counts['unused'])
             )),
             esc_html(sprintf(
                 /* translators: %s: number of unscanned attachments */
-                __('Not scanned: %s', 'freshet-unusedmedia'),
+                __('Not scanned: %s', 'freshet-unused-media'),
                 number_format_i18n($counts['unscanned'])
             ))
         );
@@ -153,7 +153,7 @@ final class ToolsPage
         if ($last !== null) {
             $note = sprintf(
                 /* translators: 1: human time diff, 2: number of attachments scanned */
-                __('Last full scan finished %1$s ago (%2$s files).', 'freshet-unusedmedia'),
+                __('Last full scan finished %1$s ago (%2$s files).', 'freshet-unused-media'),
                 human_time_diff($last['finished_at']),
                 number_format_i18n($last['scanned'])
             );
@@ -161,7 +161,7 @@ final class ToolsPage
             $changedAt = (int) get_option('freshet_unusedmedia_content_changed_at', 0);
 
             if ($changedAt > $last['finished_at']) {
-                $note .= ' ' . __('Content has changed since — results may be stale.', 'freshet-unusedmedia');
+                $note .= ' ' . __('Content has changed since — results may be stale.', 'freshet-unused-media');
             }
 
             echo '<p class="description">' . esc_html($note) . '</p>';
@@ -177,14 +177,14 @@ final class ToolsPage
             esc_html($running !== null
                 ? sprintf(
                     /* translators: 1: scanned count, 2: total count */
-                    __('Resume scan (%1$s / %2$s)', 'freshet-unusedmedia'),
+                    __('Resume scan (%1$s / %2$s)', 'freshet-unused-media'),
                     number_format_i18n($running['done']),
                     number_format_i18n($running['total'])
                 )
-                : __('Start full scan', 'freshet-unusedmedia')),
-            esc_html__('Stop', 'freshet-unusedmedia'),
+                : __('Start full scan', 'freshet-unused-media')),
+            esc_html__('Stop', 'freshet-unused-media'),
             $running !== null
-                ? '<button type="button" class="button-link-delete" id="freshet-unusedmedia-scan-reset">' . esc_html__('Reset scan', 'freshet-unusedmedia') . '</button>'
+                ? '<button type="button" class="button-link-delete" id="freshet-unusedmedia-scan-reset">' . esc_html__('Reset scan', 'freshet-unused-media') . '</button>'
                 : ''
         );
 
@@ -206,21 +206,21 @@ final class ToolsPage
         echo '<div class="freshet-unusedmedia-card">';
         echo '<h2>' . esc_html(sprintf(
             /* translators: %s: number of unused attachments */
-            __('Unused files (%s)', 'freshet-unusedmedia'),
+            __('Unused files (%s)', 'freshet-unused-media'),
             number_format_i18n($list['total'])
         )) . '</h2>';
 
         if (!(defined('MEDIA_TRASH') && MEDIA_TRASH)) {
             echo '<p class="freshet-unusedmedia-warning">' . esc_html(sprintf(
                 /* translators: 1: MEDIA_TRASH constant name, 2: the PHP line to add to wp-config.php */
-                __('%1$s is not enabled — deletions are permanent. Add %2$s to wp-config.php to get a trash safety net.', 'freshet-unusedmedia'),
+                __('%1$s is not enabled — deletions are permanent. Add %2$s to wp-config.php to get a trash safety net.', 'freshet-unused-media'),
                 'MEDIA_TRASH',
                 "define( 'MEDIA_TRASH', true );"
             )) . '</p>';
         }
 
         if ($list['ids'] === []) {
-            echo '<p>' . esc_html__('No attachments are currently marked unused. Run a scan first, or enjoy the tidy library.', 'freshet-unusedmedia') . '</p></div>';
+            echo '<p>' . esc_html__('No attachments are currently marked unused. Run a scan first, or enjoy the tidy library.', 'freshet-unused-media') . '</p></div>';
 
             return;
         }
@@ -232,7 +232,7 @@ final class ToolsPage
         echo '<table class="widefat striped freshet-unusedmedia-table"><thead><tr>';
         echo '<td class="check-column"><input type="checkbox" id="freshet-unusedmedia-select-all"></td>';
 
-        foreach ([__('File', 'freshet-unusedmedia'), __('Type', 'freshet-unusedmedia'), __('Uploaded', 'freshet-unusedmedia'), __('Size', 'freshet-unusedmedia'), __('Scanned', 'freshet-unusedmedia')] as $col) {
+        foreach ([__('File', 'freshet-unused-media'), __('Type', 'freshet-unused-media'), __('Uploaded', 'freshet-unused-media'), __('Size', 'freshet-unused-media'), __('Scanned', 'freshet-unused-media')] as $col) {
             echo '<th>' . esc_html($col) . '</th>';
         }
 
@@ -251,17 +251,17 @@ final class ToolsPage
                 <button type="submit" class="button" onclick="return confirm(%s);">%s</button>
                 <button type="button" class="button button-link-delete" id="freshet-unusedmedia-delete-all" data-count="%d" data-confirm="%s">%s</button>
             </p>',
-            esc_attr(wp_json_encode(__('Delete the selected attachments? Each one is re-checked first; anything still in use is skipped.', 'freshet-unusedmedia'))),
-            esc_html__('Delete selected', 'freshet-unusedmedia'),
+            esc_attr(wp_json_encode(__('Delete the selected attachments? Each one is re-checked first; anything still in use is skipped.', 'freshet-unused-media'))),
+            esc_html__('Delete selected', 'freshet-unused-media'),
             (int) $list['total'],
             esc_attr(sprintf(
                 /* translators: %s: number of unused attachments */
-                __('Delete all %s unused attachments? Each one is re-checked first; anything still in use is skipped.', 'freshet-unusedmedia'),
+                __('Delete all %s unused attachments? Each one is re-checked first; anything still in use is skipped.', 'freshet-unused-media'),
                 number_format_i18n($list['total'])
             )),
             esc_html(sprintf(
                 /* translators: %s: number of unused attachments */
-                __('Delete all unused (%s)', 'freshet-unusedmedia'),
+                __('Delete all unused (%s)', 'freshet-unused-media'),
                 number_format_i18n($list['total'])
             ))
         );
@@ -305,7 +305,7 @@ final class ToolsPage
         echo '<td>' . esc_html($scannedAt > 0
             ? sprintf(
                 /* translators: %s: human time diff */
-                __('%s ago', 'freshet-unusedmedia'),
+                __('%s ago', 'freshet-unused-media'),
                 human_time_diff($scannedAt)
             )
             : '—') . '</td>';

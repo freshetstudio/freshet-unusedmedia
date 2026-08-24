@@ -45,7 +45,7 @@ final class MediaColumn
 
     public function addColumn(array $columns): array
     {
-        $columns['freshet_unusedmedia'] = __('Usage', 'freshet-unusedmedia');
+        $columns['freshet_unusedmedia'] = __('Usage', 'freshet-unused-media');
 
         return $columns;
     }
@@ -81,7 +81,7 @@ final class MediaColumn
             '<a href="%s" class="freshet-unusedmedia-check" data-id="%d">%s</a>',
             esc_url($fallback),
             (int) $post->ID,
-            esc_html__('Check usage', 'freshet-unusedmedia')
+            esc_html__('Check usage', 'freshet-unused-media')
         );
 
         return $actions;
@@ -96,10 +96,10 @@ final class MediaColumn
         $current = sanitize_key(wp_unslash($_GET['freshet_unusedmedia_status'] ?? '')); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only list filter.
 
         $options = [
-            '' => __('Any usage status', 'freshet-unusedmedia'),
-            ResultStore::STATUS_USED => __('Used', 'freshet-unusedmedia'),
-            ResultStore::STATUS_UNUSED => __('Unused', 'freshet-unusedmedia'),
-            'unscanned' => __('Not scanned', 'freshet-unusedmedia'),
+            '' => __('Any usage status', 'freshet-unused-media'),
+            ResultStore::STATUS_USED => __('Used', 'freshet-unused-media'),
+            ResultStore::STATUS_UNUSED => __('Unused', 'freshet-unused-media'),
+            'unscanned' => __('Not scanned', 'freshet-unused-media'),
         ];
 
         echo '<select name="freshet_unusedmedia_status">';

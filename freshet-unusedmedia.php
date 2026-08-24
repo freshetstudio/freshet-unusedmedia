@@ -2,14 +2,14 @@
 /**
  * Plugin Name:       Freshet Unused Media
  * Description:       Determines whether media is still in use — ACF fields, page builders, options, galleries and raw URLs included — and safely deletes what isn't.
- * Version:           1.0.0
+ * Version:           1.0.1
  * Requires at least: 6.5
  * Requires PHP:      8.2
  * Author:            Freshet Studio
  * Author URI:        https://freshet.studio
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
- * Text Domain:       freshet-unusedmedia
+ * Text Domain:       freshet-unused-media
  * Domain Path:       /languages
  */
 
@@ -19,7 +19,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('FRESHET_UNUSEDMEDIA_VERSION', '1.0.0');
+define('FRESHET_UNUSEDMEDIA_VERSION', '1.0.1');
 define('FRESHET_UNUSEDMEDIA_FILE', __FILE__);
 define('FRESHET_UNUSEDMEDIA_DIR', plugin_dir_path(__FILE__));
 define('FRESHET_UNUSEDMEDIA_URL', plugin_dir_url(__FILE__));
@@ -30,7 +30,7 @@ if (version_compare(PHP_VERSION, '8.2', '<')) {
             '<div class="notice notice-error"><p>%s</p></div>',
             esc_html(sprintf(
                 /* translators: %s: current PHP version */
-                __('Freshet Unused Media requires PHP 8.2 or newer. This site runs PHP %s — the plugin is inactive.', 'freshet-unusedmedia'),
+                __('Freshet Unused Media requires PHP 8.2 or newer. This site runs PHP %s — the plugin is inactive.', 'freshet-unused-media'),
                 PHP_VERSION
             ))
         );

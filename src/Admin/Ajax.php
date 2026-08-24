@@ -40,13 +40,13 @@ final class Ajax
         check_ajax_referer('freshet_unusedmedia_ajax');
 
         if (!current_user_can('upload_files')) {
-            wp_send_json_error(['message' => __('Not allowed.', 'freshet-unusedmedia')], 403);
+            wp_send_json_error(['message' => __('Not allowed.', 'freshet-unused-media')], 403);
         }
 
         $id = absint($_POST['id'] ?? 0);
 
         if ($id === 0 || get_post_type($id) !== 'attachment') {
-            wp_send_json_error(['message' => __('Unknown attachment.', 'freshet-unusedmedia')], 400);
+            wp_send_json_error(['message' => __('Unknown attachment.', 'freshet-unused-media')], 400);
         }
 
         $result = $this->scanner->scan($id);
@@ -63,7 +63,7 @@ final class Ajax
     public function checkSingleFallback(): void
     {
         if (!current_user_can('upload_files')) {
-            wp_die(esc_html__('Not allowed.', 'freshet-unusedmedia'));
+            wp_die(esc_html__('Not allowed.', 'freshet-unused-media'));
         }
 
         check_admin_referer('freshet_unusedmedia_check_single');
@@ -84,7 +84,7 @@ final class Ajax
         check_ajax_referer('freshet_unusedmedia_manage');
 
         if (!current_user_can('manage_options')) {
-            wp_send_json_error(['message' => __('Not allowed.', 'freshet-unusedmedia')], 403);
+            wp_send_json_error(['message' => __('Not allowed.', 'freshet-unused-media')], 403);
         }
 
         global $wpdb;
@@ -136,7 +136,7 @@ final class Ajax
         check_ajax_referer('freshet_unusedmedia_manage');
 
         if (!current_user_can('manage_options')) {
-            wp_send_json_error(['message' => __('Not allowed.', 'freshet-unusedmedia')], 403);
+            wp_send_json_error(['message' => __('Not allowed.', 'freshet-unused-media')], 403);
         }
 
         $this->state->reset();
@@ -149,7 +149,7 @@ final class Ajax
         check_ajax_referer('freshet_unusedmedia_manage');
 
         if (!current_user_can('manage_options')) {
-            wp_send_json_error(['message' => __('Not allowed.', 'freshet-unusedmedia')], 403);
+            wp_send_json_error(['message' => __('Not allowed.', 'freshet-unused-media')], 403);
         }
 
         $ids = $this->store->unusedIds(5);

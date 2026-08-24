@@ -30,7 +30,7 @@ final class DeleteController
     public function deleteSelected(): void
     {
         if (!current_user_can('manage_options')) {
-            wp_die(esc_html__('Not allowed.', 'freshet-unusedmedia'));
+            wp_die(esc_html__('Not allowed.', 'freshet-unused-media'));
         }
 
         check_admin_referer('freshet_unusedmedia_delete_selected');

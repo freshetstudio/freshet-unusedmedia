@@ -41,7 +41,7 @@ final class Plugin
         // bundled .mo never would. On init: nothing here translates earlier.
         add_action('init', static function (): void {
             load_plugin_textdomain(
-                'freshet-unusedmedia',
+                'freshet-unused-media',
                 false,
                 dirname(plugin_basename(FRESHET_UNUSEDMEDIA_FILE)) . '/languages'
             );

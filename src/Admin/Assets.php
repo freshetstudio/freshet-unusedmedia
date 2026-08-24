@@ -35,12 +35,12 @@ final class Assets
             'nonceCheck' => wp_create_nonce('freshet_unusedmedia_ajax'),
             'nonceManage' => current_user_can('manage_options') ? wp_create_nonce('freshet_unusedmedia_manage') : '',
             'i18n' => [
-                'checking' => __('Checking…', 'freshet-unusedmedia'),
-                'error' => __('Request failed — try again.', 'freshet-unusedmedia'),
-                'scanning' => __('Scanning…', 'freshet-unusedmedia'),
-                'deleting' => __('Deleting…', 'freshet-unusedmedia'),
+                'checking' => __('Checking…', 'freshet-unused-media'),
+                'error' => __('Request failed — try again.', 'freshet-unused-media'),
+                'scanning' => __('Scanning…', 'freshet-unused-media'),
+                'deleting' => __('Deleting…', 'freshet-unused-media'),
                 /* translators: 1: deleted count, 2: skipped count */
-                'deleteDone' => __('Done: %1$s deleted, %2$s skipped (found in use on re-check).', 'freshet-unusedmedia'),
+                'deleteDone' => __('Done: %1$s deleted, %2$s skipped (found in use on re-check).', 'freshet-unused-media'),
             ],
         ];
 

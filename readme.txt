@@ -4,7 +4,7 @@ Tags: media, unused media, media library, clean up, attachments
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.2
-Stable tag: 1.0.0
+Stable tag: 1.0.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -69,6 +69,9 @@ Per site, yes. Cross-site references (another site embedding this site's file UR
 Never. Scanning only reads and caches results. Deletion happens exclusively when you click a delete action, after re-verification.
 
 == Changelog ==
+
+= 1.0.1 =
+* Text domain renamed to freshet-unused-media to match the wordpress.org plugin slug.
 
 = 1.0.0 =
 * Initial release: usage scanning across postmeta (ACF, Elementor, WooCommerce, featured images), post content, options/theme mods, term meta and user meta; Media Library usage column and filter; evidence meta box; batched full-library scan; safe selected/all deletion with pre-delete re-verification.

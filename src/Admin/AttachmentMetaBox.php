@@ -35,7 +35,7 @@ final class AttachmentMetaBox
 
         add_meta_box(
             'freshet-unusedmedia-usage',
-            __('Usage', 'freshet-unusedmedia'),
+            __('Usage', 'freshet-unused-media'),
             [$this, 'render'],
             'attachment',
             'side',
@@ -52,8 +52,8 @@ final class AttachmentMetaBox
             '<p><button type="button" class="button freshet-unusedmedia-check" data-id="%s">%s</button></p>',
             esc_attr((string) $post->ID),
             esc_html($this->store->status($post->ID) === null
-                ? __('Check usage', 'freshet-unusedmedia')
-                : __('Rescan', 'freshet-unusedmedia'))
+                ? __('Check usage', 'freshet-unused-media')
+                : __('Rescan', 'freshet-unused-media'))
         );
 
         echo '</div>';
@@ -69,27 +69,27 @@ final class AttachmentMetaBox
         $html = '<p>' . StatusBadge::render($status, $data['count']) . '</p>';
 
         if ($status === null) {
-            return $html . '<p class="description">' . esc_html__('Not scanned yet.', 'freshet-unusedmedia') . '</p>';
+            return $html . '<p class="description">' . esc_html__('Not scanned yet.', 'freshet-unused-media') . '</p>';
         }
 
         if ($scannedAt > 0) {
             $note = sprintf(
                 /* translators: %s: human time diff */
-                __('Scanned %s ago.', 'freshet-unusedmedia'),
+                __('Scanned %s ago.', 'freshet-unused-media'),
                 human_time_diff($scannedAt)
             );
 
             $changedAt = (int) get_option('freshet_unusedmedia_content_changed_at', 0);
 
             if ($changedAt > $scannedAt) {
-                $note .= ' ' . __('Content has changed since — result may be stale.', 'freshet-unusedmedia');
+                $note .= ' ' . __('Content has changed since — result may be stale.', 'freshet-unused-media');
             }
 
             $html .= '<p class="description">' . esc_html($note) . '</p>';
         }
 
         if ($data['refs'] === []) {
-            return $html . '<p class="description">' . esc_html__('No references found anywhere.', 'freshet-unusedmedia') . '</p>';
+            return $html . '<p class="description">' . esc_html__('No references found anywhere.', 'freshet-unused-media') . '</p>';
         }
 
         $html .= '<ul class="freshet-unusedmedia-refs">';
@@ -103,7 +103,7 @@ final class AttachmentMetaBox
         if ($data['count'] > count($data['refs'])) {
             $html .= '<p class="description">' . esc_html(sprintf(
                 /* translators: %d: number of additional references */
-                __('…and %d more.', 'freshet-unusedmedia'),
+                __('…and %d more.', 'freshet-unused-media'),
                 $data['count'] - count($data['refs'])
             )) . '</p>';
         }
@@ -118,8 +118,8 @@ final class AttachmentMetaBox
 
         $confidence = match ($ref->confidence) {
             Reference::CONFIRMED => '',
-            Reference::INFO => ' <em>(' . esc_html__('record only — not a content reference', 'freshet-unusedmedia') . ')</em>',
-            default => ' <em>(' . esc_html__('possible', 'freshet-unusedmedia') . ')</em>',
+            Reference::INFO => ' <em>(' . esc_html__('record only — not a content reference', 'freshet-unused-media') . ')</em>',
+            default => ' <em>(' . esc_html__('possible', 'freshet-unused-media') . ')</em>',
         };
 
         $detail = '';
@@ -156,7 +156,7 @@ final class AttachmentMetaBox
 
                 return esc_html(sprintf(
                     /* translators: %d: term ID */
-                    __('term #%d', 'freshet-unusedmedia'),
+                    __('term #%d', 'freshet-unused-media'),
                     $ref->objectId
                 ));
 
@@ -164,14 +164,14 @@ final class AttachmentMetaBox
                 $user = get_userdata($ref->objectId);
                 $name = $user !== false ? $user->display_name : sprintf(
                     /* translators: %d: user ID */
-                    __('user #%d', 'freshet-unusedmedia'),
+                    __('user #%d', 'freshet-unused-media'),
                     $ref->objectId
                 );
 
                 return '<a href="' . esc_url(get_edit_user_link($ref->objectId)) . '">' . esc_html($name) . '</a>';
 
             case 'theme_mod':
-                return '<a href="' . esc_url(admin_url('customize.php')) . '">' . esc_html__('Customizer', 'freshet-unusedmedia') . '</a>';
+                return '<a href="' . esc_url(admin_url('customize.php')) . '">' . esc_html__('Customizer', 'freshet-unused-media') . '</a>';
 
             default:
                 return '<code>' . esc_html($ref->detail) . '</code>';
@@ -181,21 +181,21 @@ final class AttachmentMetaBox
     public static function matchLabel(string $match): string
     {
         return match ($match) {
-            'acf' => __('ACF field', 'freshet-unusedmedia'),
-            'thumbnail' => __('Featured image', 'freshet-unusedmedia'),
-            'woo-gallery' => __('Product gallery', 'freshet-unusedmedia'),
-            'elementor' => __('Elementor content', 'freshet-unusedmedia'),
-            'block-id' => __('Block attribute', 'freshet-unusedmedia'),
-            'wp-image-class' => __('Image in content', 'freshet-unusedmedia'),
-            'gallery' => __('Gallery', 'freshet-unusedmedia'),
-            'url' => __('File URL', 'freshet-unusedmedia'),
-            'widget' => __('Widget', 'freshet-unusedmedia'),
-            'theme-mod' => __('Customizer setting', 'freshet-unusedmedia'),
-            'site-option' => __('Site setting', 'freshet-unusedmedia'),
-            'serialized' => __('Stored data', 'freshet-unusedmedia'),
-            'comma-list' => __('ID list', 'freshet-unusedmedia'),
-            'attached' => __('Uploaded to', 'freshet-unusedmedia'),
-            default => __('ID value', 'freshet-unusedmedia'),
+            'acf' => __('ACF field', 'freshet-unused-media'),
+            'thumbnail' => __('Featured image', 'freshet-unused-media'),
+            'woo-gallery' => __('Product gallery', 'freshet-unused-media'),
+            'elementor' => __('Elementor content', 'freshet-unused-media'),
+            'block-id' => __('Block attribute', 'freshet-unused-media'),
+            'wp-image-class' => __('Image in content', 'freshet-unused-media'),
+            'gallery' => __('Gallery', 'freshet-unused-media'),
+            'url' => __('File URL', 'freshet-unused-media'),
+            'widget' => __('Widget', 'freshet-unused-media'),
+            'theme-mod' => __('Customizer setting', 'freshet-unused-media'),
+            'site-option' => __('Site setting', 'freshet-unused-media'),
+            'serialized' => __('Stored data', 'freshet-unused-media'),
+            'comma-list' => __('ID list', 'freshet-unused-media'),
+            'attached' => __('Uploaded to', 'freshet-unused-media'),
+            default => __('ID value', 'freshet-unused-media'),
         };
     }
 }

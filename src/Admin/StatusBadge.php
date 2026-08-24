@@ -20,18 +20,18 @@ final class StatusBadge
             $label = $refCount > 0
                 ? sprintf(
                     /* translators: %d: number of references found */
-                    _n('Used (%d reference)', 'Used (%d references)', $refCount, 'freshet-unusedmedia'),
+                    _n('Used (%d reference)', 'Used (%d references)', $refCount, 'freshet-unused-media'),
                     $refCount
                 )
-                : __('Used', 'freshet-unusedmedia');
+                : __('Used', 'freshet-unused-media');
 
             return '<span class="freshet-unusedmedia-badge freshet-unusedmedia-badge--used">' . esc_html($label) . '</span>';
         }
 
         if ($status === ResultStore::STATUS_UNUSED) {
-            return '<span class="freshet-unusedmedia-badge freshet-unusedmedia-badge--unused">' . esc_html__('Unused', 'freshet-unusedmedia') . '</span>';
+            return '<span class="freshet-unusedmedia-badge freshet-unusedmedia-badge--unused">' . esc_html__('Unused', 'freshet-unused-media') . '</span>';
         }
 
-        return '<span class="freshet-unusedmedia-badge freshet-unusedmedia-badge--unknown">' . esc_html__('Not scanned', 'freshet-unusedmedia') . '</span>';
+        return '<span class="freshet-unusedmedia-badge freshet-unusedmedia-badge--unknown">' . esc_html__('Not scanned', 'freshet-unused-media') . '</span>';
     }
 }

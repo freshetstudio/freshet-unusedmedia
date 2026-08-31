@@ -116,6 +116,12 @@ final class PostmetaDetector implements DetectorInterface
             default => null,
         };
 
+        // JSON blobs keep IDs under arbitrary keys ({"logo":123}); serialized
+        // values may nest JSON strings. The structural search is the last word.
+        if ($idMatch === null && LikePatterns::structureContains(LikePatterns::decodeStored($value), $ctx->id, $ctx->basenames)) {
+            $idMatch = 'serialized';
+        }
+
         if ($idMatch === null) {
             return null; // LIKE candidate failed precise verification (e.g. id 1234 vs 123).
         }

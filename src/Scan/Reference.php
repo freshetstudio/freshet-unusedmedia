@@ -17,11 +17,11 @@ final class Reference
     public const INFO = 'info';
 
     public function __construct(
-        public readonly string $detector,   // 'postmeta', 'post-content', 'options', 'termmeta', 'usermeta', 'attached'
-        public readonly string $objectType, // 'post' | 'option' | 'theme_mod' | 'term' | 'user'
+        public readonly string $detector,   // 'postmeta', 'post-content', 'options', 'termmeta', 'usermeta', 'comment', 'recent-upload', 'attached'
+        public readonly string $objectType, // 'post' | 'option' | 'theme_mod' | 'term' | 'user' | 'comment'
         public readonly int $objectId,      // 0 for option / theme_mod
         public readonly string $detail,     // meta_key / option_name / short description
-        public readonly string $match,      // 'acf' | 'thumbnail' | 'woo-gallery' | 'elementor' | 'block-id' | 'wp-image-class' | 'gallery' | 'url' | 'serialized' | 'comma-list' | 'exact' | 'widget' | 'theme-mod' | 'site-option' | 'attached'
+        public readonly string $match,      // 'acf' | 'acf-block' | 'thumbnail' | 'woo-gallery' | 'elementor' | 'block-id' | 'wp-image-class' | 'gallery' | 'shortcode' | 'url' | 'serialized' | 'comma-list' | 'exact' | 'widget' | 'theme-mod' | 'site-option' | 'autosave' | 'recent-upload' | 'attached'
         public readonly string $confidence, // self::CONFIRMED | self::POSSIBLE | self::INFO
     ) {
     }

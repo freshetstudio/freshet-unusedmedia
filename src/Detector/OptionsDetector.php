@@ -120,10 +120,12 @@ final class OptionsDetector implements DetectorInterface
             return $make('option', 'url', Reference::CONFIRMED);
         }
 
-        $serialized = maybe_unserialize($value);
+        // Serialized or JSON settings blob: verify in the structure (JSON nested
+        // in strings included) so array indexes never false-positive.
+        $decoded = LikePatterns::decodeStored($value);
 
-        if (is_array($serialized) || is_object($serialized)) {
-            return LikePatterns::structureContains($serialized, $ctx->id, $ctx->basenames)
+        if (is_array($decoded) || is_object($decoded)) {
+            return LikePatterns::structureContains($decoded, $ctx->id, $ctx->basenames)
                 ? $make('option', 'serialized', Reference::POSSIBLE)
                 : null;
         }

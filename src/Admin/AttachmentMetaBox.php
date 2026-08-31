@@ -124,7 +124,7 @@ final class AttachmentMetaBox
 
         $detail = '';
 
-        if (in_array($ref->objectType, ['post', 'term', 'user'], true) && $ref->detail !== '' && $ref->detail !== $ref->match) {
+        if (in_array($ref->objectType, ['post', 'term', 'user', 'comment'], true) && $ref->detail !== '' && $ref->detail !== $ref->match) {
             $detail = ' <code>' . esc_html($ref->detail) . '</code>';
         }
 
@@ -170,6 +170,25 @@ final class AttachmentMetaBox
 
                 return '<a href="' . esc_url(get_edit_user_link($ref->objectId)) . '">' . esc_html($name) . '</a>';
 
+            case 'comment':
+                $comment = get_comment($ref->objectId);
+                $label = $comment instanceof \WP_Comment && $comment->comment_author !== ''
+                    ? sprintf(
+                        /* translators: %s: comment author name */
+                        __('comment by %s', 'freshet-unused-media'),
+                        $comment->comment_author
+                    )
+                    : sprintf(
+                        /* translators: %d: comment ID */
+                        __('comment #%d', 'freshet-unused-media'),
+                        $ref->objectId
+                    );
+                $link = get_edit_comment_link($ref->objectId);
+
+                return is_string($link) && $link !== ''
+                    ? '<a href="' . esc_url($link) . '">' . esc_html($label) . '</a>'
+                    : esc_html($label);
+
             case 'theme_mod':
                 return '<a href="' . esc_url(admin_url('customize.php')) . '">' . esc_html__('Customizer', 'freshet-unused-media') . '</a>';
 
@@ -182,6 +201,10 @@ final class AttachmentMetaBox
     {
         return match ($match) {
             'acf' => __('ACF field', 'freshet-unused-media'),
+            'acf-block' => __('Block field', 'freshet-unused-media'),
+            'shortcode' => __('Shortcode attribute', 'freshet-unused-media'),
+            'autosave' => __('Unsaved edit', 'freshet-unused-media'),
+            'recent-upload' => __('Uploaded recently', 'freshet-unused-media'),
             'thumbnail' => __('Featured image', 'freshet-unused-media'),
             'woo-gallery' => __('Product gallery', 'freshet-unused-media'),
             'elementor' => __('Elementor content', 'freshet-unused-media'),

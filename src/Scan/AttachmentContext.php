@@ -14,7 +14,8 @@ final class AttachmentContext
 {
     /**
      * @param string[] $basenames Every basename the attachment may appear as
-     *                            (original, -scaled, size variants).
+     *                            (original, -scaled, size variants, alternate
+     *                            mime sources, encoded spellings).
      */
     private function __construct(
         public readonly int $id,
@@ -41,9 +42,26 @@ final class AttachmentContext
                 $names[] = wp_basename((string) $meta['original_image']);
             }
 
+            // Alternate-mime copies of the original (WebP/AVIF generators).
+            foreach ((array) ($meta['sources'] ?? []) as $source) {
+                if (is_array($source) && !empty($source['file'])) {
+                    $names[] = wp_basename((string) $source['file']);
+                }
+            }
+
             foreach ((array) ($meta['sizes'] ?? []) as $size) {
+                if (!is_array($size)) {
+                    continue;
+                }
+
                 if (!empty($size['file'])) {
                     $names[] = wp_basename((string) $size['file']);
+                }
+
+                foreach ((array) ($size['sources'] ?? []) as $source) {
+                    if (is_array($source) && !empty($source['file'])) {
+                        $names[] = wp_basename((string) $source['file']);
+                    }
                 }
             }
         }
@@ -59,10 +77,33 @@ final class AttachmentContext
             }
         }
 
+        $names = array_values(array_unique(array_filter($names)));
+
+        // Non-ASCII basenames also travel percent-encoded (a URL copied from the
+        // browser) and \u-escaped (json_encode without JSON_UNESCAPED_UNICODE).
+        // ASCII names are unchanged by both, so nothing is added for them.
+        foreach ($names as $name) {
+            $encoded = rawurlencode($name);
+
+            if ($encoded !== $name) {
+                $names[] = $encoded;
+            }
+
+            $json = json_encode($name);
+
+            if (is_string($json)) {
+                $json = trim($json, '"');
+
+                if ($json !== $name) {
+                    $names[] = $json;
+                }
+            }
+        }
+
         return new self(
             id: $id,
             parentId: (int) (get_post($id)?->post_parent ?? 0),
-            basenames: array_values(array_unique(array_filter($names))),
+            basenames: array_values(array_unique($names)),
         );
     }
 }

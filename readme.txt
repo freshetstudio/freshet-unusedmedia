@@ -19,12 +19,15 @@ Freshet Unused Media scans everywhere a reference can hide and tells you, per at
 **What it detects**
 
 * ACF fields: image, gallery, file — including serialized values and repeater/flexible sub-fields, verified via ACF's own field-key meta
+* ACF blocks: field values stored inside the block markup, where no URL is ever written
 * Featured images and WooCommerce product galleries
 * Block editor content: image blocks, gallery blocks, `wp-image-N` classes
-* Classic content: `[gallery]` shortcodes and raw file URLs, including resized variants like `photo-300x200.jpg` and `-scaled` files
+* Classic content: `[gallery]` and `[playlist]` shortcodes, page-builder shortcodes holding an ID (`image="123"`), and raw file URLs, including resized variants like `photo-300x200.jpg`, `-scaled` files and percent-encoded filenames
 * Elementor page data
-* Options and theme mods: site icon, custom logo, widgets, customizer settings
+* Options and theme mods: site icon, custom logo, widgets, customizer settings — serialized or JSON
 * Term meta and user meta (ACF fields on categories and profiles)
+* Comments and comment meta (a file linked in a reply, review photos)
+* Excerpts, and unsaved edits held in autosaves
 
 **How it works**
 
@@ -33,12 +36,13 @@ Freshet Unused Media scans everywhere a reference can hide and tells you, per at
 * A **full-library scan** (Media → Usage) that batches through your library in the browser, resumable at any time
 * **Safe deletion**: delete selected or all unused files — every file is re-checked immediately before deletion, and anything that has become used is skipped
 * Ambiguous matches (a bare ID in unknown meta) are treated as **used** — the plugin errs on the side of keeping files
+* Files uploaded in the last 24 hours count as in use — an editor may still be placing them — so a clean-up never removes work in progress
 
 The "Uploaded to" relation itself is shown as informational evidence but never counts as usage — that unreliable signal is exactly what this plugin replaces.
 
 **Extensible**
 
-Site-specific detectors can be added via the `freshet_unusedmedia_detectors` filter; `freshet_unusedmedia_is_used` gets the final say on any status; `freshet_unusedmedia_batch_size` tunes scan batches.
+Site-specific detectors can be added via the `freshet_unusedmedia_detectors` filter; `freshet_unusedmedia_is_used` gets the final say on any status; `freshet_unusedmedia_batch_size` and `freshet_unusedmedia_batch_seconds` tune scan batches; `freshet_unusedmedia_upload_grace` sets the recent-upload window in seconds (0 disables it).
 
 Part of the Freshet plugin suite. Full documentation: [freshet.studio/docs](https://freshet.studio/docs).
 
@@ -56,7 +60,9 @@ Tip: add `define( 'MEDIA_TRASH', true );` to `wp-config.php` so deletions go to 
 
 Detection is deliberately conservative: filename and structural matches are boundary-checked (attachment 123 never matches `wp-image-1234`), ambiguous ID matches count as used, and every file is re-verified right before deletion.
 
-What it cannot see is anything outside the tables it reads — posts, postmeta, options, term meta and user meta. The blind spot most worth knowing about is inside your database, not outside it: **references stored in a plugin's own custom database tables** — form entries, slider or page-builder records, any plugin that keeps attachment IDs or file URLs in a table of its own. No query-based scanner can find a reference in a table whose shape it has never seen. The same applies to references hard-coded in theme or plugin files, references held by an external service, and references on other sites of a multisite network.
+What it cannot see is anything outside the tables it reads — posts, postmeta, options, term meta, user meta, comments and comment meta. The blind spot most worth knowing about is inside your database, not outside it: **references stored in a plugin's own custom database tables** — form entries, slider or page-builder records, any plugin that keeps attachment IDs or file URLs in a table of its own. No query-based scanner can find a reference in a table whose shape it has never seen. The same applies to references hard-coded in theme or plugin files, references held by an external service, references on other sites of a multisite network (network-wide options included), and the legacy Links manager.
+
+Two deliberate choices are worth knowing too. Old post revisions are not counted as usage — a file removed from a post is meant to be found — but autosaves are, because they hold edits nobody has saved yet. And the re-check before deletion is not atomic: a reference written in the instant between the re-check and the deletion is not seen. That window is a fraction of a second; the recent-upload grace period covers the realistic case (a file placed in the editor before its post is saved), and `MEDIA_TRASH` covers the rest.
 
 So: if a plugin on your site stores media in its own tables, check what it holds before deleting — and add `define( 'MEDIA_TRASH', true );` (see Installation) so a deletion can be undone.
 
@@ -71,6 +77,14 @@ Never. Scanning only reads and caches results. Deletion happens exclusively when
 == Changelog ==
 
 = 1.0.1 =
+* Detects field values stored inside ACF block markup, which carry no URL and were previously invisible.
+* Detects IDs in shortcode attributes beyond `[gallery]` — `[playlist]` and page-builder shortcodes included.
+* Detects IDs inside JSON stored in meta and options under any key, including JSON nested in serialized settings.
+* Scans comments and comment meta, and post excerpts.
+* Counts autosaves (unsaved edits) as usage; old revisions still do not count.
+* Matches percent-encoded and JSON-escaped spellings of non-ASCII filenames, and alternate-format (WebP/AVIF) sources recorded in attachment metadata.
+* Files uploaded in the last 24 hours count as in use (`freshet_unusedmedia_upload_grace` to tune).
+* Full-scan batches stop before the PHP time limit and resume from the last completed file, so large libraries always make progress (`freshet_unusedmedia_batch_seconds` to tune).
 * Text domain renamed to freshet-unused-media to match the wordpress.org plugin slug.
 
 = 1.0.0 =

@@ -80,6 +80,10 @@ final class UserMetaDetector implements DetectorInterface
                 default => null,
             };
 
+            if ($idMatch === null && LikePatterns::structureContains(LikePatterns::decodeStored($value), $ctx->id, $ctx->basenames)) {
+                $idMatch = 'serialized'; // JSON blob or nested JSON in serialized data.
+            }
+
             if ($idMatch === null) {
                 continue;
             }

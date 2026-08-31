@@ -17,7 +17,8 @@ final class LikePatterns
 {
     /**
      * OR'd SQL conditions matching an attachment ID inside a text column:
-     * exact value, comma lists, serialized int/string, JSON "id".
+     * exact value, comma lists, serialized int/string, JSON "id", and JSON
+     * values under any other key.
      *
      * @return array{0: string[], 1: array<int, string>} [conditions, params]
      */
@@ -37,6 +38,9 @@ final class LikePatterns
             "{$column} LIKE %s",       // serialized string s:3:"123"
             "{$column} LIKE %s",       // JSON "id":123
             "{$column} LIKE %s",       // JSON "id":"123"
+            "{$column} LIKE %s",       // JSON string value "123" (any key, or array member)
+            "{$column} LIKE %s",       // JSON number value :123, (any key)
+            "{$column} LIKE %s",       // JSON number value :123} (last key)
         ];
 
         $params = [
@@ -48,6 +52,9 @@ final class LikePatterns
             '%' . $wpdb->esc_like($serializedString) . '%',
             '%' . $wpdb->esc_like('"id":' . $id) . '%',
             '%' . $wpdb->esc_like('"id":"' . $id . '"') . '%',
+            '%' . $wpdb->esc_like('"' . $id . '"') . '%',
+            '%' . $wpdb->esc_like(':' . $id . ',') . '%',
+            '%' . $wpdb->esc_like(':' . $id . '}') . '%',
         ];
 
         return [$conditions, $params];
@@ -118,7 +125,12 @@ final class LikePatterns
         return (bool) preg_match('/"id":\s*"?' . $id . '(?!\d)/', $text);
     }
 
-    /** Recursively search an unserialized/decoded structure for the ID or a basename. */
+    /**
+     * Recursively search an unserialized/decoded structure for the ID or a
+     * basename. A string leaf that is itself a JSON object/array is decoded and
+     * searched too — settings blobs keep IDs under arbitrary keys, and
+     * serialized theme mods nest JSON strings.
+     */
     public static function structureContains(mixed $value, int $id, array $basenames): bool
     {
         if (is_int($value)) {
@@ -126,7 +138,13 @@ final class LikePatterns
         }
 
         if (is_string($value)) {
-            return $value === (string) $id || self::containsBasename($value, $basenames);
+            if ($value === (string) $id || self::containsBasename($value, $basenames)) {
+                return true;
+            }
+
+            $decoded = self::decodeJson($value);
+
+            return $decoded !== null && self::structureContains($decoded, $id, $basenames);
         }
 
         if (is_array($value)) {
@@ -142,5 +160,35 @@ final class LikePatterns
         }
 
         return false;
+    }
+
+    /**
+     * A stored value as a structure: PHP-serialized data is unserialized with
+     * classes disabled (meta can be author-written), JSON text is decoded,
+     * anything else is returned as the plain string.
+     */
+    public static function decodeStored(string $value): mixed
+    {
+        if (is_serialized($value)) {
+            $data = @unserialize(trim($value), ['allowed_classes' => false]);
+
+            return $data === false ? $value : $data;
+        }
+
+        return self::decodeJson($value) ?? $value;
+    }
+
+    /** Decodes a string that is a JSON object or array; null for anything else. */
+    public static function decodeJson(string $text): ?array
+    {
+        $first = ltrim($text)[0] ?? '';
+
+        if ($first !== '{' && $first !== '[') {
+            return null;
+        }
+
+        $decoded = json_decode($text, true);
+
+        return is_array($decoded) ? $decoded : null;
     }
 }

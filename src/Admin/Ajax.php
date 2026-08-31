@@ -118,11 +118,26 @@ final class Ajax
             ]);
         }
 
+        // Time-box the batch: a request that hits max_execution_time never
+        // advances the cursor, and the scan would retry the same IDs forever.
+        // Stopping early keeps every batch making progress on large libraries.
+        $limit = (int) ini_get('max_execution_time');
+        $budget = (float) apply_filters('freshet_unusedmedia_batch_seconds', $limit > 0 ? min(20, $limit / 2) : 20);
+        $started = microtime(true);
+        $processed = 0;
+        $last = $state['cursor'];
+
         foreach ($ids as $id) {
             $this->scanner->scan($id);
+            ++$processed;
+            $last = $id;
+
+            if (microtime(true) - $started > $budget) {
+                break;
+            }
         }
 
-        $state = $this->state->advance((int) end($ids), count($ids));
+        $state = $this->state->advance($last, $processed);
 
         wp_send_json_success([
             'finished' => false,

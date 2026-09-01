@@ -57,7 +57,7 @@ Site-specific detectors can be added via the `freshet_unusedmedia_detectors` fil
 
 **Free, and what a licence adds**
 
-Scanning, detection and deletion are free, and stay free — they are the plugin. Nothing in this download is locked, limited or time-barred. A licence from [freshet.studio](https://freshet.studio) adds the Used view: open any file that is in use and see every place it is used, not just the first few.
+Scanning, detection and deletion are free, and stay free — they are the plugin. Nothing in this download is locked, limited or time-barred. A licence from [freshet.studio](https://freshet.studio) adds two things. The Used view: open any file that is in use and see every place it is used, not just the first few. And a WP-CLI command — `wp freshet-unusedmedia scan` and `wp freshet-unusedmedia list` — for running the same scan across many sites without a browser and reading the result as JSON. Both are additions rather than limits on what is here, and the command scans and reports only: it has no delete verb, so nothing can be removed from the command line.
 
 Part of the Freshet plugin suite. Full documentation: [freshet.studio/docs](https://freshet.studio/docs).
 
@@ -95,7 +95,7 @@ Per site, yes. Cross-site references (another site embedding this site's file UR
 
 = Does it delete anything by itself? =
 
-Never. Scanning only reads and caches results. Deletion happens exclusively when you click a delete action, after re-verification.
+Never. Scanning only reads and caches results. Deletion happens exclusively when you click a delete action, after re-verification. The licensed WP-CLI command scans and reports; there is deliberately no delete verb on the command line, so nothing can be deleted non-interactively.
 
 == Changelog ==
 

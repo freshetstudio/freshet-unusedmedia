@@ -11,6 +11,7 @@ use FreshetUnusedMedia\Admin\LicenseSection;
 use FreshetUnusedMedia\Admin\MediaColumn;
 use FreshetUnusedMedia\Admin\ToolsPage;
 use FreshetUnusedMedia\Admin\UsedView;
+use FreshetUnusedMedia\Cli\ScanCommand;
 use FreshetUnusedMedia\License\LicenseClient;
 use FreshetUnusedMedia\License\LicenseInterface;
 use FreshetUnusedMedia\License\NoLicense;
@@ -66,6 +67,18 @@ final class Plugin
                 $licenseSection->hooks();
                 (new UsedView($store, $scanner, $metaBox, $license))->hooks();
             }
+        }
+
+        // WP_CLI first, so a normal page load pays one defined() and stops:
+        // no file read, no class load, nothing registered. The file check is
+        // the same tolerance the paid files above get — the wordpress.org
+        // build strips this command, and a missing file must mean the command
+        // is simply not there rather than a fatal.
+        if (defined('WP_CLI') && WP_CLI && is_readable(FRESHET_UNUSEDMEDIA_DIR . 'src/Cli/ScanCommand.php')) {
+            \WP_CLI::add_command(
+                'freshet-unusedmedia',
+                new ScanCommand($scanner, $store, $state, $license)
+            );
         }
 
         // Translations shipped inside the plugin's own /languages need this

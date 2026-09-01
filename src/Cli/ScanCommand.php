@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace FreshetUnusedMedia\Cli;
 
 use FreshetUnusedMedia\License\LicenseInterface;
+use FreshetUnusedMedia\Scan\FileSize;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\Scanner;
 use FreshetUnusedMedia\Scan\ScanState;
@@ -253,13 +254,7 @@ final class ScanCommand
     private function row(int $id): array
     {
         $file = get_attached_file($id);
-        $meta = wp_get_attachment_metadata($id);
-
-        // Local file first; fall back to the filesize recorded in attachment
-        // metadata (WP 6.0+) — covers offloaded media with local copies removed.
-        $bytes = $file !== false && file_exists($file)
-            ? (int) filesize($file)
-            : (int) (is_array($meta) ? ($meta['filesize'] ?? 0) : 0);
+        $bytes = FileSize::bytes($id) ?? 0;
 
         $filename = $file !== false ? wp_basename($file) : sprintf('#%d', $id);
         $title = get_the_title($id);

@@ -13,6 +13,7 @@ WordPress' "Uploaded to" column only records where a file was first attached. It
 - Conservative by design: ambiguous matches count as *used*; ID matches are digit-boundary-checked (123 never matches 1234)
 - **WP-CLI** (licensed): `wp freshet-unusedmedia scan` / `list` — the same scan and the same results across many installs, in `--format=json`. It reports; it has no delete verb.
 - **Evidence report** (licensed): export the library from Media → Usage as CSV or JSON — one row per file, with the references behind each verdict. It exports; it does not delete.
+- **Space totals** (licensed): what the unused files are holding now, and — kept separate — what deletions made here have actually freed.
 
 ## Dev environment
 
@@ -76,6 +77,31 @@ agency hands a client before it deletes anything.
   than implying the list is complete.
 - **It exports, and that is all it does.** No delete action, nothing scheduled,
   nothing emailed; the file streams to the browser that asked for it.
+- Stripped from the wordpress.org build with the rest of the paid tier
+  (`bin/release.conf`).
+
+## Space totals (licensed)
+
+A card on Media → Usage carrying two figures that are deliberately not merged.
+
+- **Reclaimable now** — bytes held by the files currently on the unused list.
+  The figure to quote before touching anything; nothing has been freed. It is
+  summed live from the same `FileSize::bytes()` the table shows per file, in
+  pages of 200, so it reconciles against rows anyone can check.
+- **Reclaimed so far** — bytes actually freed by deletions this plugin made,
+  accumulated in `ReclaimedLedger` at deletion time because after
+  `wp_delete_attachment()` there is nothing left to measure. **It is never the
+  reclaimable number relabelled.** A file sent to the media trash frees no disk,
+  so it is counted separately as pending rather than as reclaimed.
+- **Unknown sizes are said, not zeroed.** A file with no local copy and no
+  recorded size — an offloaded library — is counted and reported as un-sizeable
+  rather than folded into the total as 0.
+- **Original file only.** Deleting also removes the generated thumbnail sizes,
+  so the real saving is larger than either figure. Both understate.
+- **No scan, no store of its own, nothing scheduled.** It adds up results that
+  already exist, when someone opens the page. Recording at deletion time lives
+  in the free build (`ReclaimedLedger`, four integers in one option) so the
+  deletion path never consults the licence; only the card is gated.
 - Stripped from the wordpress.org build with the rest of the paid tier
   (`bin/release.conf`).
 

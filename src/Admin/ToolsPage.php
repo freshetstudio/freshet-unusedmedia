@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace FreshetUnusedMedia\Admin;
 
+use FreshetUnusedMedia\Scan\FileSize;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\ScanState;
 
@@ -20,15 +21,16 @@ final class ToolsPage
     private const PER_PAGE = 50;
 
     /**
-     * $licenseSection and $report are null in the wordpress.org build, where
-     * neither class exists at all — the type hints resolve lazily, so passing
-     * null never reaches for a stripped file.
+     * $licenseSection, $report and $totals are null in the wordpress.org build,
+     * where none of those classes exists at all — the type hints resolve
+     * lazily, so passing null never reaches for a stripped file.
      */
     public function __construct(
         private readonly ResultStore $store,
         private readonly ScanState $state,
         private readonly ?LicenseSection $licenseSection = null,
         private readonly ?EvidenceReport $report = null,
+        private readonly ?SpaceTotals $totals = null,
     ) {
     }
 
@@ -94,6 +96,11 @@ final class ToolsPage
 
         $this->renderScanCard();
         $this->renderUnusedTable();
+
+        // Same shape as the report below and for the same reason: licensed, so
+        // it renders its own card or nothing. It follows the table because it
+        // totals it.
+        $this->totals?->render();
 
         // Renders its own card, or nothing at all: the report is licensed, and
         // an empty box where a feature is not entitled reads as a broken
@@ -305,12 +312,7 @@ final class ToolsPage
     private function renderUnusedRow(int $id): void
     {
         $file = get_attached_file($id);
-
-        // Local file first; fall back to the filesize recorded in attachment
-        // metadata (WP 6.0+) — covers offloaded media with local copies removed.
-        $bytes = $file !== false && file_exists($file)
-            ? (int) filesize($file)
-            : (int) (wp_get_attachment_metadata($id)['filesize'] ?? 0);
+        $bytes = FileSize::bytes($id) ?? 0;
 
         $size = $bytes > 0 ? size_format($bytes) : '—';
         $scannedAt = $this->store->scannedAt($id);

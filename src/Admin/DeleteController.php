@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace FreshetUnusedMedia\Admin;
 
+use FreshetUnusedMedia\Scan\FileSize;
+use FreshetUnusedMedia\Scan\ReclaimedLedger;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\Scanner;
 
@@ -57,6 +59,11 @@ final class DeleteController
      * MEDIA_TRASH enabled wp_delete_attachment() trashes, otherwise it
      * deletes permanently.
      *
+     * Bookkeeping around this loop, not a change to it: each file is sized
+     * before it goes, because afterwards there is nothing left to measure, and
+     * the pass adds its total to ReclaimedLedger at the end. Nothing about what
+     * is deleted, re-verified or skipped moves.
+     *
      * @param int[] $ids
      * @return array{deleted: int, skipped: int, failed: int}
      */
@@ -65,6 +72,11 @@ final class DeleteController
         $deleted = 0;
         $skipped = 0;
         $failed = 0;
+
+        $freedBytes = 0;
+        $freedFiles = 0;
+        $freedUnsized = 0;
+        $trashed = 0;
 
         foreach ($ids as $id) {
             if (get_post_type($id) !== 'attachment' || !current_user_can('delete_post', $id)) {
@@ -81,13 +93,33 @@ final class DeleteController
                 continue;
             }
 
+            // Measured before the call: once the file is gone there is nothing
+            // to size. Null means it could not be sized at all — an offloaded
+            // file with no recorded size — which is unknown, not zero.
+            $bytes = FileSize::bytes($id);
+
             if (wp_delete_attachment($id, false) instanceof \WP_Post) {
                 ++$deleted;
+
+                if (get_post_status($id) === 'trash') {
+                    // MEDIA_TRASH turned the delete into a trash: the post
+                    // moved, the file did not, and no disk was freed. Counting
+                    // it as reclaimed would be the inflated number this figure
+                    // exists to avoid.
+                    ++$trashed;
+                } elseif ($bytes === null) {
+                    ++$freedUnsized;
+                } else {
+                    $freedBytes += $bytes;
+                    ++$freedFiles;
+                }
             } else {
                 ++$failed;
                 $this->store->clear($id);
             }
         }
+
+        ReclaimedLedger::add($freedBytes, $freedFiles, $freedUnsized, $trashed);
 
         return ['deleted' => $deleted, 'skipped' => $skipped, 'failed' => $failed];
     }

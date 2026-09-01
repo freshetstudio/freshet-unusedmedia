@@ -34,15 +34,30 @@ Freshet Unused Media scans everywhere a reference can hide and tells you, per at
 * A **Usage column** in the Media Library (list mode) with a per-file "Check usage" action
 * A **Usage meta box** on the attachment screen showing the evidence: which post, which field, which option — with edit links
 * A **full-library scan** (Media → Usage) that batches through your library in the browser, resumable at any time
-* **Safe deletion**: delete selected or all unused files — every file is re-checked immediately before deletion, and anything that has become used is skipped
-* Ambiguous matches (a bare ID in unknown meta) are treated as **used** — the plugin errs on the side of keeping files
-* Files uploaded in the last 24 hours count as in use — an editor may still be placing them — so a clean-up never removes work in progress
+* **Safe deletion**: delete selected or all unused files, each one re-checked before it goes
+
+**Why the answer can be trusted**
+
+Deleting media is destructive, so the scan is built to be wrong in one direction only — towards keeping the file.
+
+* **Ambiguity counts as used.** A bare attachment ID in a meta key the plugin has never seen keeps the file. Matches are boundary-checked, so attachment 123 is never matched by `wp-image-1234`.
+* **Every file is re-checked in the instant before it is deleted.** Anything that became used between the scan and your click is skipped rather than deleted, and the result tells you how many were skipped.
+* **A reference in the trash still counts.** A trashed post or comment can be restored, so the files it uses are kept.
+* **Files uploaded in the last 24 hours count as in use** — an editor may still be placing them — so a clean-up never removes work in progress.
+* **The evidence is shown, not summarised.** Every reference is listed with the object it lives in, the field or option it was found in, and a link to go and look: you can check the reasoning before you act on it.
+* **The blind spot is written down.** References kept inside a plugin's own custom database tables cannot be found by any query-based scanner, and the FAQ below names that limit rather than leaving you to discover it.
 
 The "Uploaded to" relation itself is shown as informational evidence but never counts as usage — that unreliable signal is exactly what this plugin replaces.
+
+Thoroughness is the point rather than speed: a first full scan of a large library can take hours rather than minutes. It runs in batches that stop before the PHP time limit and resume where they left off, so a scan always makes progress and never has to be started over.
 
 **Extensible**
 
 Site-specific detectors can be added via the `freshet_unusedmedia_detectors` filter; `freshet_unusedmedia_is_used` gets the final say on any status; `freshet_unusedmedia_batch_size` and `freshet_unusedmedia_batch_seconds` tune scan batches; `freshet_unusedmedia_upload_grace` sets the recent-upload window in seconds (0 disables it).
+
+**Free, and what a licence adds**
+
+Scanning, detection and deletion are free, and stay free — they are the plugin. Nothing in this download is locked, limited or time-barred. A licence from [freshet.studio](https://freshet.studio) adds the Used view: open any file that is in use and see every place it is used, not just the first few.
 
 Part of the Freshet plugin suite. Full documentation: [freshet.studio/docs](https://freshet.studio/docs).
 
@@ -65,6 +80,14 @@ What it cannot see is anything outside the tables it reads — posts, postmeta, 
 Two deliberate choices are worth knowing too. Old post revisions are not counted as usage — a file removed from a post is meant to be found — but autosaves are, because they hold edits nobody has saved yet. And the re-check before deletion is not atomic: a reference written in the instant between the re-check and the deletion is not seen. That window is a fraction of a second; the recent-upload grace period covers the realistic case (a file placed in the editor before its post is saved), and `MEDIA_TRASH` covers the rest.
 
 So: if a plugin on your site stores media in its own tables, check what it holds before deleting — and add `define( 'MEDIA_TRASH', true );` (see Installation) so a deletion can be undone.
+
+= How long does a full scan take? =
+
+Longer than a scanner that only looks at the "Uploaded to" column, because it looks everywhere else as well. On a large library the first full scan is measured in hours, not minutes. It runs in batches from the Media → Usage screen, each batch stops before the PHP time limit and the next one resumes from the last completed file, so the scan always makes progress and can be stopped and picked up later. Nothing runs on a schedule — a scan happens when you start one.
+
+= Does a file referenced from the trash get deleted? =
+
+No. A trashed post or comment can be restored, so a reference from one keeps the file — it is reported as a possible reference rather than a confirmed one, and possible still counts as used.
 
 = Does it work with multisite? =
 

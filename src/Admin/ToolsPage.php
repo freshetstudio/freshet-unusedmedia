@@ -136,6 +136,8 @@ final class ToolsPage
         echo '<div class="freshet-unusedmedia-card">';
         echo '<h2>' . esc_html__('Scan', 'freshet-unused-media') . '</h2>';
 
+        echo '<p class="description">' . esc_html__('Every file is checked against post content and blocks, custom fields, options and theme mods, term and user meta, comments and excerpts — not just what it was uploaded to. Anything ambiguous counts as used, so a file reaches the unused list only when nothing anywhere refers to it.', 'freshet-unused-media') . '</p>';
+
         echo '<p class="freshet-unusedmedia-counts">';
         printf(
             '%s &nbsp;•&nbsp; %s &nbsp;•&nbsp; %s',
@@ -231,6 +233,8 @@ final class ToolsPage
 
             return;
         }
+
+        echo '<p class="description">' . esc_html__('Files uploaded in the last 24 hours never appear here, and a reference from a trashed post or comment still counts as usage. Every file below is re-checked in the instant before it is deleted — anything that has become used in the meantime is skipped.', 'freshet-unused-media') . '</p>';
 
         echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" id="freshet-unusedmedia-delete-form">';
         wp_nonce_field('freshet_unusedmedia_delete_selected');

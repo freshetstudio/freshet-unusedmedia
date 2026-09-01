@@ -20,14 +20,15 @@ final class ToolsPage
     private const PER_PAGE = 50;
 
     /**
-     * $licenseSection is null in the wordpress.org build, where the class does
-     * not exist at all — the type hint resolves lazily, so passing null never
-     * reaches for a stripped file.
+     * $licenseSection and $report are null in the wordpress.org build, where
+     * neither class exists at all — the type hints resolve lazily, so passing
+     * null never reaches for a stripped file.
      */
     public function __construct(
         private readonly ResultStore $store,
         private readonly ScanState $state,
         private readonly ?LicenseSection $licenseSection = null,
+        private readonly ?EvidenceReport $report = null,
     ) {
     }
 
@@ -93,6 +94,12 @@ final class ToolsPage
 
         $this->renderScanCard();
         $this->renderUnusedTable();
+
+        // Renders its own card, or nothing at all: the report is licensed, and
+        // an empty box where a feature is not entitled reads as a broken
+        // screen. Free builds have no $report to ask.
+        $this->report?->render();
+
         $this->renderLicenseCard();
 
         echo '</div>';

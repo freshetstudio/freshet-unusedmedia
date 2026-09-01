@@ -7,6 +7,7 @@ namespace FreshetUnusedMedia;
 use FreshetUnusedMedia\Admin\Ajax;
 use FreshetUnusedMedia\Admin\AttachmentMetaBox;
 use FreshetUnusedMedia\Admin\DeleteController;
+use FreshetUnusedMedia\Admin\EvidenceReport;
 use FreshetUnusedMedia\Admin\LicenseSection;
 use FreshetUnusedMedia\Admin\MediaColumn;
 use FreshetUnusedMedia\Admin\ToolsPage;
@@ -55,9 +56,10 @@ final class Plugin
         );
 
         $licenseSection = $client !== null ? new LicenseSection($client, $license) : null;
+        $report = $client !== null ? new EvidenceReport($store, $license) : null;
 
         if (is_admin()) {
-            (new ToolsPage($store, $state, $licenseSection))->hooks();
+            (new ToolsPage($store, $state, $licenseSection, $report))->hooks();
             (new MediaColumn($store))->hooks();
             $metaBox->hooks();
             (new Ajax($scanner, $store, $state, $deleter, $metaBox))->hooks();
@@ -66,6 +68,7 @@ final class Plugin
             if ($licenseSection !== null) {
                 $licenseSection->hooks();
                 (new UsedView($store, $scanner, $metaBox, $license))->hooks();
+                $report?->hooks();
             }
         }
 

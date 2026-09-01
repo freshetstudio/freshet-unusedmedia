@@ -12,6 +12,7 @@ WordPress' "Uploaded to" column only records where a file was first attached. It
 - **Safe deletion** of unused files: every file is re-verified immediately before deletion; anything that became used is skipped
 - Conservative by design: ambiguous matches count as *used*; ID matches are digit-boundary-checked (123 never matches 1234)
 - **WP-CLI** (licensed): `wp freshet-unusedmedia scan` / `list` — the same scan and the same results across many installs, in `--format=json`. It reports; it has no delete verb.
+- **Evidence report** (licensed): export the library from Media → Usage as CSV or JSON — one row per file, with the references behind each verdict. It exports; it does not delete.
 
 ## Dev environment
 
@@ -51,6 +52,32 @@ wp freshet-unusedmedia list [--fields=<fields>] [--limit=<n>] [--format=table|js
 - **Nothing is scheduled.** A scan happens when someone runs one.
 - Stripped from the wordpress.org build along with the rest of the paid tier
   (`bin/release.conf`), so the directory archive has nothing locked in it.
+
+## Evidence report (licensed)
+
+A card on Media → Usage that exports the last scan's results — the file an
+agency hands a client before it deletes anything.
+
+- **CSV or JSON, from the same rows.** CSV is the deliverable: stable English
+  column keys (`id,file,title,url,mime,uploaded,status,bytes,size,scanned_at,
+  references,evidence`), a UTF-8 BOM so a spreadsheet reads non-ASCII filenames,
+  and the references packed into one readable `evidence` cell. JSON carries the
+  references as structured objects plus a `summary` block of the library totals.
+- **Used files as well as unused**, unused first, with a scope select for
+  unused-only. The working is half the point: "why we kept these" is what makes
+  a deletion defensible. Files that have never been scanned are not rows — they
+  have no evidence — and their count is stated on the card and in the JSON
+  summary.
+- **Serialisation, not detection.** Every value comes from the stored results
+  (`ResultStore::byStatus()`, `refs()`, `status()`, `scannedAt()`, `counts()`)
+  and the same byte computation the unused table uses. Nothing is re-scanned,
+  so the report cannot disagree with the screen. Where a file has more
+  references than a scan stores, the row says `…and N more (not stored)` rather
+  than implying the list is complete.
+- **It exports, and that is all it does.** No delete action, nothing scheduled,
+  nothing emailed; the file streams to the browser that asked for it.
+- Stripped from the wordpress.org build with the rest of the paid tier
+  (`bin/release.conf`).
 
 ## Filters
 

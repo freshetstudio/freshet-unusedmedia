@@ -113,6 +113,18 @@ final class ResultStore
      */
     public function unused(int $page, int $perPage): array
     {
+        return $this->byStatus(self::STATUS_UNUSED, $page, $perPage);
+    }
+
+    /**
+     * Paginated list of attachments carrying a given scan status. One query,
+     * one paging rule, whichever half of the library is being read — so the
+     * used set can never be paged differently from the unused one.
+     *
+     * @return array{ids: int[], total: int}
+     */
+    public function byStatus(string $status, int $page, int $perPage): array
+    {
         $query = new \WP_Query([
             'post_type' => 'attachment',
             'post_status' => ['inherit', 'private'],
@@ -122,7 +134,7 @@ final class ResultStore
             'order' => 'ASC',
             'fields' => 'ids',
             'meta_key' => self::META_STATUS, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key -- core index on meta_key; this is the feature.
-            'meta_value' => self::STATUS_UNUSED, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+            'meta_value' => $status, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
         ]);
 
         return [

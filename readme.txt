@@ -57,7 +57,9 @@ Site-specific detectors can be added via the `freshet_unusedmedia_detectors` fil
 
 **Free, and what a licence adds**
 
-Scanning, detection and deletion are free, and stay free — they are the plugin. Nothing in this download is locked, limited or time-barred. A licence from [freshet.studio](https://freshet.studio) adds two things. The Used view: open any file that is in use and see every place it is used, not just the first few. And a WP-CLI command — `wp freshet-unusedmedia scan` and `wp freshet-unusedmedia list` — for running the same scan across many sites without a browser and reading the result as JSON. Both are additions rather than limits on what is here, and the command scans and reports only: it has no delete verb, so nothing can be removed from the command line.
+Scanning, detection and deletion are free, and stay free — they are the plugin. Nothing in this download is locked, limited or time-barred. A licence from [freshet.studio](https://freshet.studio) adds three things. The Used view: open any file that is in use and see every place it is used, not just the first few. A WP-CLI command — `wp freshet-unusedmedia scan` and `wp freshet-unusedmedia list` — for running the same scan across many sites without a browser and reading the result as JSON. And an evidence report: export the whole library from Media → Usage as CSV or JSON, one row per file with its status, its size and the places it was found referenced, so the reasoning can be checked — or handed to whoever has to approve it — before anything is deleted.
+
+All three are additions rather than limits on what is here, and none of them deletes: the command scans and reports, the report exports, and deletion stays where it is, in the admin, behind a confirmation and the re-verification pass.
 
 Part of the Freshet plugin suite. Full documentation: [freshet.studio/docs](https://freshet.studio/docs).
 
@@ -95,7 +97,7 @@ Per site, yes. Cross-site references (another site embedding this site's file UR
 
 = Does it delete anything by itself? =
 
-Never. Scanning only reads and caches results. Deletion happens exclusively when you click a delete action, after re-verification. The licensed WP-CLI command scans and reports; there is deliberately no delete verb on the command line, so nothing can be deleted non-interactively.
+Never. Scanning only reads and caches results. Deletion happens exclusively when you click a delete action, after re-verification. The licensed WP-CLI command scans and reports; there is deliberately no delete verb on the command line, so nothing can be deleted non-interactively. The licensed evidence report only writes a file to your own browser — it has no delete action either, and exporting changes nothing on the site.
 
 == Changelog ==
 

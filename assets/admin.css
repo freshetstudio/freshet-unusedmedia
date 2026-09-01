@@ -137,3 +137,22 @@
 .column-freshet_unusedmedia {
     width: 130px;
 }
+
+/* Used view (licensed) — the complete reference list on an attachment */
+
+.freshet-unusedmedia-used {
+    margin: 8px 0 0;
+    padding-left: 24px;
+}
+
+.freshet-unusedmedia-used li {
+    margin-bottom: 6px;
+}
+
+.freshet-unusedmedia-license--on {
+    color: #00832a;
+}
+
+.freshet-unusedmedia-license--off {
+    color: #b32d2e;
+}

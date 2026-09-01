@@ -17,6 +17,12 @@ delete_option('freshet_unusedmedia_scan');
 delete_option('freshet_unusedmedia_last_scan');
 delete_option('freshet_unusedmedia_content_changed_at');
 
+// License data always goes, in every build. These options only ever exist on a
+// licensed site; deleting what was never written is free.
+delete_option('freshet_unusedmedia_license_key');
+delete_option('freshet_unusedmedia_license_last_ok');
+delete_transient('freshet_unusedmedia_license_status');
+
 global $wpdb;
 
 // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- bulk meta cleanup at uninstall; no API for cross-post meta deletes.

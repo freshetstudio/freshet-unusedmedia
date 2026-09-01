@@ -79,6 +79,112 @@ function is_serialized(string $data): bool
     return (bool) preg_match('/^(?:[aOsib]:|N;)/', trim($data));
 }
 
+// --------------------------------------------------- options, transients, HTTP
+//
+// Everything below serves the license-state checks at the end of this file.
+// RemoteLicense is pure decision logic over four things — a stored key, a
+// cached verdict, a recorded last success and one HTTP reply — so all four are
+// stubbed here and the real class is exercised, not a paraphrase of it.
+
+const HOUR_IN_SECONDS = 3600;
+const DAY_IN_SECONDS = 86400;
+
+$GLOBALS['options'] = [];
+$GLOBALS['transients'] = [];
+$GLOBALS['http'] = null;      // canned wp_remote_post reply; null means unreachable
+$GLOBALS['httpCalls'] = 0;
+
+function get_option(string $name, mixed $default = false): mixed
+{
+    return $GLOBALS['options'][$name] ?? $default;
+}
+
+function update_option(string $name, mixed $value, bool $autoload = true): bool
+{
+    $GLOBALS['options'][$name] = $value;
+
+    return true;
+}
+
+function get_transient(string $name): mixed
+{
+    return $GLOBALS['transients'][$name] ?? false;
+}
+
+function set_transient(string $name, mixed $value, int $ttl = 0): bool
+{
+    $GLOBALS['transients'][$name] = $value;
+
+    return true;
+}
+
+function delete_transient(string $name): bool
+{
+    unset($GLOBALS['transients'][$name]);
+
+    return true;
+}
+
+function home_url(): string
+{
+    return 'https://example.test';
+}
+
+function untrailingslashit(string $value): string
+{
+    return rtrim($value, '/\\');
+}
+
+function apply_filters(string $hook, mixed $value, mixed ...$rest): mixed
+{
+    return $value;
+}
+
+function wp_json_encode(mixed $value): string|false
+{
+    return json_encode($value);
+}
+
+function __(string $text, string $domain = ''): string
+{
+    return $text;
+}
+
+/** Enough of WP_Error for the "license server unreachable" branch. */
+class WP_Error
+{
+    public function __construct(private readonly string $message = 'Connection refused')
+    {
+    }
+
+    public function get_error_message(): string
+    {
+        return $this->message;
+    }
+}
+
+function is_wp_error(mixed $thing): bool
+{
+    return $thing instanceof WP_Error;
+}
+
+function wp_remote_post(string $url, array $args = []): array|WP_Error
+{
+    ++$GLOBALS['httpCalls'];
+
+    return $GLOBALS['http'] ?? new WP_Error();
+}
+
+function wp_remote_retrieve_body(mixed $response): string
+{
+    return is_array($response) ? (string) ($response['body'] ?? '') : '';
+}
+
+function wp_remote_retrieve_response_code(mixed $response): int
+{
+    return is_array($response) ? (int) ($response['code'] ?? 0) : 0;
+}
+
 /**
  * Minimal $wpdb: esc_like for the query builders, and a recording prepare()
  * so a detector's SQL placeholders can be checked against its params.
@@ -112,9 +218,16 @@ require_once ABSPATH . 'src/Scan/Reference.php';
 require_once ABSPATH . 'src/Detector/DetectorInterface.php';
 require_once ABSPATH . 'src/Detector/LikePatterns.php';
 require_once ABSPATH . 'src/Detector/PostContentDetector.php';
+require_once ABSPATH . 'src/License/LicenseInterface.php';
+require_once ABSPATH . 'src/License/LicenseClient.php';
+require_once ABSPATH . 'src/License/RemoteLicense.php';
+require_once ABSPATH . 'src/License/NoLicense.php';
 
 use FreshetUnusedMedia\Detector\LikePatterns;
 use FreshetUnusedMedia\Detector\PostContentDetector;
+use FreshetUnusedMedia\License\LicenseClient;
+use FreshetUnusedMedia\License\NoLicense;
+use FreshetUnusedMedia\License\RemoteLicense;
 use FreshetUnusedMedia\Scan\AttachmentContext;
 
 // ------------------------------------------------------------- assertions
@@ -326,6 +439,81 @@ check('post_content query first binds the autosave name', $bound[0], '%-autosave
 check('post_content query second binds the own id', $bound[1], 123);
 check('post_content query reaches the excerpt', str_contains($sql, 'p.post_excerpt LIKE'), true);
 check('post_content query admits autosave revisions only', str_contains($sql, "(p.post_type <> 'revision' OR p.post_name LIKE %s)"), true);
+
+// --------------------------------------------------------- license states
+//
+// The gate has one job: decide whether the Used view exists on this site. It
+// must never open on a site that has not paid, never shut on a site that has
+// because the license server had a bad afternoon, and never call out at all
+// when there is no key — the wordpress.org build must not phone home.
+
+$TRANSIENT = 'freshet_unusedmedia_license_status';
+$LAST_OK = 'freshet_unusedmedia_license_last_ok';
+
+$license = static fn(): RemoteLicense => new RemoteLicense(new LicenseClient('https://license.test'));
+
+$reply = static fn(bool $valid): array => [
+    'code' => 200,
+    'body' => json_encode(['success' => true, 'data' => ['valid' => $valid]]),
+];
+
+$reset = static function (string $key = '', ?int $lastOk = null) use ($LAST_OK): void {
+    $GLOBALS['options'] = $key !== '' ? [RemoteLicense::OPTION_KEY => $key] : [];
+    $GLOBALS['transients'] = [];
+    $GLOBALS['http'] = null;
+    $GLOBALS['httpCalls'] = 0;
+
+    if ($lastOk !== null) {
+        $GLOBALS['options'][$LAST_OK] = $lastOk;
+    }
+};
+
+// No key at all — the free site, and the one state that must make no request.
+$reset();
+check('no key is not licensed', $license()->isPro(), false);
+check('no key never calls the license server', $GLOBALS['httpCalls'], 0);
+
+// A validating key: licensed, and the success is what the grace window dates from.
+$reset('KEY-1');
+$GLOBALS['http'] = $reply(true);
+check('a validating key is licensed', $license()->isPro(), true);
+check('a validating key records the last success', isset($GLOBALS['options'][$LAST_OK]), true);
+
+// Expired or revoked: the server's "no" is authoritative even for a site that
+// validated a minute ago — a lapsed license is not a network problem.
+$reset('KEY-1', time() - 60);
+$GLOBALS['http'] = $reply(false);
+check('an expired key is not licensed', $license()->isPro(), false);
+check('an expired key caches the refusal', $GLOBALS['transients'][$TRANSIENT]['valid'], false);
+
+// Server unreachable: fail open, but only from a real previous success and only
+// for seven days. Boundary included — blocking the server is not a way to buy.
+$reset('KEY-1', time() - 3 * DAY_IN_SECONDS);
+check('an unreachable server keeps a recent license', $license()->isPro(), true);
+
+$reset('KEY-1', time() - 8 * DAY_IN_SECONDS);
+check('an unreachable server drops a stale license', $license()->isPro(), false);
+
+$reset('KEY-1', time() - 7 * DAY_IN_SECONDS);
+check('the grace window ends at seven days', $license()->isPro(), false);
+
+$reset('KEY-1');
+check('an unreachable server never opens without a prior success', $license()->isPro(), false);
+
+// The cache: one call per 12h, and never a verdict borrowed from another key.
+$reset('KEY-1');
+$GLOBALS['http'] = $reply(true);
+$license()->isPro();
+$license()->isPro();
+check('a cached validation makes no second request', $GLOBALS['httpCalls'], 1);
+
+$reset('KEY-NEW');
+$GLOBALS['transients'][$TRANSIENT] = ['key' => 'KEY-OLD', 'valid' => true];
+$GLOBALS['http'] = $reply(false);
+check('a cached verdict for another key is ignored', $license()->isPro(), false);
+
+// The directory build, where there is no client and no feature to unlock.
+check('the wordpress.org build is never licensed', (new NoLicense())->isPro(), false);
 
 // ------------------------------------------------------------------ report
 

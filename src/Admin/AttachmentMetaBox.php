@@ -111,7 +111,8 @@ final class AttachmentMetaBox
         return $html;
     }
 
-    private function renderReference(Reference $ref): string
+    /** One reference, as a line of escaped HTML. Shared with the Used view. */
+    public function renderReference(Reference $ref): string
     {
         $label = self::matchLabel($ref->match);
         $where = $this->whereHtml($ref);

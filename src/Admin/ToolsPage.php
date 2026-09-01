@@ -19,9 +19,15 @@ final class ToolsPage
     private const CAP = 'manage_options';
     private const PER_PAGE = 50;
 
+    /**
+     * $licenseSection is null in the wordpress.org build, where the class does
+     * not exist at all — the type hint resolves lazily, so passing null never
+     * reaches for a stripped file.
+     */
     public function __construct(
         private readonly ResultStore $store,
         private readonly ScanState $state,
+        private readonly ?LicenseSection $licenseSection = null,
     ) {
     }
 
@@ -87,6 +93,7 @@ final class ToolsPage
 
         $this->renderScanCard();
         $this->renderUnusedTable();
+        $this->renderLicenseCard();
 
         echo '</div>';
     }
@@ -324,6 +331,20 @@ final class ToolsPage
             )
             : '—') . '</td>';
         echo '</tr>';
+    }
+
+    // --------------------------------------------------------------- license
+
+    /** Nothing at all without the license stack, which is the free build. */
+    private function renderLicenseCard(): void
+    {
+        if ($this->licenseSection === null) {
+            return;
+        }
+
+        echo '<div class="freshet-unusedmedia-card">';
+        $this->licenseSection->render();
+        echo '</div>';
     }
 
     private function renderPagination(int $page, int $total): void

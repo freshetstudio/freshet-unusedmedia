@@ -155,11 +155,7 @@ final class ToolsPage
         echo '<p class="freshet-unusedmedia-counts">';
         printf(
             '%s &nbsp;•&nbsp; %s &nbsp;•&nbsp; %s',
-            esc_html(sprintf(
-                /* translators: %s: number of used attachments */
-                __('Used: %s', 'freshet-unused-media'),
-                number_format_i18n($counts['used'])
-            )),
+            $this->usedCountHtml($counts['used']), // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in usedCountHtml().
             esc_html(sprintf(
                 /* translators: %s: number of unused attachments */
                 __('Unused: %s', 'freshet-unused-media'),
@@ -217,6 +213,35 @@ final class ToolsPage
               </div>';
 
         echo '</div>';
+    }
+
+    /**
+     * The used count, as a link to the files it counts. Escaped HTML.
+     *
+     * This screen lists the unused files and links every one of them, so the
+     * used ones — the only files the Used view appears on — had no route out of
+     * here at all. List mode is deliberate and not cosmetic: the media grid
+     * opens an attachment in a modal, and a modal never fires
+     * add_meta_boxes_attachment, so no meta box can render there.
+     */
+    private function usedCountHtml(int $used): string
+    {
+        $label = esc_html(sprintf(
+            /* translators: %s: number of used attachments */
+            __('Used: %s', 'freshet-unused-media'),
+            number_format_i18n($used)
+        ));
+
+        if ($used < 1) {
+            return $label;
+        }
+
+        $url = add_query_arg(
+            ['mode' => 'list', 'freshet_unusedmedia_status' => ResultStore::STATUS_USED],
+            admin_url('upload.php')
+        );
+
+        return '<a href="' . esc_url($url) . '">' . $label . '</a>';
     }
 
     // ---------------------------------------------------------------- unused

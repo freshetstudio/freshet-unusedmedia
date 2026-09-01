@@ -246,19 +246,33 @@ final class ToolsPage
 
         $this->renderPagination($page, $list['total']);
 
+        $hasTrash = defined('MEDIA_TRASH') && MEDIA_TRASH;
+
+        $confirmSelected = $hasTrash
+            ? __('Delete the selected attachments? Each one is re-checked first; anything still in use is skipped. Deleted files go to the media trash and can be restored from there.', 'freshet-unused-media')
+            : __('Delete the selected attachments? Each one is re-checked first; anything still in use is skipped. Deletion is permanent and cannot be undone.', 'freshet-unused-media');
+
+        $confirmAll = $hasTrash
+            ? sprintf(
+                /* translators: %s: number of unused attachments */
+                __('Delete all %s unused attachments? Each one is re-checked first; anything still in use is skipped. Deleted files go to the media trash and can be restored from there.', 'freshet-unused-media'),
+                number_format_i18n($list['total'])
+            )
+            : sprintf(
+                /* translators: %s: number of unused attachments */
+                __('Delete all %s unused attachments? Each one is re-checked first; anything still in use is skipped. Deletion is permanent and cannot be undone.', 'freshet-unused-media'),
+                number_format_i18n($list['total'])
+            );
+
         printf(
             '<p class="freshet-unusedmedia-actions">
                 <button type="submit" class="button" onclick="return confirm(%s);">%s</button>
                 <button type="button" class="button button-link-delete" id="freshet-unusedmedia-delete-all" data-count="%d" data-confirm="%s">%s</button>
             </p>',
-            esc_attr(wp_json_encode(__('Delete the selected attachments? Each one is re-checked first; anything still in use is skipped.', 'freshet-unused-media'))),
+            esc_attr(wp_json_encode($confirmSelected)),
             esc_html__('Delete selected', 'freshet-unused-media'),
             (int) $list['total'],
-            esc_attr(sprintf(
-                /* translators: %s: number of unused attachments */
-                __('Delete all %s unused attachments? Each one is re-checked first; anything still in use is skipped.', 'freshet-unused-media'),
-                number_format_i18n($list['total'])
-            )),
+            esc_attr($confirmAll),
             esc_html(sprintf(
                 /* translators: %s: number of unused attachments */
                 __('Delete all unused (%s)', 'freshet-unused-media'),

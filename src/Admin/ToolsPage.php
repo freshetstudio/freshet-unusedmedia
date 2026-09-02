@@ -490,12 +490,24 @@ final class ToolsPage
         $list = $this->store->unused($page, self::PER_PAGE, $filters);
 
         echo '<div class="freshet-unusedmedia-card">';
+
+        // freshet-D75 (8): the heading row carries the destructive control on
+        // its right - "Unused files (400) [Delete all]". It sits outside the
+        // selection form deliberately: it is a script-driven button, not a
+        // submit, so the form it would otherwise post is irrelevant to it.
+        echo '<div class="freshet-unusedmedia-card__heading">';
         echo '<h2>' . esc_html($this->listHeading(
             /* translators: %s: number of unused attachments */
             __('Unused files (%s)', 'freshet-unused-media'),
             $list['total'],
             'unused'
         )) . '</h2>';
+
+        if ($list['total'] > 0) {
+            $this->renderDeleteAllButton($filters, $list['total']);
+        }
+
+        echo '</div>';
 
         if (!(defined('MEDIA_TRASH') && MEDIA_TRASH)) {
             echo '<p class="freshet-unusedmedia-warning">' . esc_html(sprintf(
@@ -522,6 +534,8 @@ final class ToolsPage
         wp_nonce_field('freshet_unusedmedia_delete_selected');
         echo '<input type="hidden" name="action" value="freshet_unusedmedia_delete_selected">';
 
+        $this->renderDeleteSelectedButton($filters);
+
         echo '<table class="widefat striped freshet-unusedmedia-table"><thead><tr>';
         echo '<td class="check-column"><input type="checkbox" id="freshet-unusedmedia-select-all"></td>';
 
@@ -539,7 +553,7 @@ final class ToolsPage
 
         $this->renderPagination(self::TAB_UNUSED, 'unused_page', $page, $list['total']);
 
-        $this->renderDeleteControls($filters, $list['total']);
+        $this->renderDeleteSelectedButton($filters);
 
         $this->renderProgress();
 
@@ -548,8 +562,27 @@ final class ToolsPage
     }
 
     /**
-     * The two delete controls, and the one rule that governs both: a button
-     * says which set it acts on.
+     * freshet-057's permanence sentence, and the reason it now lives in a
+     * method of its own: the two delete buttons no longer share a row, so the
+     * one line that carries the weight of both has to be composed rather than
+     * repeated. Reads the trash net at render time, not at build time.
+     */
+    private function permanenceNotice(): string
+    {
+        return defined('MEDIA_TRASH') && MEDIA_TRASH
+            ? __('Deleted files go to the media trash and can be restored from there.', 'freshet-unused-media')
+            : __('Deletion is permanent and cannot be undone.', 'freshet-unused-media');
+    }
+
+    /** The promise the delete path actually keeps, said in every confirmation. */
+    private function recheckNotice(): string
+    {
+        return __('Each one is re-checked first; anything still in use is skipped.', 'freshet-unused-media');
+    }
+
+    /**
+     * The destructive control, and the one rule that governs it: a button says
+     * which set it acts on.
      *
      * Unfiltered, "Delete all unused (400)" means the four hundred. Filtered, it
      * becomes "Delete all matching (37)" and the confirmation spells the filter
@@ -557,23 +590,15 @@ final class ToolsPage
      * showing a subset is exactly how the wrong files get deleted. The filter
      * rides along on data-filters so the batch loop walks the same set the
      * number was counted from.
+     *
+     * It renders on the heading row (freshet-D75 clause 8), which is exactly why
+     * it keeps button-link-delete and not button-primary: prominent enough to
+     * find without scrolling, never the primary action of the screen.
      */
-    private function renderDeleteControls(ResultFilters $filters, int $total): void
+    private function renderDeleteAllButton(ResultFilters $filters, int $total): void
     {
-        $hasTrash = defined('MEDIA_TRASH') && MEDIA_TRASH;
-
-        // freshet-057's permanence wording, unchanged — it is the sentence that
-        // carries the weight of both buttons.
-        $permanence = $hasTrash
-            ? __('Deleted files go to the media trash and can be restored from there.', 'freshet-unused-media')
-            : __('Deletion is permanent and cannot be undone.', 'freshet-unused-media');
-
-        $recheck = __('Each one is re-checked first; anything still in use is skipped.', 'freshet-unused-media');
-
-        $confirmSelected = __('Delete the selected attachments?', 'freshet-unused-media')
-            . ' ' . $recheck
-            . ($filters->isActive() ? ' ' . __('Only files matching the current filter are listed, so the selection comes from that list.', 'freshet-unused-media') : '')
-            . ' ' . $permanence;
+        $recheck = $this->recheckNotice();
+        $permanence = $this->permanenceNotice();
 
         if ($filters->isActive()) {
             $label = sprintf(
@@ -603,16 +628,33 @@ final class ToolsPage
         }
 
         printf(
-            '<p class="freshet-unusedmedia-actions">
-                <button type="submit" class="button" onclick="return confirm(%s);">%s</button>
-                <button type="button" class="button button-link-delete" id="freshet-unusedmedia-delete-all" data-count="%d" data-confirm="%s" data-filters="%s">%s</button>
-            </p>',
-            esc_attr(wp_json_encode($confirmSelected)),
-            esc_html__('Delete selected', 'freshet-unused-media'),
+            '<button type="button" class="button button-link-delete" id="freshet-unusedmedia-delete-all" data-count="%d" data-confirm="%s" data-filters="%s">%s</button>',
             $total,
             esc_attr($confirmAll),
             esc_attr(http_build_query($filters->queryArgs())),
             esc_html($label)
+        );
+    }
+
+    /**
+     * "Delete selected", rendered twice - above the table and below it - so the
+     * control is in reach from either end of a fifty-row list (freshet-D75
+     * clause 8). Both are submits on the same form and carry the same
+     * confirmation; neither takes an id, so there is nothing to collide.
+     */
+    private function renderDeleteSelectedButton(ResultFilters $filters): void
+    {
+        $confirmSelected = __('Delete the selected attachments?', 'freshet-unused-media')
+            . ' ' . $this->recheckNotice()
+            . ($filters->isActive() ? ' ' . __('Only files matching the current filter are listed, so the selection comes from that list.', 'freshet-unused-media') : '')
+            . ' ' . $this->permanenceNotice();
+
+        printf(
+            '<p class="freshet-unusedmedia-actions">
+                <button type="submit" class="button" onclick="return confirm(%s);">%s</button>
+            </p>',
+            esc_attr(wp_json_encode($confirmSelected)),
+            esc_html__('Delete selected', 'freshet-unused-media')
         );
     }
 

@@ -108,6 +108,19 @@
     margin-top: 0;
 }
 
+/* "Unused files (400) [Delete all]" - the destructive control on the heading row. */
+.freshet-unusedmedia-card__heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.freshet-unusedmedia-card__heading h2 {
+    margin-bottom: 0;
+}
+
 .freshet-unusedmedia-warning {
     background: #fcf9e8;
     border-left: 4px solid #dba617;

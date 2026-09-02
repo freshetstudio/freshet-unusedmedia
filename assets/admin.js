@@ -143,8 +143,23 @@
     var deleteAllButton = document.getElementById('freshet-unusedmedia-delete-all');
     var totals = { deleted: 0, skipped: 0, failed: 0 };
 
+    // The filter the button was labelled with, and the cursor the server hands
+    // back. Both travel with every batch: the count in the button described a
+    // filtered set, so the loop has to walk that set and nothing wider.
+    var deleteFilters = '';
+    var deleteCursor = 0;
+
     function deleteLoop() {
-        post('freshet_unusedmedia_delete_batch', config.nonceManage).then(function (data) {
+        var payload = {};
+
+        new URLSearchParams(deleteFilters).forEach(function (value, key) {
+            payload[key] = value;
+        });
+
+        payload.after = String(deleteCursor);
+
+        post('freshet_unusedmedia_delete_batch', config.nonceManage, payload).then(function (data) {
+            deleteCursor = data.cursor || 0;
             totals.deleted += data.deleted;
             totals.skipped += data.skipped;
             totals.failed += data.failed;
@@ -177,6 +192,8 @@
             }
 
             totals = { deleted: 0, skipped: 0, failed: 0 };
+            deleteFilters = deleteAllButton.getAttribute('data-filters') || '';
+            deleteCursor = 0;
             deleteAllButton.disabled = true;
             updateProgress(0, 0, config.i18n.deleting);
             deleteLoop();

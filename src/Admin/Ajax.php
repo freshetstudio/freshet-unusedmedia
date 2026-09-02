@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace FreshetUnusedMedia\Admin;
 
+use FreshetUnusedMedia\Scan\ResultFilters;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\Scanner;
 use FreshetUnusedMedia\Scan\ScanState;
@@ -158,7 +159,14 @@ final class Ajax
         wp_send_json_success();
     }
 
-    /** One batch of delete-all-unused: each ID is re-verified before deletion. */
+    /**
+     * One batch of delete-all-unused: each ID is re-verified before deletion.
+     *
+     * The screen's filter travels with every batch. It has to: the button the
+     * user pressed named a filtered subset and a count to go with it, so a loop
+     * that walked the whole unused set would delete files that count never
+     * covered. `after` is the cursor the store hands back — see unusedIds().
+     */
     public function deleteBatch(): void
     {
         check_ajax_referer('freshet_unusedmedia_manage');
@@ -167,19 +175,23 @@ final class Ajax
             wp_send_json_error(['message' => __('Not allowed.', 'freshet-unused-media')], 403);
         }
 
-        $ids = $this->store->unusedIds(5);
+        $filters = ResultFilters::fromRequest(wp_unslash($_POST)); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce checked above; every value is validated in fromRequest().
+        $after = absint($_POST['after'] ?? 0); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- as above.
 
-        if ($ids === []) {
-            wp_send_json_success(['finished' => true, 'deleted' => 0, 'skipped' => 0, 'failed' => 0]);
+        $batch = $this->store->unusedIds(5, $filters, $after);
+
+        if ($batch['ids'] === []) {
+            wp_send_json_success(['finished' => true, 'deleted' => 0, 'skipped' => 0, 'failed' => 0, 'cursor' => 0]);
         }
 
-        $result = $this->deleter->deleteVerified($ids);
+        $result = $this->deleter->deleteVerified($batch['ids']);
 
         wp_send_json_success([
             'finished' => false,
             'deleted' => $result['deleted'],
             'skipped' => $result['skipped'],
             'failed' => $result['failed'],
+            'cursor' => $batch['cursor'],
         ]);
     }
 }

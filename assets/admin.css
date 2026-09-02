@@ -193,3 +193,35 @@
 .freshet-unusedmedia-license--off {
     color: #b32d2e;
 }
+
+/* Filter bar — above both listings, on the unused one above the delete form */
+
+.freshet-unusedmedia-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+    margin: 12px 0 16px;
+    padding: 12px;
+    background: #f6f7f7;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+}
+
+.freshet-unusedmedia-filters label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: #50575e;
+}
+
+.freshet-unusedmedia-filters input[type="number"] {
+    width: 100px;
+}
+
+.freshet-unusedmedia-filters__actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}

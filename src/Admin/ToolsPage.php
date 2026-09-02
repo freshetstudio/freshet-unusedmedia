@@ -6,6 +6,7 @@ namespace FreshetUnusedMedia\Admin;
 
 use FreshetUnusedMedia\License\LicenseInterface;
 use FreshetUnusedMedia\Scan\FileSize;
+use FreshetUnusedMedia\Scan\ResultFilters;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\ScanState;
 
@@ -26,6 +27,9 @@ final class ToolsPage
 
     private const CAP = 'manage_options';
     private const PER_PAGE = 50;
+
+    /** Read once per request; both listings and every URL on the page share it. */
+    private ?ResultFilters $filters = null;
 
     /**
      * $licenseSection, $report and $totals are null in the wordpress.org build,
@@ -172,16 +176,115 @@ final class ToolsPage
         return array_key_exists($tab, $this->tabs()) ? $tab : self::TAB_SCAN;
     }
 
-    /** The screen's own URL for one tab; the default tab carries no arg. */
-    private function tabUrl(string $tab): string
+    private function filters(): ResultFilters
     {
-        return add_query_arg(
-            array_filter([
-                'page' => self::SLUG,
-                'tab' => $tab !== self::TAB_SCAN ? $tab : null,
-            ]),
-            admin_url('upload.php')
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only listing filter; every value is validated in fromRequest().
+        return $this->filters ??= ResultFilters::fromRequest(wp_unslash($_GET));
+    }
+
+    /**
+     * The screen's own URL for one tab; the default tab carries no arg.
+     *
+     * The two listings carry the filter with them, so narrowing the unused list
+     * and then crossing to the used one to check the same window is one click
+     * rather than a re-typed filter. Scan and License take no filter — there is
+     * nothing there for it to narrow.
+     */
+    private function tabUrl(string $tab, bool $filtered = true): string
+    {
+        $args = array_filter([
+            'page' => self::SLUG,
+            'tab' => $tab !== self::TAB_SCAN ? $tab : null,
+        ]);
+
+        if ($filtered && ($tab === self::TAB_USED || $tab === self::TAB_UNUSED)) {
+            $args += $this->filters()->queryArgs();
+        }
+
+        return add_query_arg($args, admin_url('upload.php'));
+    }
+
+    // --------------------------------------------------------------- filters
+
+    /**
+     * The filter controls, above the table on both listings.
+     *
+     * A GET form straight back at this screen: the URL is the filter state, so
+     * it survives pagination, it can be bookmarked, and it is visible — which
+     * matters more here than on an ordinary list table, because the number in
+     * the delete button is derived from it.
+     */
+    private function renderFilterBar(string $tab): void
+    {
+        $filters = $this->filters();
+
+        ?>
+        <form method="get" class="freshet-unusedmedia-filters">
+            <input type="hidden" name="page" value="<?php echo esc_attr(self::SLUG); ?>">
+            <input type="hidden" name="tab" value="<?php echo esc_attr($tab); ?>">
+
+            <label>
+                <span><?php esc_html_e('Uploaded from', 'freshet-unused-media'); ?></span>
+                <input type="date" name="<?php echo esc_attr(ResultFilters::ARG_FROM); ?>" value="<?php echo esc_attr($filters->from); ?>">
+            </label>
+
+            <label>
+                <span><?php esc_html_e('Uploaded to', 'freshet-unused-media'); ?></span>
+                <input type="date" name="<?php echo esc_attr(ResultFilters::ARG_TO); ?>" value="<?php echo esc_attr($filters->to); ?>">
+            </label>
+
+            <label>
+                <span><?php esc_html_e('Filename contains', 'freshet-unused-media'); ?></span>
+                <input type="search" name="<?php echo esc_attr(ResultFilters::ARG_FILE); ?>" value="<?php echo esc_attr($filters->filename); ?>" placeholder="<?php esc_attr_e('e.g. hero', 'freshet-unused-media'); ?>">
+            </label>
+
+            <label>
+                <span><?php esc_html_e('Min size (MB)', 'freshet-unused-media'); ?></span>
+                <input type="number" min="0" step="any" name="<?php echo esc_attr(ResultFilters::ARG_MIN); ?>" value="<?php echo esc_attr($filters->queryArgs()[ResultFilters::ARG_MIN] ?? ''); ?>">
+            </label>
+
+            <label>
+                <span><?php esc_html_e('Max size (MB)', 'freshet-unused-media'); ?></span>
+                <input type="number" min="0" step="any" name="<?php echo esc_attr(ResultFilters::ARG_MAX); ?>" value="<?php echo esc_attr($filters->queryArgs()[ResultFilters::ARG_MAX] ?? ''); ?>">
+            </label>
+
+            <span class="freshet-unusedmedia-filters__actions">
+                <button type="submit" class="button"><?php esc_html_e('Filter', 'freshet-unused-media'); ?></button>
+                <?php if ($filters->isActive()) : ?>
+                    <a href="<?php echo esc_url($this->tabUrl($tab, false)); ?>"><?php esc_html_e('Clear filters', 'freshet-unused-media'); ?></a>
+                <?php endif; ?>
+            </span>
+        </form>
+        <?php
+    }
+
+    /**
+     * The heading count. Filtered, it says both numbers — "37 of 400" is the
+     * sentence that stops a subset being read as the whole library.
+     */
+    private function listHeading(string $singular, int $shown, string $status): string
+    {
+        if (!$this->filters()->isActive()) {
+            return sprintf($singular, number_format_i18n($shown));
+        }
+
+        return sprintf(
+            $singular,
+            sprintf(
+                /* translators: 1: number of matching files, 2: number of files in total */
+                __('%1$s of %2$s', 'freshet-unused-media'),
+                number_format_i18n($shown),
+                number_format_i18n($this->store->counts()[$status])
+            )
         );
+    }
+
+    /** Said once, wherever a size filter changes which files can appear. */
+    private function sizeFilterNote(): string
+    {
+        return $this->filters()->hasSizeFilter()
+            ? ' ' . __('While a size filter is applied, files whose size cannot be read are left out of the list.', 'freshet-unused-media')
+            : '';
     }
 
     /**
@@ -332,22 +435,28 @@ final class ToolsPage
     private function renderUsedTable(): void
     {
         $page = max(1, absint($_GET['used_page'] ?? 1)); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only pagination.
-        $list = $this->store->byStatus(ResultStore::STATUS_USED, $page, self::PER_PAGE);
+        $filters = $this->filters();
+        $list = $this->store->byStatus(ResultStore::STATUS_USED, $page, self::PER_PAGE, $filters);
 
         echo '<div class="freshet-unusedmedia-card">';
-        echo '<h2>' . esc_html(sprintf(
+        echo '<h2>' . esc_html($this->listHeading(
             /* translators: %s: number of used attachments */
             __('Used files (%s)', 'freshet-unused-media'),
-            number_format_i18n($list['total'])
+            $list['total'],
+            'used'
         )) . '</h2>';
 
+        $this->renderFilterBar(self::TAB_USED);
+
         if ($list['ids'] === []) {
-            echo '<p>' . esc_html__('No attachments are currently marked used. Run a scan first.', 'freshet-unused-media') . '</p></div>';
+            echo '<p>' . esc_html($filters->isActive()
+                ? __('No used files match this filter. Clear it to see the rest.', 'freshet-unused-media')
+                : __('No attachments are currently marked used. Run a scan first.', 'freshet-unused-media')) . '</p></div>';
 
             return;
         }
 
-        echo '<p class="description">' . esc_html__('Every file here was found referenced somewhere on the site, so none of them is offered for deletion. Open one to see where it is used.', 'freshet-unused-media') . '</p>';
+        echo '<p class="description">' . esc_html(__('Every file here was found referenced somewhere on the site, so none of them is offered for deletion. Open one to see where it is used.', 'freshet-unused-media') . $this->sizeFilterNote()) . '</p>';
 
         echo '<table class="widefat striped freshet-unusedmedia-table"><thead><tr>';
 
@@ -377,13 +486,15 @@ final class ToolsPage
     private function renderUnusedTable(): void
     {
         $page = max(1, absint($_GET['unused_page'] ?? 1)); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only pagination.
-        $list = $this->store->unused($page, self::PER_PAGE);
+        $filters = $this->filters();
+        $list = $this->store->unused($page, self::PER_PAGE, $filters);
 
         echo '<div class="freshet-unusedmedia-card">';
-        echo '<h2>' . esc_html(sprintf(
+        echo '<h2>' . esc_html($this->listHeading(
             /* translators: %s: number of unused attachments */
             __('Unused files (%s)', 'freshet-unused-media'),
-            number_format_i18n($list['total'])
+            $list['total'],
+            'unused'
         )) . '</h2>';
 
         if (!(defined('MEDIA_TRASH') && MEDIA_TRASH)) {
@@ -395,13 +506,17 @@ final class ToolsPage
             )) . '</p>';
         }
 
+        $this->renderFilterBar(self::TAB_UNUSED);
+
         if ($list['ids'] === []) {
-            echo '<p>' . esc_html__('No attachments are currently marked unused. Run a scan first, or enjoy the tidy library.', 'freshet-unused-media') . '</p></div>';
+            echo '<p>' . esc_html($filters->isActive()
+                ? __('No unused files match this filter. Clear it to see the rest.', 'freshet-unused-media')
+                : __('No attachments are currently marked unused. Run a scan first, or enjoy the tidy library.', 'freshet-unused-media')) . '</p></div>';
 
             return;
         }
 
-        echo '<p class="description">' . esc_html__('Files uploaded in the last 24 hours never appear here, and a reference from a trashed post or comment still counts as usage. Every file below is re-checked in the instant before it is deleted — anything that has become used in the meantime is skipped.', 'freshet-unused-media') . '</p>';
+        echo '<p class="description">' . esc_html(__('Files uploaded in the last 24 hours never appear here, and a reference from a trashed post or comment still counts as usage. Every file below is re-checked in the instant before it is deleted — anything that has become used in the meantime is skipped.', 'freshet-unused-media') . $this->sizeFilterNote()) . '</p>';
 
         echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" id="freshet-unusedmedia-delete-form">';
         wp_nonce_field('freshet_unusedmedia_delete_selected');
@@ -424,44 +539,81 @@ final class ToolsPage
 
         $this->renderPagination(self::TAB_UNUSED, 'unused_page', $page, $list['total']);
 
-        $hasTrash = defined('MEDIA_TRASH') && MEDIA_TRASH;
-
-        $confirmSelected = $hasTrash
-            ? __('Delete the selected attachments? Each one is re-checked first; anything still in use is skipped. Deleted files go to the media trash and can be restored from there.', 'freshet-unused-media')
-            : __('Delete the selected attachments? Each one is re-checked first; anything still in use is skipped. Deletion is permanent and cannot be undone.', 'freshet-unused-media');
-
-        $confirmAll = $hasTrash
-            ? sprintf(
-                /* translators: %s: number of unused attachments */
-                __('Delete all %s unused attachments? Each one is re-checked first; anything still in use is skipped. Deleted files go to the media trash and can be restored from there.', 'freshet-unused-media'),
-                number_format_i18n($list['total'])
-            )
-            : sprintf(
-                /* translators: %s: number of unused attachments */
-                __('Delete all %s unused attachments? Each one is re-checked first; anything still in use is skipped. Deletion is permanent and cannot be undone.', 'freshet-unused-media'),
-                number_format_i18n($list['total'])
-            );
-
-        printf(
-            '<p class="freshet-unusedmedia-actions">
-                <button type="submit" class="button" onclick="return confirm(%s);">%s</button>
-                <button type="button" class="button button-link-delete" id="freshet-unusedmedia-delete-all" data-count="%d" data-confirm="%s">%s</button>
-            </p>',
-            esc_attr(wp_json_encode($confirmSelected)),
-            esc_html__('Delete selected', 'freshet-unused-media'),
-            (int) $list['total'],
-            esc_attr($confirmAll),
-            esc_html(sprintf(
-                /* translators: %s: number of unused attachments */
-                __('Delete all unused (%s)', 'freshet-unused-media'),
-                number_format_i18n($list['total'])
-            ))
-        );
+        $this->renderDeleteControls($filters, $list['total']);
 
         $this->renderProgress();
 
         echo '</form>';
         echo '</div>';
+    }
+
+    /**
+     * The two delete controls, and the one rule that governs both: a button
+     * says which set it acts on.
+     *
+     * Unfiltered, "Delete all unused (400)" means the four hundred. Filtered, it
+     * becomes "Delete all matching (37)" and the confirmation spells the filter
+     * out in words, because a control that still said *all* over a screen
+     * showing a subset is exactly how the wrong files get deleted. The filter
+     * rides along on data-filters so the batch loop walks the same set the
+     * number was counted from.
+     */
+    private function renderDeleteControls(ResultFilters $filters, int $total): void
+    {
+        $hasTrash = defined('MEDIA_TRASH') && MEDIA_TRASH;
+
+        // freshet-057's permanence wording, unchanged — it is the sentence that
+        // carries the weight of both buttons.
+        $permanence = $hasTrash
+            ? __('Deleted files go to the media trash and can be restored from there.', 'freshet-unused-media')
+            : __('Deletion is permanent and cannot be undone.', 'freshet-unused-media');
+
+        $recheck = __('Each one is re-checked first; anything still in use is skipped.', 'freshet-unused-media');
+
+        $confirmSelected = __('Delete the selected attachments?', 'freshet-unused-media')
+            . ' ' . $recheck
+            . ($filters->isActive() ? ' ' . __('Only files matching the current filter are listed, so the selection comes from that list.', 'freshet-unused-media') : '')
+            . ' ' . $permanence;
+
+        if ($filters->isActive()) {
+            $label = sprintf(
+                /* translators: %s: number of unused attachments matching the filter */
+                __('Delete all matching (%s)', 'freshet-unused-media'),
+                number_format_i18n($total)
+            );
+
+            $confirmAll = sprintf(
+                /* translators: 1: number of matching attachments, 2: the filter in words */
+                __('Delete all %1$s unused attachments matching the current filter (%2$s)?', 'freshet-unused-media'),
+                number_format_i18n($total),
+                $filters->describe()
+            ) . ' ' . $recheck . ' ' . $permanence;
+        } else {
+            $label = sprintf(
+                /* translators: %s: number of unused attachments */
+                __('Delete all unused (%s)', 'freshet-unused-media'),
+                number_format_i18n($total)
+            );
+
+            $confirmAll = sprintf(
+                /* translators: %s: number of unused attachments */
+                __('Delete all %s unused attachments?', 'freshet-unused-media'),
+                number_format_i18n($total)
+            ) . ' ' . $recheck . ' ' . $permanence;
+        }
+
+        printf(
+            '<p class="freshet-unusedmedia-actions">
+                <button type="submit" class="button" onclick="return confirm(%s);">%s</button>
+                <button type="button" class="button button-link-delete" id="freshet-unusedmedia-delete-all" data-count="%d" data-confirm="%s" data-filters="%s">%s</button>
+            </p>',
+            esc_attr(wp_json_encode($confirmSelected)),
+            esc_html__('Delete selected', 'freshet-unused-media'),
+            $total,
+            esc_attr($confirmAll),
+            esc_attr(http_build_query($filters->queryArgs())),
+            esc_html($label)
+        );
     }
 
     private function renderUnusedRow(int $id): void

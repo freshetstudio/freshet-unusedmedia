@@ -238,3 +238,14 @@
     align-items: center;
     gap: 12px;
 }
+
+/* Scan controls — Resume and Stop are buttons, Reset is a link, so the row is
+   laid out rather than left to baseline alignment: a link-button has no padding
+   and would otherwise sit on the buttons' text baseline. */
+
+.freshet-unusedmedia-scan-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+}

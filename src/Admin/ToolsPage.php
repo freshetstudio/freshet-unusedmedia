@@ -383,6 +383,10 @@ final class ToolsPage
             echo '<p class="description">' . esc_html($note) . '</p>';
         }
 
+        // Reset only exists while a scan is unfinished: it is the escape hatch out
+        // of a half-done run, next to Resume and Stop. It carries button-link so it
+        // reads as a link rather than a third button — it throws a scan's progress
+        // away and must never look like the obvious next click.
         printf(
             '<p class="freshet-unusedmedia-scan-controls">
                 <button type="button" class="button button-primary" id="freshet-unusedmedia-scan-start" data-resume="%s">%s</button>
@@ -400,7 +404,7 @@ final class ToolsPage
                 : __('Start full scan', 'freshet-unused-media')),
             esc_html__('Stop', 'freshet-unused-media'),
             $running !== null
-                ? '<button type="button" class="button-link-delete" id="freshet-unusedmedia-scan-reset">' . esc_html__('Reset scan', 'freshet-unused-media') . '</button>'
+                ? '<button type="button" class="button-link button-link-delete" id="freshet-unusedmedia-scan-reset">' . esc_html__('Reset scan', 'freshet-unused-media') . '</button>'
                 : ''
         );
 

@@ -277,3 +277,33 @@
     align-items: center;
     gap: 12px;
 }
+
+/* The join between the tab strip and the panel it switches (freshet-D77 (3)).
+   Every tab opens with a .freshet-unusedmedia-card as the first thing in the
+   wrap, so that card *is* the panel: it starts where the strip ends instead of
+   floating 16px below it behind a band of page grey. Three consequences of
+   meeting, not three separate ideas — no gutter, no second border stacked on
+   the strip's own, and square top corners so the two edges read as one surface.
+   Feeds has no panel here at all (a bare table 16.5px down), so there is
+   nothing to port; this is the join it never had to solve. */
+
+.freshet-unusedmedia-wrap {
+    margin-top: 0;
+}
+
+.freshet-unusedmedia-wrap > .freshet-unusedmedia-card:first-child {
+    margin-top: 0;
+    border-top: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+}
+
+/* The active tab drops onto the panel's white rather than the page grey, so it
+   reads as attached to what it switches. Core gives it margin-bottom: -1px
+   already; only the colour it lands in was wrong. */
+.frst-header .nav-tab-active,
+.frst-header .nav-tab-active:hover,
+.frst-header .nav-tab-active:focus {
+    background: #fff;
+    border-bottom-color: #fff;
+}

@@ -46,6 +46,8 @@ final class DeleteController
 
         wp_safe_redirect(add_query_arg([
             'page' => ToolsPage::SLUG,
+            // Back to the list that was acted on, not to the scan.
+            'tab' => ToolsPage::TAB_UNUSED,
             'freshet_unusedmedia_deleted' => $result['deleted'],
             'freshet_unusedmedia_skipped' => $result['skipped'],
             'freshet_unusedmedia_failed' => $result['failed'],

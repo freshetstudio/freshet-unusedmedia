@@ -61,7 +61,7 @@ final class Plugin
         $totals = $client !== null ? new SpaceTotals($store, $license) : null;
 
         if (is_admin()) {
-            (new ToolsPage($store, $state, $licenseSection, $report, $totals))->hooks();
+            (new ToolsPage($store, $state, $license, $licenseSection, $report, $totals))->hooks();
             (new MediaColumn($store))->hooks();
             $metaBox->hooks();
             (new Ajax($scanner, $store, $state, $deleter, $metaBox))->hooks();

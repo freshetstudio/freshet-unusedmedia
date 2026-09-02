@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace FreshetUnusedMedia\Admin;
 
+use FreshetUnusedMedia\License\LicenseInterface;
 use FreshetUnusedMedia\Scan\FileSize;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\ScanState;
@@ -11,12 +12,18 @@ use FreshetUnusedMedia\Scan\ScanState;
 defined('ABSPATH') || exit;
 
 /**
- * The Media → Usage screen: scan controls with progress, usage counts and
- * the unused-files table with delete actions.
+ * The Media → Usage screen, in four tabs: the scan and what it found, the used
+ * files, the unused files with their delete actions, and the license.
  */
 final class ToolsPage
 {
     public const SLUG = 'freshet-unusedmedia';
+
+    public const TAB_SCAN = 'scan';
+    public const TAB_USED = 'used';
+    public const TAB_UNUSED = 'unused';
+    public const TAB_LICENSE = 'license';
+
     private const CAP = 'manage_options';
     private const PER_PAGE = 50;
 
@@ -24,10 +31,16 @@ final class ToolsPage
      * $licenseSection, $report and $totals are null in the wordpress.org build,
      * where none of those classes exists at all — the type hints resolve
      * lazily, so passing null never reaches for a stripped file.
+     *
+     * $license is not one of them: LicenseInterface and NoLicense ship in every
+     * build, and Plugin falls back to NoLicense when the paid files are absent.
+     * That is what the header pill reads, so the free build can say "Free"
+     * without a single paid class existing.
      */
     public function __construct(
         private readonly ResultStore $store,
         private readonly ScanState $state,
+        private readonly LicenseInterface $license,
         private readonly ?LicenseSection $licenseSection = null,
         private readonly ?EvidenceReport $report = null,
         private readonly ?SpaceTotals $totals = null,
@@ -90,34 +103,96 @@ final class ToolsPage
             return;
         }
 
-        $this->renderHeader();
+        $tab = $this->currentTab();
+
+        $this->renderHeader($tab);
 
         echo '<div class="wrap freshet-unusedmedia-wrap">';
 
-        $this->renderScanCard();
-        $this->renderUnusedTable();
+        switch ($tab) {
+            case self::TAB_USED:
+                $this->renderUsedTable();
 
-        // Same shape as the report below and for the same reason: licensed, so
-        // it renders its own card or nothing. It follows the table because it
-        // totals it.
-        $this->totals?->render();
+                break;
 
-        // Renders its own card, or nothing at all: the report is licensed, and
-        // an empty box where a feature is not entitled reads as a broken
-        // screen. Free builds have no $report to ask.
-        $this->report?->render();
+            case self::TAB_UNUSED:
+                $this->renderUnusedTable();
 
-        $this->renderLicenseCard();
+                // Licensed, so it renders its own card or nothing at all — an
+                // empty box where a feature is not entitled reads as a broken
+                // screen. It follows the table because it totals it.
+                $this->totals?->render();
+
+                break;
+
+            case self::TAB_LICENSE:
+                $this->renderLicenseCard();
+
+                break;
+
+            default:
+                $this->renderScanCard();
+
+                // Same shape and the same reason as the totals above. It sits
+                // with the scan because it exports what the last scan found,
+                // used and unused alike, not just the delete list.
+                $this->report?->render();
+        }
 
         echo '</div>';
     }
 
     /**
-     * Slim brand strip, matching the Freshet Feeds header. Scoped to this
-     * page only — the rest of wp-admin is never touched.
+     * The tabs, in order. License appears only where there is a license stack
+     * to show — the wordpress.org build has none, and an empty tab is worse
+     * than no tab. The other three are free surfaces and always present.
+     *
+     * @return array<string, string>
      */
-    private function renderHeader(): void
+    private function tabs(): array
     {
+        $tabs = [
+            self::TAB_SCAN => __('Scan', 'freshet-unused-media'),
+            self::TAB_USED => __('Used', 'freshet-unused-media'),
+            self::TAB_UNUSED => __('Unused', 'freshet-unused-media'),
+        ];
+
+        if ($this->licenseSection !== null) {
+            $tabs[self::TAB_LICENSE] = __('License', 'freshet-unused-media');
+        }
+
+        return $tabs;
+    }
+
+    /** One query arg, an allow-list, and the scan as the default. */
+    private function currentTab(): string
+    {
+        $tab = sanitize_key(wp_unslash($_GET['tab'] ?? '')); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only navigation.
+
+        return array_key_exists($tab, $this->tabs()) ? $tab : self::TAB_SCAN;
+    }
+
+    /** The screen's own URL for one tab; the default tab carries no arg. */
+    private function tabUrl(string $tab): string
+    {
+        return add_query_arg(
+            array_filter([
+                'page' => self::SLUG,
+                'tab' => $tab !== self::TAB_SCAN ? $tab : null,
+            ]),
+            admin_url('upload.php')
+        );
+    }
+
+    /**
+     * Slim brand strip and native nav-tabs, matching the Freshet Feeds header.
+     * Scoped to this page only — the rest of wp-admin is never touched. The
+     * tabs use core .nav-tab classes so the user's admin color scheme applies.
+     */
+    private function renderHeader(string $activeTab): void
+    {
+        $tabs = $this->tabs();
+
         ?>
         <div class="frst-header">
             <div class="frst-header__row">
@@ -130,11 +205,26 @@ final class ToolsPage
                 <h1 class="frst-header__title"><?php esc_html_e('Freshet Unused Media', 'freshet-unused-media'); ?></h1>
                 <span class="frst-header__version"><?php echo esc_html('v' . FRESHET_UNUSEDMEDIA_VERSION); ?></span>
                 <div class="frst-header__meta">
+                    <?php // The tier, from the license itself rather than from which files are on disk: NoLicense answers this in the free build, where nothing paid exists to ask. No link hangs off it — the directory build carries no upsell. ?>
+                    <?php if ($this->license->isPro()) : ?>
+                        <span class="frst-header__pill frst-header__pill--pro"><?php esc_html_e('Pro', 'freshet-unused-media'); ?></span>
+                    <?php else : ?>
+                        <span class="frst-header__pill frst-header__pill--free"><?php esc_html_e('Free', 'freshet-unused-media'); ?></span>
+                    <?php endif; ?>
                     <a href="https://freshet.studio/docs" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Docs', 'freshet-unused-media'); ?></a>
                     <a href="mailto:email@freshet.studio"><?php esc_html_e('Support', 'freshet-unused-media'); ?></a>
                 </div>
             </div>
+            <nav class="nav-tab-wrapper">
+                <?php foreach ($tabs as $slug => $label) : ?>
+                    <a class="nav-tab<?php echo $slug === $activeTab ? ' nav-tab-active' : ''; ?>"
+                       href="<?php echo esc_url($this->tabUrl($slug)); ?>">
+                        <?php echo esc_html($label); ?>
+                    </a>
+                <?php endforeach; ?>
+            </nav>
         </div>
+        <?php // Anchor for common.js: notices are moved after .wp-header-end, below the brand strip. ?>
         <hr class="wp-header-end">
         <?php
     }
@@ -155,7 +245,11 @@ final class ToolsPage
         echo '<p class="freshet-unusedmedia-counts">';
         printf(
             '%s &nbsp;•&nbsp; %s &nbsp;•&nbsp; %s',
-            $this->usedCountHtml($counts['used']), // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in usedCountHtml().
+            esc_html(sprintf(
+                /* translators: %s: number of used attachments */
+                __('Used: %s', 'freshet-unused-media'),
+                number_format_i18n($counts['used'])
+            )),
             esc_html(sprintf(
                 /* translators: %s: number of unused attachments */
                 __('Unused: %s', 'freshet-unused-media'),
@@ -207,41 +301,75 @@ final class ToolsPage
                 : ''
         );
 
-        echo '<div class="freshet-unusedmedia-progress" id="freshet-unusedmedia-progress" hidden>
-                <div class="freshet-unusedmedia-progress__bar"><span></span></div>
-                <span class="freshet-unusedmedia-progress__label"></span>
-              </div>';
+        $this->renderProgress();
 
         echo '</div>';
     }
 
     /**
-     * The used count, as a link to the files it counts. Escaped HTML.
-     *
-     * This screen lists the unused files and links every one of them, so the
-     * used ones — the only files the Used view appears on — had no route out of
-     * here at all. List mode is deliberate and not cosmetic: the media grid
-     * opens an attachment in a modal, and a modal never fires
-     * add_meta_boxes_attachment, so no meta box can render there.
+     * The progress bar the scan and the delete-all loop both drive. Rendered on
+     * whichever of the two tabs owns the button that starts a loop, and never on
+     * both at once — the script looks the element up by id and does nothing when
+     * it is absent, so a tab without a long-running action simply has no bar.
      */
-    private function usedCountHtml(int $used): string
+    private function renderProgress(): void
     {
-        $label = esc_html(sprintf(
-            /* translators: %s: number of used attachments */
-            __('Used: %s', 'freshet-unused-media'),
-            number_format_i18n($used)
-        ));
+        echo '<div class="freshet-unusedmedia-progress" id="freshet-unusedmedia-progress" hidden>
+                <div class="freshet-unusedmedia-progress__bar"><span></span></div>
+                <span class="freshet-unusedmedia-progress__label"></span>
+              </div>';
+    }
 
-        if ($used < 1) {
-            return $label;
+    // ------------------------------------------------------------------ used
+
+    /**
+     * The files the scan kept, and the tab that is their only listing. Every
+     * row links to post.php rather than to the media library: the library
+     * defaults to grid, the grid opens an attachment in a modal, and a modal
+     * never fires add_meta_boxes_attachment — so no usage box of any kind can
+     * render there.
+     */
+    private function renderUsedTable(): void
+    {
+        $page = max(1, absint($_GET['used_page'] ?? 1)); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only pagination.
+        $list = $this->store->byStatus(ResultStore::STATUS_USED, $page, self::PER_PAGE);
+
+        echo '<div class="freshet-unusedmedia-card">';
+        echo '<h2>' . esc_html(sprintf(
+            /* translators: %s: number of used attachments */
+            __('Used files (%s)', 'freshet-unused-media'),
+            number_format_i18n($list['total'])
+        )) . '</h2>';
+
+        if ($list['ids'] === []) {
+            echo '<p>' . esc_html__('No attachments are currently marked used. Run a scan first.', 'freshet-unused-media') . '</p></div>';
+
+            return;
         }
 
-        $url = add_query_arg(
-            ['mode' => 'list', 'freshet_unusedmedia_status' => ResultStore::STATUS_USED],
-            admin_url('upload.php')
-        );
+        echo '<p class="description">' . esc_html__('Every file here was found referenced somewhere on the site, so none of them is offered for deletion. Open one to see where it is used.', 'freshet-unused-media') . '</p>';
 
-        return '<a href="' . esc_url($url) . '">' . $label . '</a>';
+        echo '<table class="widefat striped freshet-unusedmedia-table"><thead><tr>';
+
+        foreach ([__('File', 'freshet-unused-media'), __('Type', 'freshet-unused-media'), __('Uploaded', 'freshet-unused-media'), __('Size', 'freshet-unused-media'), __('References', 'freshet-unused-media'), __('Scanned', 'freshet-unused-media')] as $col) {
+            echo '<th>' . esc_html($col) . '</th>';
+        }
+
+        echo '</tr></thead><tbody>';
+
+        foreach ($list['ids'] as $id) {
+            echo '<tr>';
+            $this->renderFileCells($id);
+            echo '<td>' . esc_html(number_format_i18n($this->store->refs($id)['count'])) . '</td>';
+            $this->renderScannedCell($id);
+            echo '</tr>';
+        }
+
+        echo '</tbody></table>';
+
+        $this->renderPagination(self::TAB_USED, 'used_page', $page, $list['total']);
+
+        echo '</div>';
     }
 
     // ---------------------------------------------------------------- unused
@@ -294,7 +422,7 @@ final class ToolsPage
 
         echo '</tbody></table>';
 
-        $this->renderPagination($page, $list['total']);
+        $this->renderPagination(self::TAB_UNUSED, 'unused_page', $page, $list['total']);
 
         $hasTrash = defined('MEDIA_TRASH') && MEDIA_TRASH;
 
@@ -330,23 +458,33 @@ final class ToolsPage
             ))
         );
 
+        $this->renderProgress();
+
         echo '</form>';
         echo '</div>';
     }
 
     private function renderUnusedRow(int $id): void
     {
+        echo '<tr>';
+        printf('<th scope="row" class="check-column"><input type="checkbox" name="attachments[]" value="%d"></th>', (int) $id);
+        $this->renderFileCells($id);
+        $this->renderScannedCell($id);
+        echo '</tr>';
+    }
+
+    // ------------------------------------------------------------ table cells
+
+    /** File, type, upload date and size — identical in both listings. */
+    private function renderFileCells(int $id): void
+    {
         $file = get_attached_file($id);
         $bytes = FileSize::bytes($id) ?? 0;
 
         $size = $bytes > 0 ? size_format($bytes) : '—';
-        $scannedAt = $this->store->scannedAt($id);
         $editLink = get_edit_post_link($id);
         $title = get_the_title($id);
         $filename = $file !== false ? wp_basename($file) : sprintf('#%d', $id);
-
-        echo '<tr>';
-        printf('<th scope="row" class="check-column"><input type="checkbox" name="attachments[]" value="%d"></th>', (int) $id);
 
         echo '<td class="freshet-unusedmedia-file">';
         echo wp_get_attachment_image($id, [40, 40], true);
@@ -361,6 +499,12 @@ final class ToolsPage
         echo '<td>' . esc_html((string) get_post_mime_type($id)) . '</td>';
         echo '<td>' . esc_html(get_the_date('', $id) ?: '—') . '</td>';
         echo '<td>' . esc_html((string) $size) . '</td>';
+    }
+
+    private function renderScannedCell(int $id): void
+    {
+        $scannedAt = $this->store->scannedAt($id);
+
         echo '<td>' . esc_html($scannedAt > 0
             ? sprintf(
                 /* translators: %s: human time diff */
@@ -368,7 +512,6 @@ final class ToolsPage
                 human_time_diff($scannedAt)
             )
             : '—') . '</td>';
-        echo '</tr>';
     }
 
     // --------------------------------------------------------------- license
@@ -385,7 +528,7 @@ final class ToolsPage
         echo '</div>';
     }
 
-    private function renderPagination(int $page, int $total): void
+    private function renderPagination(string $tab, string $arg, int $page, int $total): void
     {
         $pages = (int) ceil($total / self::PER_PAGE);
 
@@ -394,7 +537,7 @@ final class ToolsPage
         }
 
         $links = paginate_links([
-            'base' => add_query_arg('unused_page', '%#%', menu_page_url(self::SLUG, false)),
+            'base' => add_query_arg($arg, '%#%', $this->tabUrl($tab)),
             'format' => '',
             'current' => $page,
             'total' => $pages,

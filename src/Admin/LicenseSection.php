@@ -229,6 +229,9 @@ final class LicenseSection
     {
         wp_safe_redirect(add_query_arg(array_filter([
             'page' => ToolsPage::SLUG,
+            // Back to the tab the form was submitted from; without it an
+            // activation lands on the scan and its notice looks unrelated.
+            'tab' => ToolsPage::TAB_LICENSE,
             self::NOTICE_ARG => $notice,
             self::MESSAGE_ARG => $message !== '' ? rawurlencode($message) : null,
         ]), admin_url('upload.php')));

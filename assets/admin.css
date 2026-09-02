@@ -6,13 +6,14 @@
     background: #fff;
     border-bottom: 1px solid #dcdcde;
     margin: 0 0 0 -20px;
-    padding: 16px 20px;
+    padding: 16px 20px 0;
 }
 
 .frst-header__row {
     display: flex;
     align-items: center;
     gap: 10px;
+    padding-bottom: 14px;
 }
 
 .frst-header__mark {
@@ -43,6 +44,30 @@
     align-items: center;
     gap: 14px;
     font-size: 13px;
+}
+
+.frst-header__pill {
+    border-radius: 12px;
+    padding: 3px 10px;
+    font-weight: 600;
+    font-size: 12px;
+}
+
+.frst-header__pill--pro {
+    background: #edfaef;
+    color: #00832a;
+}
+
+.frst-header__pill--free {
+    background: #f0f0f1;
+    color: #50575e;
+}
+
+/* Core .nav-tab keeps its own colours; only the strip's own edges go. */
+.frst-header .nav-tab-wrapper {
+    border-bottom: 0;
+    padding: 0;
+    margin: 0;
 }
 
 .freshet-unusedmedia-badge {

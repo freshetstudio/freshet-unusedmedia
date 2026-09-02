@@ -149,8 +149,13 @@ final class ToolsPage
     }
 
     /**
-     * The tabs, in order. Two are conditional, on two different questions, and
-     * keeping them apart is the point:
+     * The tabs, in order: Unused first, because finding what is unused is why
+     * anyone opens this screen. Scan follows it and stays the default landing
+     * tab — the second tab, not the first, which is deliberate: Unused is empty
+     * on a site that has never scanned.
+     *
+     * Two are conditional, on two different questions, and keeping them apart
+     * is the point:
      *
      * - Used is the paid listing, so it appears where the site is *entitled* to
      *   it: LicenseInterface::isPro(), the one read UsedView, SpaceTotals and
@@ -167,13 +172,14 @@ final class ToolsPage
      */
     private function tabs(): array
     {
-        $tabs = [self::TAB_SCAN => __('Scan', 'freshet-unused-media')];
+        $tabs = [
+            self::TAB_UNUSED => __('Unused', 'freshet-unused-media'),
+            self::TAB_SCAN => __('Scan', 'freshet-unused-media'),
+        ];
 
         if ($this->license->isPro()) {
             $tabs[self::TAB_USED] = __('Used', 'freshet-unused-media');
         }
-
-        $tabs[self::TAB_UNUSED] = __('Unused', 'freshet-unused-media');
 
         if ($this->licenseSection !== null) {
             $tabs[self::TAB_LICENSE] = __('License', 'freshet-unused-media');

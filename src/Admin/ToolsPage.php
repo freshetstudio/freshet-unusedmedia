@@ -111,9 +111,18 @@ final class ToolsPage
 
         $tab = $this->currentTab();
 
-        $this->renderHeader($tab);
-
+        // WordPress relocates every `.notice` to just after `.wp-header-end`.
+        // The anchor sits ABOVE the brand strip and inside `.wrap`, so foreign
+        // notices land above our chrome instead of between the tabs and the
+        // panel they switch. `.wrap` must also carry an h1 for the admin's own
+        // heading logic; ours is visual, so this one is for screen readers.
         echo '<div class="wrap freshet-unusedmedia-wrap">';
+        printf(
+            '<h1 class="screen-reader-text">%s</h1><hr class="wp-header-end">',
+            esc_html__('Freshet Unused Media', 'freshet-unused-media')
+        );
+
+        $this->renderHeader($tab);
 
         switch ($tab) {
             case self::TAB_USED:
@@ -347,8 +356,6 @@ final class ToolsPage
                 <?php endforeach; ?>
             </nav>
         </div>
-        <?php // Anchor for common.js: notices are moved after .wp-header-end, below the brand strip. ?>
-        <hr class="wp-header-end">
         <?php
     }
 

@@ -395,8 +395,11 @@ final class ToolsPage
 
         if ($last !== null) {
             $note = sprintf(
+                // Attachments, not files: the scan walks rows, and several rows
+                // can share one file. Everything else on this screen counts
+                // files, so this one has to say which unit it is in.
                 /* translators: 1: human time diff, 2: number of attachments scanned */
-                __('Last full scan finished %1$s ago (%2$s files).', 'freshet-unused-media'),
+                __('Last full scan finished %1$s ago (%2$s attachments).', 'freshet-unused-media'),
                 human_time_diff($last['finished_at']),
                 number_format_i18n($last['scanned'])
             );

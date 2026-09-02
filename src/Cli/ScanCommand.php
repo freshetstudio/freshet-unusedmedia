@@ -149,7 +149,10 @@ final class ScanCommand
 
         if (!$quiet) {
             WP_CLI::success(sprintf(
-                '%d file(s) scanned, %d unused. Nothing was deleted — review them with `wp freshet-unusedmedia list`.',
+                // Attachments scanned, files unused: the scan walks rows and
+                // several rows can share one file, so the two numbers are in
+                // different units and the sentence has to say so.
+                '%d attachment(s) scanned, %d unused file(s). Nothing was deleted — review them with `wp freshet-unusedmedia list`.',
                 $summary['scanned'],
                 $summary['unused']
             ));
@@ -161,6 +164,9 @@ final class ScanCommand
      *
      * Reads the stored results; it does not re-scan. Files in the trash are
      * excluded, exactly as they are on Media → Usage.
+     *
+     * One row per file, not per attachment: several attachment rows can point
+     * at one path, and `id` is the row that stands for the file.
      *
      * ## OPTIONS
      *

@@ -146,6 +146,10 @@ final class SpaceTotals
     /**
      * Bytes held by everything currently on the unused list.
      *
+     * One size per file, because ResultStore hands back one row per file. Sizing
+     * per attachment row instead is what inflated this figure by the duplication
+     * factor — on a library with two rows per file, twice the real saving.
+     *
      * Read in pages rather than one list, the way the evidence report streams,
      * so the memory cost is the batch and not the library. The disk cost is one
      * stat per unused file — the same work the table already does for the fifty

@@ -78,43 +78,44 @@ final class ResultStore
         delete_post_meta($attachmentId, self::META_SCANNED_AT);
     }
 
-    /** @return array{used: int, unused: int, unscanned: int, total: int} */
+    /**
+     * How many *files* the library holds, and what the last scan made of them.
+     *
+     * Files, not attachment rows: several rows can point at one path, and the
+     * saving this plugin is sold on is claimed against disk. See FileGroups.
+     *
+     * @return array{used: int, unused: int, unscanned: int, total: int}
+     */
     public function counts(): array
     {
         global $wpdb;
 
-        // phpcs:disable WordPress.DB.DirectDatabaseQuery -- aggregate counts over postmeta; no WP API equivalent.
-        $total = (int) $wpdb->get_var(
-            "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'attachment' AND post_status <> 'trash'"
-        );
+        $counts = [self::STATUS_USED => 0, self::STATUS_UNUSED => 0, FileGroups::STATUS_UNSCANNED => 0];
 
-        $used = (int) $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$wpdb->posts} p
-             INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID AND pm.meta_key = %s
-             WHERE p.post_type = 'attachment' AND p.post_status <> 'trash' AND pm.meta_value = %s",
-            self::META_STATUS,
-            self::STATUS_USED
-        ));
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- aggregate over the grouped subquery; no WP API groups on _wp_attached_file.
+        $rows = (array) $wpdb->get_results($this->prepared(
+            FileGroups::subquery(),
+            'SELECT fg.fg_status AS status, COUNT(*) AS files FROM ({{groups}}) fg GROUP BY fg.fg_status'
+        ), ARRAY_A);
 
-        $unused = (int) $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$wpdb->posts} p
-             INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID AND pm.meta_key = %s
-             WHERE p.post_type = 'attachment' AND p.post_status <> 'trash' AND pm.meta_value = %s",
-            self::META_STATUS,
-            self::STATUS_UNUSED
-        ));
-        // phpcs:enable WordPress.DB.DirectDatabaseQuery
+        foreach ($rows as $row) {
+            $status = (string) ($row['status'] ?? '');
+
+            if (array_key_exists($status, $counts)) {
+                $counts[$status] = (int) ($row['files'] ?? 0);
+            }
+        }
 
         return [
-            'used' => $used,
-            'unused' => $unused,
-            'unscanned' => max(0, $total - $used - $unused),
-            'total' => $total,
+            'used' => $counts[self::STATUS_USED],
+            'unused' => $counts[self::STATUS_UNUSED],
+            'unscanned' => $counts[FileGroups::STATUS_UNSCANNED],
+            'total' => array_sum($counts),
         ];
     }
 
     /**
-     * Paginated list of attachments currently marked unused.
+     * Paginated list of the files currently unused.
      *
      * @return array{ids: int[], total: int}
      */
@@ -124,9 +125,17 @@ final class ResultStore
     }
 
     /**
-     * Paginated list of attachments carrying a given scan status. One query,
-     * one paging rule, whichever half of the library is being read — so the
-     * used set can never be paged differently from the unused one.
+     * Paginated list of the files carrying a given scan status. One query, one
+     * paging rule, whichever half of the library is being read — so the used set
+     * can never be paged differently from the unused one, and neither can be
+     * paged differently from what counts() counted: both wrap the same grouped
+     * subquery, so a disagreement between the heading and the list is not
+     * something the code can express.
+     *
+     * The IDs are representatives — one attachment row standing for one file.
+     * Everything downstream reads them that way: the table shows one row per
+     * file, the space totals size each file once, and the delete loop expands a
+     * representative back to every row on its path before touching anything.
      *
      * Date and filename narrow the query itself. A size bound cannot: no column
      * records a file's size, so when one is set the whole narrowed set is sized
@@ -138,6 +147,8 @@ final class ResultStore
      */
     public function byStatus(string $status, int $page, int $perPage, ?ResultFilters $filters = null): array
     {
+        global $wpdb;
+
         $filters ??= ResultFilters::none();
         $page = max(1, $page);
 
@@ -150,24 +161,31 @@ final class ResultStore
             ];
         }
 
-        $query = new \WP_Query($this->queryArgs($status, $filters) + [
-            'posts_per_page' => $perPage,
-            'paged' => $page,
-        ]);
+        $groups = FileGroups::subquery($status, $filters);
 
-        return [
-            'ids' => array_map('intval', $query->posts),
-            'total' => (int) $query->found_posts,
-        ];
+        // phpcs:disable WordPress.DB.DirectDatabaseQuery -- the grouped subquery; no WP API groups on _wp_attached_file.
+        $ids = array_map('intval', (array) $wpdb->get_col($this->prepared(
+            $groups,
+            'SELECT fg.fg_id FROM ({{groups}}) fg ORDER BY fg.fg_id ASC LIMIT %d OFFSET %d',
+            [$perPage, ($page - 1) * $perPage]
+        )));
+
+        $total = (int) $wpdb->get_var($this->prepared(
+            $groups,
+            'SELECT COUNT(*) FROM ({{groups}}) fg'
+        ));
+        // phpcs:enable WordPress.DB.DirectDatabaseQuery
+
+        return ['ids' => $ids, 'total' => $total];
     }
 
     /**
-     * One batch of attachment IDs for the delete-all loop, honouring whatever
-     * the screen was filtered to — a loop that ignored the filter would delete
-     * files the user was never shown.
+     * One batch of files for the delete-all loop, honouring whatever the screen
+     * was filtered to — a loop that ignored the filter would delete files the
+     * user was never shown.
      *
-     * Without a size filter there is no cursor and none is needed: every ID the
-     * batch touches leaves the unused pool (deleted, re-scanned as used, or
+     * Without a size filter there is no cursor and none is needed: every file
+     * the batch touches leaves the unused pool (deleted, re-scanned as used, or
      * cleared), so the front of the list always moves and the loop terminates.
      * With one, the files that fail the size test stay in the pool and would be
      * re-sized on every batch — hence `cursor`, which the caller passes back as
@@ -195,8 +213,8 @@ final class ResultStore
 
             update_postmeta_cache($chunk);
 
-            // The cursor moves per ID rather than per chunk: it has to name the
-            // last file *examined*, or breaking out mid-chunk would step the
+            // The cursor moves per file rather than per chunk: it has to name
+            // the last file *examined*, or breaking out mid-chunk would step the
             // next batch over everything after it.
             foreach ($chunk as $id) {
                 $cursor = $id;
@@ -215,50 +233,26 @@ final class ResultStore
     }
 
     /**
-     * The shared query: one status, plus whatever date and filename the filter
-     * asked for. Trash is excluded by the status allow-list — already-trashed
-     * files are the trash UI's business, and a second delete pass over them
-     * would erase them permanently.
+     * One query around the grouped subquery. The subquery's own placeholders
+     * come first in the string, so its parameters lead the list.
      *
-     * @return array<string, mixed>
+     * @param array{sql: string, params: array<int, string>} $groups
+     * @param array<int, int|string> $params
      */
-    private function queryArgs(string $status, ResultFilters $filters): array
+    private function prepared(array $groups, string $wrapper, array $params = []): string
     {
-        $meta = [['key' => self::META_STATUS, 'value' => $status]];
+        global $wpdb;
 
-        if ($filters->filename !== '') {
-            // The stored path, which is what the File column shows underneath
-            // the title — matching the title instead would filter on a label
-            // the user can rename without touching the file.
-            $meta[] = [
-                'key' => '_wp_attached_file',
-                'value' => $filters->filename,
-                'compare' => 'LIKE',
-            ];
-        }
+        $sql = str_replace('{{groups}}', $groups['sql'], $wrapper);
+        $params = array_merge($groups['params'], $params);
 
-        $args = [
-            'post_type' => 'attachment',
-            'post_status' => ['inherit', 'private'],
-            'orderby' => 'ID',
-            'order' => 'ASC',
-            'fields' => 'ids',
-            'meta_query' => $meta, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- core index on meta_key; this is the feature.
-        ];
-
-        $dates = $filters->dateQuery();
-
-        if ($dates !== []) {
-            $args['date_query'] = [$dates];
-        }
-
-        return $args;
+        return $params === [] ? $sql : $wpdb->prepare($sql, $params);
     }
 
     /**
-     * IDs in ascending order starting after a given one. The cursor is a
-     * posts_where clause because WP_Query has no argument for it; it is added
-     * and removed around this one query so nothing else on the request sees it.
+     * Representative IDs in ascending order starting after a given one. The
+     * cursor is a plain WHERE on the grouped set rather than a filter hook,
+     * because the set is a subquery here and not a WP_Query.
      *
      * @return int[]
      */
@@ -266,40 +260,34 @@ final class ResultStore
     {
         global $wpdb;
 
-        $cursor = static fn(string $where): string => $after > 0
-            ? $where . $wpdb->prepare(" AND {$wpdb->posts}.ID > %d", $after)
-            : $where;
-
-        add_filter('posts_where', $cursor);
-
-        $query = new \WP_Query($this->queryArgs($status, $filters) + [
-            'posts_per_page' => $limit,
-            'paged' => 1,
-            'no_found_rows' => true,
-        ]);
-
-        remove_filter('posts_where', $cursor);
-
-        return array_map('intval', $query->posts);
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- the grouped subquery; no WP API groups on _wp_attached_file.
+        return array_map('intval', (array) $wpdb->get_col($this->prepared(
+            FileGroups::subquery($status, $filters),
+            'SELECT fg.fg_id FROM ({{groups}}) fg WHERE fg.fg_id > %d ORDER BY fg.fg_id ASC LIMIT %d',
+            [$after, $limit]
+        )));
     }
 
     /**
-     * Every ID matching the status, the date and the filename, then sized one by
-     * one against the size bounds. Priming the postmeta cache in chunks is what
-     * keeps this one query per SIZE_CHUNK rather than one per attachment.
+     * Every file matching the status, the date and the filename, then sized one
+     * by one against the size bounds. Priming the postmeta cache in chunks is
+     * what keeps this one query per SIZE_CHUNK rather than one per file.
      *
      * @return int[]
      */
     private function sizedIds(string $status, ResultFilters $filters): array
     {
-        $query = new \WP_Query($this->queryArgs($status, $filters) + [
-            'posts_per_page' => -1,
-            'no_found_rows' => true,
-        ]);
+        global $wpdb;
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- the grouped subquery; no WP API groups on _wp_attached_file.
+        $ids = array_map('intval', (array) $wpdb->get_col($this->prepared(
+            FileGroups::subquery($status, $filters),
+            'SELECT fg.fg_id FROM ({{groups}}) fg ORDER BY fg.fg_id ASC'
+        )));
 
         $matched = [];
 
-        foreach (array_chunk(array_map('intval', $query->posts), self::SIZE_CHUNK) as $chunk) {
+        foreach (array_chunk($ids, self::SIZE_CHUNK) as $chunk) {
             update_postmeta_cache($chunk);
 
             foreach ($chunk as $id) {

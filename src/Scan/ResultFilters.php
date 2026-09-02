@@ -16,10 +16,11 @@ defined('ABSPATH') || exit;
  * delete-all loop walks. A filter that changed only the first of those would
  * make the screen more dangerous, not less.
  *
- * Date and filename are query terms — ResultStore hands them to WP_Query.
- * Size is not: nothing in the database records how big a file is, so the size
- * test runs in PHP over whatever the other two narrowed the set to. See
- * matchesSize() for what that costs and what it decides about unknowns.
+ * Date and filename are query terms — FileGroups turns them into HAVING clauses
+ * over the grouped set, so they narrow files rather than rows. Size is not:
+ * nothing in the database records how big a file is, so the size test runs in
+ * PHP over whatever the other two narrowed the set to. See matchesSize() for
+ * what that costs and what it decides about unknowns.
  */
 final class ResultFilters
 {
@@ -104,30 +105,6 @@ final class ResultFilters
             self::ARG_MIN => $this->minMb === null ? '' : self::number($this->minMb),
             self::ARG_MAX => $this->maxMb === null ? '' : self::number($this->maxMb),
         ], static fn(string $value): bool => $value !== '');
-    }
-
-    /** WP_Query date_query clause for the upload date, or [] for no date bound. */
-    public function dateQuery(): array
-    {
-        $clause = [];
-
-        if ($this->from !== '') {
-            $clause['after'] = $this->from;
-        }
-
-        if ($this->to !== '') {
-            $clause['before'] = $this->to;
-        }
-
-        if ($clause === []) {
-            return [];
-        }
-
-        // Both bounds name a whole day: "before 2024-06-30" has to include the
-        // thirtieth, or a filter reads as off-by-one against the Uploaded column.
-        $clause['inclusive'] = true;
-
-        return $clause;
     }
 
     /**

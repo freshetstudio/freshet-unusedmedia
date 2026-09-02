@@ -236,7 +236,9 @@ final class EvidenceReport
      *
      * This is the only place the report reads the library, and it reads results
      * rather than files: ResultStore::byStatus() is the same paged query the
-     * unused table runs, with the other status value for the used half.
+     * unused table runs, with the other status value for the used half. One row
+     * per file, so a file behind three attachments is one line in the export and
+     * its bytes are in the total once.
      *
      * @param string[] $statuses
      * @param callable(array<string, string|int>, array<int, array<string, string|int>>): void $write

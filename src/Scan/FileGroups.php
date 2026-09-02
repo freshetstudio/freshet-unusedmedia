@@ -1,0 +1,261 @@
+<?php
+
+declare(strict_types=1);
+
+namespace FreshetUnusedMedia\Scan;
+
+defined('ABSPATH') || exit;
+
+/**
+ * The unit of work: one file on disk, not one attachment row.
+ *
+ * A media library has fewer files than it has attachments. Translation copies,
+ * duplicated posts and the same image uploaded twice each get their own row in
+ * `wp_posts`, and every one of those rows points at the *same* path in
+ * `_wp_attached_file`. Libraries in the wild run from two rows per file to well
+ * over twelve, so this is the common case rather than an edge one.
+ *
+ * Treating a row as a file breaks this plugin in both directions:
+ *
+ * - **It deletes live files.** Detection is partly ID-based (a featured image,
+ *   a custom field holding an ID), so two rows on one file can honestly reach
+ *   opposite verdicts. Deleting the row marked unused erases the file the row
+ *   marked used still displays — the catastrophic false positive this plugin
+ *   exists to avoid.
+ * - **It inflates the saving.** Size is a property of the file. Counting it
+ *   once per row multiplies the reclaimable figure by the duplication factor.
+ *
+ * So everything here groups on `_wp_attached_file`, which is WordPress core's
+ * own column. Nothing in this class knows or asks which plugin produced the
+ * duplicates, and nothing should: whatever made two rows point at one path,
+ * they are one file.
+ *
+ * **Match on basenames, group on paths.** The detectors match basenames,
+ * because that is how a reference appears in content. Grouping must not:
+ * `2024/01/logo.png` and `2025/06/logo.png` share a basename and are two
+ * unrelated files, and merging them would delete a live one from the other
+ * side. Every key here is the full stored path, compared whole.
+ */
+final class FileGroups
+{
+    /** Core's own record of where an attachment's file lives. The grouping key. */
+    public const META_FILE = '_wp_attached_file';
+
+    /** A file nothing has decided about yet — some rows scanned, some not. */
+    public const STATUS_UNSCANNED = 'unscanned';
+
+    /**
+     * Rows with no `_wp_attached_file` at all have no file to share, so each is
+     * its own group. A stored path can never start with this, so the two key
+     * spaces cannot collide.
+     */
+    private const ROW_KEY_PREFIX = '#';
+
+    // ------------------------------------------------------------- the key
+
+    /**
+     * The grouping key for one attachment — the full stored path, never a
+     * basename. Twin of keySql(); the delete loop reads this one.
+     */
+    public static function keyFor(int $attachmentId): string
+    {
+        $file = trim((string) get_post_meta($attachmentId, self::META_FILE, true));
+
+        return $file !== '' ? $file : self::ROW_KEY_PREFIX . $attachmentId;
+    }
+
+    /** The same key in SQL. Twin of keyFor(); the counts and the listing read this one. */
+    public static function keySql(): string
+    {
+        return "COALESCE(NULLIF(fgf.meta_value, ''), CONCAT('" . self::ROW_KEY_PREFIX . "', p.ID))";
+    }
+
+    /**
+     * Every attachment row pointing at this attachment's file, ascending, with
+     * the attachment itself always in it.
+     *
+     * Trashed rows are included on purpose. They are excluded from the unused
+     * pool, but they still hold the file: a group with one in it is not
+     * deletable, and the delete loop has to be able to see that.
+     *
+     * The comparison is on the whole path. A LIKE on the basename here is the
+     * mirror of the bug this class fixes.
+     *
+     * @return int[]
+     */
+    public static function siblings(int $attachmentId): array
+    {
+        global $wpdb;
+
+        $key = self::keyFor($attachmentId);
+
+        if (str_starts_with($key, self::ROW_KEY_PREFIX)) {
+            return [$attachmentId];
+        }
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- rows sharing one file; no WP API groups on _wp_attached_file.
+        $ids = array_map('intval', (array) $wpdb->get_col($wpdb->prepare(
+            "SELECT p.ID FROM {$wpdb->posts} p
+             INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID AND pm.meta_key = %s
+             WHERE p.post_type = 'attachment' AND pm.meta_value = %s
+             ORDER BY p.ID ASC",
+            self::META_FILE,
+            $key
+        )));
+
+        return in_array($attachmentId, $ids, true) ? $ids : array_merge($ids, [$attachmentId]);
+    }
+
+    // --------------------------------------------------------- the verdict
+
+    /**
+     * One file's status from its rows. **A file is unused only when every row
+     * pointing at it is unused** — one row still in use keeps the whole file,
+     * which is the default-closed direction and the one that stops a live file
+     * being deleted.
+     *
+     * A trashed row is neither: it is a deletion someone has already started
+     * and can still undo, and its file must survive for that. A group holding
+     * one is therefore never unused.
+     *
+     * statusSql() is this sentence in SQL. The two live side by side so they
+     * change together.
+     */
+    public static function verdict(int $live, int $trash, int $used, int $unused): string
+    {
+        if ($used > 0) {
+            return ResultStore::STATUS_USED;
+        }
+
+        if ($live > 0 && $trash === 0 && $unused === $live) {
+            return ResultStore::STATUS_UNUSED;
+        }
+
+        return self::STATUS_UNSCANNED;
+    }
+
+    /** verdict(), transcribed. Read it against the method above, not on its own. */
+    public static function statusSql(): string
+    {
+        return 'CASE'
+            . ' WHEN ' . self::scannedSql(ResultStore::STATUS_USED) . ' > 0 THEN ' . self::quote(ResultStore::STATUS_USED)
+            . ' WHEN ' . self::liveSql() . ' > 0 AND ' . self::trashSql() . ' = 0'
+            . ' AND ' . self::scannedSql(ResultStore::STATUS_UNUSED) . ' = ' . self::liveSql()
+            . ' THEN ' . self::quote(ResultStore::STATUS_UNUSED)
+            . ' ELSE ' . self::quote(self::STATUS_UNSCANNED)
+            . ' END';
+    }
+
+    // ------------------------------------------------------- the subquery
+
+    /**
+     * One file per row: the grouped set every count, every listing, the space
+     * total and the delete loop are built on.
+     *
+     * It is raw SQL rather than WP_Query, and that is the point rather than an
+     * optimisation. WP_Query is filterable, so a listing that went through it
+     * could be narrowed by other plugins while an aggregate count beside it was
+     * not — which is exactly how a screen ends up counting dozens of files and
+     * listing one. Files on disk are not a per-request opinion, so both halves
+     * read this.
+     *
+     * Columns: `fg_key` the path, `fg_id` the row that represents the file,
+     * `fg_status` the verdict, `fg_date` the earliest upload of any of its rows.
+     * The filter clauses sit in HAVING and never in WHERE: narrowing the rows
+     * before they are grouped would hide a *used* row from its own group and
+     * hand back a file marked unused on half its evidence.
+     *
+     * @param string|null $status  Keep only files with this verdict; null keeps all.
+     * @return array{sql: string, params: array<int, string>}
+     */
+    public static function subquery(?string $status = null, ?ResultFilters $filters = null): array
+    {
+        global $wpdb;
+
+        $filters ??= ResultFilters::none();
+
+        // Files whose every row is in the trash are not in the library any more.
+        $having = [self::liveSql() . ' > 0'];
+        $params = [];
+
+        if ($status !== null) {
+            $having[] = 'fg_status = ' . self::quote($status);
+        }
+
+        if ($filters->filename !== '') {
+            // The stored path, which is what the File column shows underneath
+            // the title — matching the title instead would filter on a label
+            // the user can rename without touching the file.
+            $having[] = 'fg_key LIKE %s';
+            $params[] = '%' . $wpdb->esc_like($filters->filename) . '%';
+        }
+
+        // Both bounds name a whole day: "uploaded to 2024-06-30" has to include
+        // the thirtieth, or the filter reads as off-by-one against the Uploaded
+        // column.
+        if ($filters->from !== '') {
+            $having[] = 'fg_date >= %s';
+            $params[] = $filters->from . ' 00:00:00';
+        }
+
+        if ($filters->to !== '') {
+            $having[] = 'fg_date <= %s';
+            $params[] = $filters->to . ' 23:59:59';
+        }
+
+        $sql = 'SELECT ' . self::keySql() . ' AS fg_key,'
+            . ' ' . self::representativeSql() . ' AS fg_id,'
+            . ' ' . self::statusSql() . ' AS fg_status,'
+            . " MIN(CASE WHEN p.post_status <> 'trash' THEN p.post_date END) AS fg_date"
+            . " FROM {$wpdb->posts} p"
+            . " LEFT JOIN {$wpdb->postmeta} fgf ON fgf.post_id = p.ID AND fgf.meta_key = " . self::quote(self::META_FILE)
+            . " LEFT JOIN {$wpdb->postmeta} fgs ON fgs.post_id = p.ID AND fgs.meta_key = " . self::quote(ResultStore::META_STATUS)
+            . " WHERE p.post_type = 'attachment'"
+            . ' GROUP BY fg_key'
+            . ' HAVING ' . implode(' AND ', $having);
+
+        return ['sql' => $sql, 'params' => $params];
+    }
+
+    // ------------------------------------------------------------ fragments
+
+    /**
+     * The row that stands for the file on screen: the first row that carries
+     * the verdict, so a used file is represented by a row whose references are
+     * the reason it was kept. Falls back to the first live row, then to any row
+     * at all, so a group always has one.
+     */
+    private static function representativeSql(): string
+    {
+        return 'COALESCE('
+            . "MIN(CASE WHEN p.post_status <> 'trash' AND fgs.meta_value = " . self::quote(ResultStore::STATUS_USED) . ' THEN p.ID END), '
+            . "MIN(CASE WHEN p.post_status <> 'trash' THEN p.ID END), "
+            . 'MIN(p.ID))';
+    }
+
+    private static function liveSql(): string
+    {
+        return "SUM(CASE WHEN p.post_status <> 'trash' THEN 1 ELSE 0 END)";
+    }
+
+    private static function trashSql(): string
+    {
+        return "SUM(CASE WHEN p.post_status = 'trash' THEN 1 ELSE 0 END)";
+    }
+
+    private static function scannedSql(string $status): string
+    {
+        return "SUM(CASE WHEN p.post_status <> 'trash' AND fgs.meta_value = " . self::quote($status) . ' THEN 1 ELSE 0 END)';
+    }
+
+    /**
+     * Meta keys and status values are constants declared in this plugin's own
+     * source, never request data — so they are quoted here rather than threaded
+     * through every caller as a placeholder. Everything that *does* come from a
+     * request goes through $wpdb->prepare() in subquery().
+     */
+    private static function quote(string $literal): string
+    {
+        return "'" . esc_sql($literal) . "'";
+    }
+}

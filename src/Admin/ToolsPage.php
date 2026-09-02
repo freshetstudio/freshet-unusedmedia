@@ -124,20 +124,20 @@ final class ToolsPage
             case self::TAB_UNUSED:
                 $this->renderUnusedTable();
 
-                // Licensed, so it renders its own card or nothing at all — an
-                // empty box where a feature is not entitled reads as a broken
-                // screen. It follows the table because it totals it.
+                // Licensed, so it renders its own section or nothing at all —
+                // an empty heading where a feature is not entitled reads as a
+                // broken screen. It follows the table because it totals it.
                 $this->totals?->render();
 
                 break;
 
             case self::TAB_LICENSE:
-                $this->renderLicenseCard();
+                $this->renderLicenseSection();
 
                 break;
 
             default:
-                $this->renderScanCard();
+                $this->renderScanSection();
 
                 // Same shape and the same reason as the totals above. It sits
                 // with the scan because it exports what the last scan found,
@@ -354,13 +354,13 @@ final class ToolsPage
 
     // ------------------------------------------------------------------ scan
 
-    private function renderScanCard(): void
+    private function renderScanSection(): void
     {
         $counts = $this->store->counts();
         $running = $this->state->current();
         $last = $this->state->lastScan();
 
-        echo '<div class="freshet-unusedmedia-card">';
+        echo '<div class="freshet-unusedmedia-section">';
         echo '<h2>' . esc_html__('Scan', 'freshet-unused-media') . '</h2>';
 
         echo '<p class="description">' . esc_html__('Every file is checked against post content and blocks, custom fields, options and theme mods, term and user meta, comments and excerpts — not just what it was uploaded to. Anything ambiguous counts as used, so a file reaches the unused list only when nothing anywhere refers to it.', 'freshet-unused-media') . '</p>';
@@ -471,7 +471,7 @@ final class ToolsPage
         $filters = $this->filters();
         $list = $this->store->byStatus(ResultStore::STATUS_USED, $page, self::PER_PAGE, $filters);
 
-        echo '<div class="freshet-unusedmedia-card">';
+        echo '<div class="freshet-unusedmedia-section">';
         echo '<h2>' . esc_html($this->listHeading(
             /* translators: %s: number of used attachments */
             __('Used files (%s)', 'freshet-unused-media'),
@@ -522,13 +522,13 @@ final class ToolsPage
         $filters = $this->filters();
         $list = $this->store->unused($page, self::PER_PAGE, $filters);
 
-        echo '<div class="freshet-unusedmedia-card">';
+        echo '<div class="freshet-unusedmedia-section">';
 
         // freshet-D75 (8): the heading row carries the destructive control on
         // its right - "Unused files (400) [Delete all]". It sits outside the
         // selection form deliberately: it is a script-driven button, not a
         // submit, so the form it would otherwise post is irrelevant to it.
-        echo '<div class="freshet-unusedmedia-card__heading">';
+        echo '<div class="freshet-unusedmedia-section__heading">';
         echo '<h2>' . esc_html($this->listHeading(
             /* translators: %s: number of unused attachments */
             __('Unused files (%s)', 'freshet-unused-media'),
@@ -744,13 +744,13 @@ final class ToolsPage
     // --------------------------------------------------------------- license
 
     /** Nothing at all without the license stack, which is the free build. */
-    private function renderLicenseCard(): void
+    private function renderLicenseSection(): void
     {
         if ($this->licenseSection === null) {
             return;
         }
 
-        echo '<div class="freshet-unusedmedia-card">';
+        echo '<div class="freshet-unusedmedia-section">';
         $this->licenseSection->render();
         echo '</div>';
     }

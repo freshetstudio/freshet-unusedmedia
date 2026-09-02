@@ -108,21 +108,23 @@
     color: #50575e;
 }
 
-.freshet-unusedmedia-card {
-    background: #fff;
-    border: 1px solid #dcdcde;
-    border-radius: 4px;
-    padding: 16px 20px;
-    margin-top: 16px;
-    max-width: 1100px;
+/* Content sections, and they are sections rather than surfaces: Feeds and the
+   WordPress admin both put a list table straight onto the page background at the
+   full width of the content column, so there is nothing here to draw
+   (freshet-D81). No background, no border, no radius, no padding - and above all
+   no width cap, which is what kept the tables off the full width. What is left
+   is the vertical rhythm between one section and the next. */
+
+.freshet-unusedmedia-section {
+    margin-top: 24px;
 }
 
-.freshet-unusedmedia-card h2 {
+.freshet-unusedmedia-section h2 {
     margin-top: 0;
 }
 
 /* "Unused files (400) [Delete all]" - the destructive control on the heading row. */
-.freshet-unusedmedia-card__heading {
+.freshet-unusedmedia-section__heading {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -130,7 +132,7 @@
     flex-wrap: wrap;
 }
 
-.freshet-unusedmedia-card__heading h2 {
+.freshet-unusedmedia-section__heading h2 {
     margin-bottom: 0;
 }
 
@@ -278,32 +280,22 @@
     gap: 12px;
 }
 
-/* The join between the tab strip and the panel it switches (freshet-D77 (3)).
-   Every tab opens with a .freshet-unusedmedia-card as the first thing in the
-   wrap, so that card *is* the panel: it starts where the strip ends instead of
-   floating 16px below it behind a band of page grey. Three consequences of
-   meeting, not three separate ideas — no gutter, no second border stacked on
-   the strip's own, and square top corners so the two edges read as one surface.
-   Feeds has no panel here at all (a bare table 16.5px down), so there is
-   nothing to port; this is the join it never had to solve. */
+/* The join between the tab strip and the content it switches (freshet-D81 (3)).
+   There is no panel left to meet, so the join is core's own and needs no help:
+   .nav-tab-active carries margin-bottom: -1px and a bottom border in the page
+   background colour, so the active tab breaks the strip's rule line and opens
+   onto the same surface its content sits on. freshet-088 had to paint that tab
+   white because a white card started where the strip ended; with the card gone
+   the override would leave the active tab the only white thing on the screen, so
+   it goes with it.
+
+   The wrap's offset is Feeds' own 1.5em, and the first section adds nothing on
+   top of it. */
 
 .freshet-unusedmedia-wrap {
-    margin-top: 0;
+    margin-top: 1.5em;
 }
 
-.freshet-unusedmedia-wrap > .freshet-unusedmedia-card:first-child {
+.freshet-unusedmedia-wrap > .freshet-unusedmedia-section:first-child {
     margin-top: 0;
-    border-top: 0;
-    border-top-left-radius: 0;
-    border-top-right-radius: 0;
-}
-
-/* The active tab drops onto the panel's white rather than the page grey, so it
-   reads as attached to what it switches. Core gives it margin-bottom: -1px
-   already; only the colour it lands in was wrong. */
-.frst-header .nav-tab-active,
-.frst-header .nav-tab-active:hover,
-.frst-header .nav-tab-active:focus {
-    background: #fff;
-    border-bottom-color: #fff;
 }

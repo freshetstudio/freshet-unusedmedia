@@ -46,9 +46,9 @@ final class SpaceTotals
     }
 
     /**
-     * The card on Media → Usage. Renders its own wrapper and nothing at all
-     * without a valid key, matching EvidenceReport: an empty bordered box where
-     * a feature is not entitled reads as a broken screen.
+     * The section on Media → Usage. Renders its own wrapper and nothing at all
+     * without a valid key, matching EvidenceReport: an empty heading where a
+     * feature is not entitled reads as a broken screen.
      */
     public function render(): void
     {
@@ -59,7 +59,7 @@ final class SpaceTotals
         $reclaimable = $this->reclaimable();
         $reclaimed = ReclaimedLedger::read();
 
-        echo '<div class="freshet-unusedmedia-card">';
+        echo '<div class="freshet-unusedmedia-section">';
         echo '<h2>' . esc_html__('Space', 'freshet-unused-media') . '</h2>';
 
         echo '<p class="description">' . esc_html__('Two figures, kept apart on purpose: what the unused files are holding now, and what deleting them has actually freed so far. Both are measured from the files themselves — the same size shown against each file in the table above — and count the original file only, so the disk a deletion really frees is larger than the number here, never smaller.', 'freshet-unused-media') . '</p>';

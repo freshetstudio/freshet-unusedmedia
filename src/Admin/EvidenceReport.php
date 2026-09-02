@@ -73,9 +73,9 @@ final class EvidenceReport
     // ------------------------------------------------------------------- UI
 
     /**
-     * The card on Media → Usage. Renders its own wrapper rather than being
-     * wrapped by ToolsPage the way the license card is: without a valid key
-     * there is no card at all here, and an empty bordered box is worse than
+     * The section on Media → Usage. Renders its own wrapper rather than being
+     * wrapped by ToolsPage the way the license section is: without a valid key
+     * there is nothing here at all, and an empty heading is worse than
      * nothing.
      */
     public function render(): void
@@ -86,7 +86,7 @@ final class EvidenceReport
 
         $counts = $this->store->counts();
 
-        echo '<div class="freshet-unusedmedia-card">';
+        echo '<div class="freshet-unusedmedia-section">';
         echo '<h2>' . esc_html__('Evidence report', 'freshet-unused-media') . '</h2>';
 
         echo '<p class="description">' . esc_html__('Export what the last scan found: every file with its status, its size, and the places it was found referenced — the same evidence the attachment screen shows, for the whole library at once. It is the file to send before anything is deleted, so the reasoning can be checked by somebody who does not have access here.', 'freshet-unused-media') . '</p>';

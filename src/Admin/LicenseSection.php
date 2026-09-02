@@ -127,7 +127,7 @@ final class LicenseSection
             esc_html(substr($key, 0, 6)),
             esc_html(substr($key, -4)),
             $isPro
-                ? '<strong class="freshet-unusedmedia-license--on">' . esc_html__('Active — this site is on Pro.', 'freshet-unused-media') . '</strong>'
+                ? '<strong class="freshet-unusedmedia-license--on">' . esc_html__('Active — this site is on Freshet Unused Media Pro.', 'freshet-unused-media') . '</strong>'
                 : '<strong class="freshet-unusedmedia-license--off">' . esc_html__('Invalid or expired — this site is on Free.', 'freshet-unused-media') . '</strong>'
         );
 
@@ -200,7 +200,7 @@ final class LicenseSection
         }
 
         $text = match ($notice) {
-            'activated' => __('License activated. This site is now on Pro.', 'freshet-unused-media'),
+            'activated' => __('License activated. This site is now on Freshet Unused Media Pro.', 'freshet-unused-media'),
             'deactivated' => __('License removed from this site.', 'freshet-unused-media'),
             default => $message !== '' ? $message : __('Activation failed.', 'freshet-unused-media'),
         };

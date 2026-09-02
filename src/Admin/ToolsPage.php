@@ -9,6 +9,7 @@ use FreshetUnusedMedia\Scan\FileSize;
 use FreshetUnusedMedia\Scan\ResultFilters;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\ScanState;
+use FreshetUnusedMedia\Scan\UploadGrace;
 
 defined('ABSPATH') || exit;
 
@@ -330,6 +331,27 @@ final class ToolsPage
         );
     }
 
+    /**
+     * The upload grace in words, on every screen someone hunting a fresh
+     * upload could be looking at — the scan they just ran and the list it is
+     * absent from. One sentence, said the same way in both places.
+     *
+     * The window comes from UploadGrace, which is the value the detector
+     * enforces: a hardcoded "24 hours" beside a filtered grace would be the
+     * one line on the screen that lies. Empty when the grace is filtered off,
+     * because then nothing is being held back and there is nothing to explain.
+     */
+    private function graceNotice(): string
+    {
+        return UploadGrace::isActive()
+            ? sprintf(
+                /* translators: %s: the upload grace window, e.g. "24 hours" */
+                __('A file uploaded in the last %s is held back whatever the scan finds, so an editor still placing it has time to finish — it is not missing, it is being kept out of the list on purpose.', 'freshet-unused-media'),
+                UploadGrace::window()
+            )
+            : '';
+    }
+
     /** Said once, wherever a size filter changes which files can appear. */
     private function sizeFilterNote(): string
     {
@@ -394,6 +416,15 @@ final class ToolsPage
 
         echo '<p class="description">' . esc_html__('Every file is checked against post content and blocks, custom fields, options and theme mods, term and user meta, comments and excerpts — not just what it was uploaded to. Anything ambiguous counts as used, so a file reaches the unused list only when nothing anywhere refers to it.', 'freshet-unused-media') . '</p>';
 
+        // freshet-D92 (4): a fresh upload is held out of the deletable pool on
+        // purpose, and until now nothing said so anywhere a person looking for
+        // it would be. This is the tab they land on.
+        $grace = $this->graceNotice();
+
+        if ($grace !== '') {
+            echo '<p class="description">' . esc_html($grace) . '</p>';
+        }
+
         echo '<p class="freshet-unusedmedia-counts">';
         printf(
             '%s &nbsp;•&nbsp; %s &nbsp;•&nbsp; %s',
@@ -437,6 +468,12 @@ final class ToolsPage
 
             echo '<p class="description">' . esc_html($note) . '</p>';
         }
+
+        // freshet-D92 (3): a delete orphaned the webp an optimiser had made of
+        // the deleted original, and the next scan flagged it — the product
+        // working, read as a stale result because nothing had said a cleanup
+        // can do that. Said here, once, in the same voice as the rest.
+        echo '<p class="description">' . esc_html__('Worth running again after a cleanup. Deleting a file can leave others behind it unreferenced — an optimiser or a resize tool registers its derivatives as library entries of their own, and once the original is gone nothing points at those any more — so a later scan can honestly find files an earlier one did not. That is what the scan being re-runnable is for.', 'freshet-unused-media') . '</p>';
 
         // Reset only exists while a scan is unfinished: it is the escape hatch out
         // of a half-done run, next to Resume and Stop. It carries button-link so it
@@ -537,7 +574,7 @@ final class ToolsPage
         foreach ($list['ids'] as $id) {
             echo '<tr>';
             $this->renderFileCells($id);
-            echo '<td>' . esc_html(number_format_i18n($this->store->refs($id)['count'])) . '</td>';
+            $this->renderReferencesCell($id);
             $this->renderScannedCell($id);
             echo '</tr>';
         }
@@ -589,14 +626,32 @@ final class ToolsPage
         $this->renderFilterBar(self::TAB_UNUSED);
 
         if ($list['ids'] === []) {
-            echo '<p>' . esc_html($filters->isActive()
-                ? __('No unused files match this filter. Clear it to see the rest.', 'freshet-unused-media')
-                : __('No attachments are currently marked unused. Run a scan first, or enjoy the tidy library.', 'freshet-unused-media')) . '</p></div>';
+            // An empty list is where a fresh upload is hardest to account for:
+            // nothing here, and nothing saying why. The grace explains it, and
+            // only where a filter is not the more likely answer.
+            $empty = array_filter([
+                $filters->isActive()
+                    ? __('No unused files match this filter. Clear it to see the rest.', 'freshet-unused-media')
+                    : __('No attachments are currently marked unused. Run a scan first, or enjoy the tidy library.', 'freshet-unused-media'),
+                $filters->isActive() ? '' : $this->graceNotice(),
+            ]);
+
+            echo '<p>' . esc_html(implode(' ', $empty)) . '</p></div>';
 
             return;
         }
 
-        echo '<p class="description">' . esc_html(__('Files uploaded in the last 24 hours never appear here, and a reference from a trashed post or comment still counts as usage. Every file below is re-checked in the instant before it is deleted — anything that has become used in the meantime is skipped.', 'freshet-unused-media') . $this->sizeFilterNote()) . '</p>';
+        // The list a person reads when the file they went looking for is not in
+        // it, so it says why one gets held back instead of leaving the absence
+        // to be guessed at (freshet-D92 (4)). Three reasons, and the grace
+        // window is the filtered one rather than a hardcoded day.
+        $notes = array_filter([
+            __('A file you expected here and cannot find is being held back rather than overlooked: something on the site still refers to it — a reference from a trashed post or comment counts as usage — or another library entry points at the same file and is itself in use or in the trash.', 'freshet-unused-media'),
+            $this->graceNotice(),
+            __('Every file below is re-checked in the instant before it is deleted — anything that has become used in the meantime is skipped.', 'freshet-unused-media'),
+        ]);
+
+        echo '<p class="description">' . esc_html(implode(' ', $notes) . $this->sizeFilterNote()) . '</p>';
 
         echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" id="freshet-unusedmedia-delete-form">';
         wp_nonce_field('freshet_unusedmedia_delete_selected');
@@ -736,6 +791,36 @@ final class ToolsPage
     }
 
     // ------------------------------------------------------------ table cells
+
+    /**
+     * The References column, and the one row on this listing where a number is
+     * the wrong answer.
+     *
+     * A file whose every reference is the upload grace is not used by
+     * anything — it is held back, and reporting "1" here is precisely how
+     * someone goes hunting for a file the plugin is deliberately protecting
+     * (freshet-D92 (4)). It says so instead.
+     */
+    private function renderReferencesCell(int $id): void
+    {
+        $data = $this->store->refs($id);
+
+        // Stored refs are capped, so a file with more references than were kept
+        // cannot be grace-only however the kept ones read.
+        $graceOnly = $data['refs'] !== [] && $data['count'] === count($data['refs']);
+
+        foreach ($data['refs'] as $ref) {
+            if ($ref->match !== 'recent-upload') {
+                $graceOnly = false;
+
+                break;
+            }
+        }
+
+        echo '<td>' . esc_html($graceOnly
+            ? UploadGrace::heldBack()
+            : number_format_i18n($data['count'])) . '</td>';
+    }
 
     /** File, type, upload date and size — identical in both listings. */
     private function renderFileCells(int $id): void

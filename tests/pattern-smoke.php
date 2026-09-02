@@ -86,6 +86,7 @@ function is_serialized(string $data): bool
 // cached verdict, a recorded last success and one HTTP reply — so all four are
 // stubbed here and the real class is exercised, not a paraphrase of it.
 
+const MINUTE_IN_SECONDS = 60;
 const HOUR_IN_SECONDS = 3600;
 const DAY_IN_SECONDS = 86400;
 
@@ -93,6 +94,7 @@ $GLOBALS['options'] = [];
 $GLOBALS['transients'] = [];
 $GLOBALS['http'] = null;      // canned wp_remote_post reply; null means unreachable
 $GLOBALS['httpCalls'] = 0;
+$GLOBALS['filters'] = [];   // hook => forced value, for the filtered upload grace
 
 function get_option(string $name, mixed $default = false): mixed
 {
@@ -137,7 +139,7 @@ function untrailingslashit(string $value): string
 
 function apply_filters(string $hook, mixed $value, mixed ...$rest): mixed
 {
-    return $value;
+    return $GLOBALS['filters'][$hook] ?? $value;
 }
 
 function wp_json_encode(mixed $value): string|false
@@ -148,6 +150,16 @@ function wp_json_encode(mixed $value): string|false
 function __(string $text, string $domain = ''): string
 {
     return $text;
+}
+
+function _n(string $single, string $plural, int $number, string $domain = ''): string
+{
+    return $number === 1 ? $single : $plural;
+}
+
+function number_format_i18n(int|float $number): string
+{
+    return (string) $number;
 }
 
 /** Enough of WP_Error for the "license server unreachable" branch. */
@@ -222,6 +234,7 @@ require_once ABSPATH . 'src/License/LicenseInterface.php';
 require_once ABSPATH . 'src/License/LicenseClient.php';
 require_once ABSPATH . 'src/License/RemoteLicense.php';
 require_once ABSPATH . 'src/License/NoLicense.php';
+require_once ABSPATH . 'src/Scan/UploadGrace.php';
 
 use FreshetUnusedMedia\Detector\LikePatterns;
 use FreshetUnusedMedia\Detector\PostContentDetector;
@@ -229,6 +242,7 @@ use FreshetUnusedMedia\License\LicenseClient;
 use FreshetUnusedMedia\License\NoLicense;
 use FreshetUnusedMedia\License\RemoteLicense;
 use FreshetUnusedMedia\Scan\AttachmentContext;
+use FreshetUnusedMedia\Scan\UploadGrace;
 
 // ------------------------------------------------------------- assertions
 
@@ -514,6 +528,54 @@ check('a cached verdict for another key is ignored', $license()->isPro(), false)
 
 // The directory build, where there is no client and no feature to unlock.
 check('the wordpress.org build is never licensed', (new NoLicense())->isPro(), false);
+
+// ------------------------------------------------- the upload grace, in words
+
+// The window the screens quote has to be the window the detector enforces: a
+// grace someone has filtered and a paragraph still saying "24 hours" is the one
+// line on the screen that lies (freshet-D92 (4)). Same read, one filter.
+
+$grace = static function (mixed $seconds = null): void {
+    if ($seconds === null) {
+        unset($GLOBALS['filters']['freshet_unusedmedia_upload_grace']);
+
+        return;
+    }
+
+    $GLOBALS['filters']['freshet_unusedmedia_upload_grace'] = $seconds;
+};
+
+$grace();
+check('the default grace is a day', UploadGrace::seconds(), DAY_IN_SECONDS);
+check('the default grace reads as hours, not "1 day"', UploadGrace::window(), '24 hours');
+check('the held-back line quotes the window', UploadGrace::heldBack(), 'Held back — uploaded in the last 24 hours');
+check('the default grace is active', UploadGrace::isActive(), true);
+
+$grace(2 * DAY_IN_SECONDS);
+check('a two-day grace reads as days', UploadGrace::window(), '2 days');
+check('the held-back line follows the filter', UploadGrace::heldBack(), 'Held back — uploaded in the last 2 days');
+
+$grace(HOUR_IN_SECONDS);
+check('an hour reads as an hour', UploadGrace::window(), '1 hour');
+
+$grace(90 * MINUTE_IN_SECONDS);
+check('ninety minutes is not a whole hour', UploadGrace::window(), '90 minutes');
+
+$grace(30);
+check('half a minute reads in seconds', UploadGrace::window(), '30 seconds');
+
+$grace('86400');
+check('a string from a filter is still a day', UploadGrace::seconds(), DAY_IN_SECONDS);
+
+// 0 disables the hold entirely, which is how the test install sees a fresh
+// upload immediately — and a screen with nothing to hold back says nothing.
+$grace(0);
+check('a zero grace holds nothing back', UploadGrace::isActive(), false);
+
+$grace(-1);
+check('a negative grace holds nothing back', UploadGrace::isActive(), false);
+
+$grace();
 
 // ------------------------------------------------------------------ report
 

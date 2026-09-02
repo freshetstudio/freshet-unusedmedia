@@ -286,6 +286,7 @@ foreach ([
     'src/Scan/FileSize.php',
     'src/Scan/FileGroups.php',
     'src/Scan/ResultFilters.php',
+    'src/Scan/UploadGrace.php',
     'src/Scan/ResultStore.php',
     'src/Scan/ReclaimedLedger.php',
     'src/Scan/Scanner.php',

@@ -6,6 +6,7 @@ namespace FreshetUnusedMedia\Detector;
 
 use FreshetUnusedMedia\Scan\AttachmentContext;
 use FreshetUnusedMedia\Scan\Reference;
+use FreshetUnusedMedia\Scan\UploadGrace;
 
 defined('ABSPATH') || exit;
 
@@ -14,6 +15,10 @@ defined('ABSPATH') || exit;
  * is still placing it, or the post that will carry it is not saved. It stays
  * out of the deletable pool for a grace period (default one day; filter
  * `freshet_unusedmedia_upload_grace`, seconds, 0 disables).
+ *
+ * The window is read through UploadGrace, which is also what the Tools screens
+ * quote when they explain the absence — one filter read, one number, so the
+ * copy cannot promise a window this does not enforce.
  */
 final class RecentUploadDetector implements DetectorInterface
 {
@@ -24,7 +29,7 @@ final class RecentUploadDetector implements DetectorInterface
 
     public function find(AttachmentContext $ctx): array
     {
-        $grace = (int) apply_filters('freshet_unusedmedia_upload_grace', DAY_IN_SECONDS);
+        $grace = UploadGrace::seconds();
         $uploaded = get_post_timestamp($ctx->id);
 
         if ($grace <= 0 || $uploaded === false || time() - $uploaded >= $grace) {

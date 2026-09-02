@@ -284,7 +284,8 @@ final class ScanCommand
 
         WP_CLI::error(
             'This command needs a license key. Scanning, the unused list and deletion are free on Media → Usage; '
-            . 'the licensed extras are the Used view and this command. Add a key on Media → Usage.'
+            . 'a license adds the Used view, this command, the exportable evidence report and the space totals. '
+            . 'Add a key on Media → Usage.'
         );
     }
 }

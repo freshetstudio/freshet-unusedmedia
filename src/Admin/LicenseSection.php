@@ -17,7 +17,7 @@ defined('ABSPATH') || exit;
  * Ported from freshet-feeds' LicenseSection. What changed: it renders inside
  * the Usage page's own card markup rather than a tab, the redirect target is
  * upload.php, the "Data" block came out (this plugin has no delete-data
- * setting), and the copy names what the license buys here — the Used view.
+ * setting), and the copy names the whole of what a license adds here.
  */
 final class LicenseSection
 {
@@ -102,7 +102,9 @@ final class LicenseSection
         $key = RemoteLicense::storedKey();
 
         if ($key === '') {
-            echo '<p class="description">' . esc_html__('Scanning, detection and deletion are free, and stay free. A license adds the Used view: open any file that is in use and see every place it is used.', 'freshet-unused-media') . '</p>';
+            echo '<p class="description">' . esc_html__('Scanning, detection and deletion are free, and stay free — they are the plugin, and nothing in this download is locked or time-limited. A license adds four things:', 'freshet-unused-media') . '</p>';
+
+            $this->renderTierList();
 
             echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
             wp_nonce_field('freshet_unusedmedia_activate_license');
@@ -117,15 +119,28 @@ final class LicenseSection
             return;
         }
 
+        $isPro = $this->license->isPro();
+
         printf(
             '<p>%s <code>%s…%s</code> — %s</p>',
             esc_html__('Key:', 'freshet-unused-media'),
             esc_html(substr($key, 0, 6)),
             esc_html(substr($key, -4)),
-            $this->license->isPro()
-                ? '<strong class="freshet-unusedmedia-license--on">' . esc_html__('Active — the Used view is on every file that is in use.', 'freshet-unused-media') . '</strong>'
-                : '<strong class="freshet-unusedmedia-license--off">' . esc_html__('Invalid or expired — the Used view is hidden. Everything else is unaffected.', 'freshet-unused-media') . '</strong>'
+            $isPro
+                ? '<strong class="freshet-unusedmedia-license--on">' . esc_html__('Active — this site is on Pro.', 'freshet-unused-media') . '</strong>'
+                : '<strong class="freshet-unusedmedia-license--off">' . esc_html__('Invalid or expired — this site is on Free.', 'freshet-unused-media') . '</strong>'
         );
+
+        // The tier said once, then what it actually buys: the state line above
+        // answers "am I on Pro", and a customer's next question is "and what
+        // does that give me" — which the screen never answered, so he had to
+        // ask. Same four either way; only the framing changes, because a key
+        // that stopped validating has not taken the free plugin away with it.
+        echo '<p class="description">' . esc_html($isPro
+            ? __('Alongside the free scan, detection and deletion, your license adds these four:', 'freshet-unused-media')
+            : __('Scanning, detection and deletion carry on as normal. These four are what a license adds:', 'freshet-unused-media')) . '</p>';
+
+        $this->renderTierList();
 
         $deactivateUrl = wp_nonce_url(
             add_query_arg(['action' => 'freshet_unusedmedia_deactivate_license'], admin_url('admin-post.php')),
@@ -137,6 +152,30 @@ final class LicenseSection
             esc_url($deactivateUrl),
             esc_html__('Deactivate license on this site', 'freshet-unused-media')
         );
+    }
+
+    /**
+     * What a license adds, in one place and in the reader's words rather than
+     * the code's. Four items because the tier has four components, and the
+     * same four whether or not there is a working key on the site: the free
+     * build is the whole plugin, so this list adds, it never unlocks.
+     */
+    private function renderTierList(): void
+    {
+        $adds = [
+            __('The Used view — open any file that is in use and see every place it is used, not just the first few.', 'freshet-unused-media'),
+            __('A WP-CLI command — run the same scan across many sites without a browser, and read the result as JSON.', 'freshet-unused-media'),
+            __('An evidence report — export the whole library as CSV or JSON, one row per file with its status, size and references, before anything is deleted.', 'freshet-unused-media'),
+            __('Space totals — how much disk the unused files are holding now, and how much deleting here has already freed.', 'freshet-unused-media'),
+        ];
+
+        echo '<ul class="freshet-unusedmedia-adds description">';
+
+        foreach ($adds as $add) {
+            echo '<li>' . esc_html($add) . '</li>';
+        }
+
+        echo '</ul>';
     }
 
     /**
@@ -161,7 +200,7 @@ final class LicenseSection
         }
 
         $text = match ($notice) {
-            'activated' => __('License activated. The Used view is now on every file that is in use.', 'freshet-unused-media'),
+            'activated' => __('License activated. This site is now on Pro.', 'freshet-unused-media'),
             'deactivated' => __('License removed from this site.', 'freshet-unused-media'),
             default => $message !== '' ? $message : __('Activation failed.', 'freshet-unused-media'),
         };

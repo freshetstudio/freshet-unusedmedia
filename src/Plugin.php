@@ -10,6 +10,7 @@ use FreshetUnusedMedia\Admin\DeleteController;
 use FreshetUnusedMedia\Admin\EvidenceReport;
 use FreshetUnusedMedia\Admin\LicenseSection;
 use FreshetUnusedMedia\Admin\MediaColumn;
+use FreshetUnusedMedia\Admin\PluginRow;
 use FreshetUnusedMedia\Admin\SpaceTotals;
 use FreshetUnusedMedia\Admin\ToolsPage;
 use FreshetUnusedMedia\Admin\UsedView;
@@ -71,6 +72,7 @@ final class Plugin
                 $licenseSection->hooks();
                 (new UsedView($store, $scanner, $metaBox, $license))->hooks();
                 $report?->hooks();
+                (new PluginRow())->hooks();
             }
         }
 

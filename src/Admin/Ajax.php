@@ -181,17 +181,45 @@ final class Ajax
         $batch = $this->store->unusedIds(5, $filters, $after);
 
         if ($batch['ids'] === []) {
-            wp_send_json_success(['finished' => true, 'deleted' => 0, 'skipped' => 0, 'failed' => 0, 'cursor' => 0]);
+            wp_send_json_success(array_merge(
+                ['finished' => true, 'deleted' => 0, 'skipped' => 0, 'failed' => 0, 'cursor' => 0],
+                $this->unusedFigure()
+            ));
         }
 
         $result = $this->deleter->deleteVerified($batch['ids']);
 
-        wp_send_json_success([
+        wp_send_json_success(array_merge([
             'finished' => false,
             'deleted' => $result['deleted'],
             'skipped' => $result['skipped'],
             'failed' => $result['failed'],
             'cursor' => $batch['cursor'],
-        ]);
+        ], $this->unusedFigure()));
+    }
+
+    /**
+     * How many files are unused *now*, on every delete reply.
+     *
+     * A batch loop never reloads the page, so a reply that says only what it
+     * removed leaves the figure on screen saying what it said before the first
+     * click — the screen has no other way to learn the number moved. Sending it
+     * back is what makes it move without a second round trip to fetch it.
+     *
+     * Nothing is remembered between requests, and nothing may be: counts() is a
+     * live aggregate over the grouped subquery, and the whole point is that this
+     * answer is different every time it is asked. It counts *files*, because
+     * counts() does — the same unit the listing and the delete loop work in.
+     *
+     * The formatted twin travels with the integer because the DOM needs the
+     * number in the site's locale and number_format_i18n() has no JS half.
+     *
+     * @return array{unused: int, unused_display: string}
+     */
+    private function unusedFigure(): array
+    {
+        $unused = $this->store->counts()['unused'];
+
+        return ['unused' => $unused, 'unused_display' => number_format_i18n($unused)];
     }
 }

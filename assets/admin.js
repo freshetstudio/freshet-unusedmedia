@@ -91,6 +91,21 @@
         text.textContent = label || (done + ' / ' + total);
     }
 
+    // A figure the server re-read for this reply, written straight into
+    // whichever elements were rendered with that status. Same idiom as the
+    // progress bar: it looks them up and does nothing when there are none, so a
+    // tab that does not show the number simply shows no change. Nothing is
+    // computed here — the string arrives formatted for the site's locale.
+    function updateCount(status, display) {
+        if (display === undefined || display === null) {
+            return;
+        }
+
+        document.querySelectorAll('[data-freshet-unusedmedia-count="' + status + '"]').forEach(function (element) {
+            element.textContent = display;
+        });
+    }
+
     function scanLoop() {
         if (stopped) {
             startButton.disabled = false;
@@ -163,6 +178,10 @@
             totals.deleted += data.deleted;
             totals.skipped += data.skipped;
             totals.failed += data.failed;
+
+            // Before the finished branch, so the last batch moves the number
+            // too — the loop is not the only thing on the screen that changed.
+            updateCount('unused', data.unused_display);
 
             if (data.finished) {
                 window.alert(

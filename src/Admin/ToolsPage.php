@@ -290,21 +290,43 @@ final class ToolsPage
     /**
      * The heading count. Filtered, it says both numbers — "37 of 400" is the
      * sentence that stops a subset being read as the whole library.
+     *
+     * Returns escaped markup rather than plain text, because the library-wide
+     * figure is the one a running delete loop moves in place: it is wrapped in
+     * countFigure() and the callers echo the result instead of escaping it.
+     * The filtered subset is left as text — no reply carries that number, so a
+     * filtered delete moves the "of 400" and leaves the "37" naming the set the
+     * button named and the loop is still walking.
      */
     private function listHeading(string $singular, int $shown, string $status): string
     {
         if (!$this->filters()->isActive()) {
-            return sprintf($singular, number_format_i18n($shown));
+            return sprintf(esc_html($singular), $this->countFigure($status, $shown));
         }
 
         return sprintf(
-            $singular,
+            esc_html($singular),
             sprintf(
                 /* translators: 1: number of matching files, 2: number of files in total */
-                __('%1$s of %2$s', 'freshet-unused-media'),
-                number_format_i18n($shown),
-                number_format_i18n($this->store->counts()[$status])
+                esc_html__('%1$s of %2$s', 'freshet-unused-media'),
+                esc_html(number_format_i18n($shown)),
+                $this->countFigure($status, $this->store->counts()[$status])
             )
+        );
+    }
+
+    /**
+     * A count the script can move without a page reload. Every delete batch
+     * replies with the unused figure as it stands after it (Ajax::deleteBatch),
+     * and admin.js writes it into whichever of these carry that status —
+     * nothing is stored on either side, the number is read fresh per reply.
+     */
+    private function countFigure(string $status, int $count): string
+    {
+        return sprintf(
+            '<span data-freshet-unusedmedia-count="%s">%s</span>',
+            esc_attr($status),
+            esc_html(number_format_i18n($count))
         );
     }
 
@@ -380,11 +402,14 @@ final class ToolsPage
                 __('Used: %s', 'freshet-unused-media'),
                 number_format_i18n($counts['used'])
             )),
-            esc_html(sprintf(
+            // The one figure a running loop rewrites, so the number is wrapped
+            // rather than escaped whole. The label is still escaped; only the
+            // span around the count is markup.
+            sprintf(
                 /* translators: %s: number of unused attachments */
-                __('Unused: %s', 'freshet-unused-media'),
-                number_format_i18n($counts['unused'])
-            )),
+                esc_html__('Unused: %s', 'freshet-unused-media'),
+                $this->countFigure(ResultStore::STATUS_UNUSED, $counts['unused']) // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in countFigure().
+            ),
             esc_html(sprintf(
                 /* translators: %s: number of unscanned attachments */
                 __('Not scanned: %s', 'freshet-unused-media'),
@@ -482,12 +507,12 @@ final class ToolsPage
         $list = $this->store->byStatus(ResultStore::STATUS_USED, $page, self::PER_PAGE, $filters);
 
         echo '<div class="freshet-unusedmedia-section">';
-        echo '<h2>' . esc_html($this->listHeading(
+        echo '<h2>' . $this->listHeading( // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in listHeading().
             /* translators: %s: number of used attachments */
             __('Used files (%s)', 'freshet-unused-media'),
             $list['total'],
             'used'
-        )) . '</h2>';
+        ) . '</h2>';
 
         $this->renderFilterBar(self::TAB_USED);
 
@@ -539,12 +564,12 @@ final class ToolsPage
         // selection form deliberately: it is a script-driven button, not a
         // submit, so the form it would otherwise post is irrelevant to it.
         echo '<div class="freshet-unusedmedia-section__heading">';
-        echo '<h2>' . esc_html($this->listHeading(
+        echo '<h2>' . $this->listHeading( // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in listHeading().
             /* translators: %s: number of unused attachments */
             __('Unused files (%s)', 'freshet-unused-media'),
             $list['total'],
             'unused'
-        )) . '</h2>';
+        ) . '</h2>';
 
         if ($list['total'] > 0) {
             $this->renderDeleteAllButton($filters, $list['total']);

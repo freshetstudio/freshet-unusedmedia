@@ -299,3 +299,20 @@
 .freshet-unusedmedia-wrap > .freshet-unusedmedia-section:first-child {
     margin-top: 0;
 }
+
+/* Running prose gets a reading measure; the tables do not (freshet-D82). The
+   unboxing left the descriptive paragraphs running the full width of the admin
+   content column alongside the list tables, and a 1238px line of text is not
+   readable. The cap therefore lands on the paragraphs themselves rather than on
+   .freshet-unusedmedia-wrap or .freshet-unusedmedia-section, either of which
+   would narrow the tables again and undo freshet-D81.
+
+   p.description, not .description: the file column renders the filename in a
+   <span class="description"> inside a <td>, and that is table content, not
+   prose. 70ch is a measure rather than a pixel width so it tracks the admin
+   font. Scoped under the wrap, so the attachment meta box - already a narrow
+   column - is untouched. */
+
+.freshet-unusedmedia-wrap p.description {
+    max-width: 70ch;
+}

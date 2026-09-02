@@ -122,11 +122,24 @@ final class ResultFilters
      */
     public function matchesSize(int $attachmentId): bool
     {
+        return $this->hasSizeFilter()
+            ? $this->matchesBytes(FileSize::bytes($attachmentId))
+            : true;
+    }
+
+    /**
+     * The same test against a size already measured.
+     *
+     * It exists because a caller that has to *order* by size has the bytes in
+     * its hand already — sorting and filtering on one walk rather than two is
+     * the difference between one stat per file and two. Null still means
+     * unknown and is still excluded while a bound is set, for the reason above.
+     */
+    public function matchesBytes(?int $bytes): bool
+    {
         if (!$this->hasSizeFilter()) {
             return true;
         }
-
-        $bytes = FileSize::bytes($attachmentId);
 
         if ($bytes === null) {
             return false;

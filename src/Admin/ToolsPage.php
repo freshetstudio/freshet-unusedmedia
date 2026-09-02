@@ -7,6 +7,7 @@ namespace FreshetUnusedMedia\Admin;
 use FreshetUnusedMedia\License\LicenseInterface;
 use FreshetUnusedMedia\Scan\FileSize;
 use FreshetUnusedMedia\Scan\ResultFilters;
+use FreshetUnusedMedia\Scan\ResultSort;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\ScanState;
 use FreshetUnusedMedia\Scan\UploadGrace;
@@ -32,6 +33,9 @@ final class ToolsPage
 
     /** Read once per request; both listings and every URL on the page share it. */
     private ?ResultFilters $filters = null;
+
+    /** The same, for the column the listings are ordered by. */
+    private ?ResultSort $sort = null;
 
     /**
      * $licenseSection, $report and $totals are null in the wordpress.org build,
@@ -212,6 +216,12 @@ final class ToolsPage
         return $this->filters ??= ResultFilters::fromRequest(wp_unslash($_GET));
     }
 
+    private function sort(): ResultSort
+    {
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only listing order; an unknown column is not a sort at all.
+        return $this->sort ??= ResultSort::fromRequest(wp_unslash($_GET));
+    }
+
     /**
      * The screen's own URL for one tab; the default tab carries no arg.
      *
@@ -219,6 +229,11 @@ final class ToolsPage
      * and then crossing to the used one to check the same window is one click
      * rather than a re-typed filter. Scan and License take no filter — there is
      * nothing there for it to narrow.
+     *
+     * The sort travels the same way and for the same reason, which is what makes
+     * it survive paging: every page link is built on this URL. It rides along
+     * even when the filter is being cleared — clearing a filter widens the set,
+     * it does not un-sort the column someone chose to read it by.
      */
     private function tabUrl(string $tab, bool $filtered = true): string
     {
@@ -227,8 +242,12 @@ final class ToolsPage
             'tab' => $tab !== self::TAB_SCAN ? $tab : null,
         ]);
 
-        if ($filtered && ($tab === self::TAB_USED || $tab === self::TAB_UNUSED)) {
-            $args += $this->filters()->queryArgs();
+        if ($tab === self::TAB_USED || $tab === self::TAB_UNUSED) {
+            if ($filtered) {
+                $args += $this->filters()->queryArgs();
+            }
+
+            $args += $this->sort()->queryArgs();
         }
 
         return add_query_arg($args, admin_url('upload.php'));
@@ -252,6 +271,10 @@ final class ToolsPage
         <form method="get" class="freshet-unusedmedia-filters">
             <input type="hidden" name="page" value="<?php echo esc_attr(self::SLUG); ?>">
             <input type="hidden" name="tab" value="<?php echo esc_attr($tab); ?>">
+            <?php // A GET form replaces the query string wholesale, so the sort has to be posted back with it or filtering would silently re-order the list under the person doing it. ?>
+            <?php foreach ($this->sort()->queryArgs() as $name => $value) : ?>
+                <input type="hidden" name="<?php echo esc_attr($name); ?>" value="<?php echo esc_attr($value); ?>">
+            <?php endforeach; ?>
 
             <label>
                 <span><?php esc_html_e('Uploaded from', 'freshet-unused-media'); ?></span>
@@ -541,7 +564,7 @@ final class ToolsPage
 
         $page = max(1, absint($_GET['used_page'] ?? 1)); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only pagination.
         $filters = $this->filters();
-        $list = $this->store->byStatus(ResultStore::STATUS_USED, $page, self::PER_PAGE, $filters);
+        $list = $this->store->byStatus(ResultStore::STATUS_USED, $page, self::PER_PAGE, $filters, $this->sort());
 
         echo '<div class="freshet-unusedmedia-section">';
         echo '<h2>' . $this->listHeading( // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in listHeading().
@@ -565,9 +588,14 @@ final class ToolsPage
 
         echo '<table class="widefat striped freshet-unusedmedia-table"><thead><tr>';
 
-        foreach ([__('File', 'freshet-unused-media'), __('Type', 'freshet-unused-media'), __('Uploaded', 'freshet-unused-media'), __('Size', 'freshet-unused-media'), __('References', 'freshet-unused-media'), __('Scanned', 'freshet-unused-media')] as $col) {
-            echo '<th>' . esc_html($col) . '</th>';
-        }
+        $this->renderColumnHeaders([
+            ResultSort::BY_FILE => __('File', 'freshet-unused-media'),
+            'type' => __('Type', 'freshet-unused-media'),
+            ResultSort::BY_DATE => __('Uploaded', 'freshet-unused-media'),
+            ResultSort::BY_SIZE => __('Size', 'freshet-unused-media'),
+            'references' => __('References', 'freshet-unused-media'),
+            'scanned' => __('Scanned', 'freshet-unused-media'),
+        ], self::TAB_USED);
 
         echo '</tr></thead><tbody>';
 
@@ -592,7 +620,7 @@ final class ToolsPage
     {
         $page = max(1, absint($_GET['unused_page'] ?? 1)); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only pagination.
         $filters = $this->filters();
-        $list = $this->store->unused($page, self::PER_PAGE, $filters);
+        $list = $this->store->unused($page, self::PER_PAGE, $filters, $this->sort());
 
         echo '<div class="freshet-unusedmedia-section">';
 
@@ -662,9 +690,13 @@ final class ToolsPage
         echo '<table class="widefat striped freshet-unusedmedia-table"><thead><tr>';
         echo '<td class="check-column"><input type="checkbox" id="freshet-unusedmedia-select-all"></td>';
 
-        foreach ([__('File', 'freshet-unused-media'), __('Type', 'freshet-unused-media'), __('Uploaded', 'freshet-unused-media'), __('Size', 'freshet-unused-media'), __('Scanned', 'freshet-unused-media')] as $col) {
-            echo '<th>' . esc_html($col) . '</th>';
-        }
+        $this->renderColumnHeaders([
+            ResultSort::BY_FILE => __('File', 'freshet-unused-media'),
+            'type' => __('Type', 'freshet-unused-media'),
+            ResultSort::BY_DATE => __('Uploaded', 'freshet-unused-media'),
+            ResultSort::BY_SIZE => __('Size', 'freshet-unused-media'),
+            'scanned' => __('Scanned', 'freshet-unused-media'),
+        ], self::TAB_UNUSED);
 
         echo '</tr></thead><tbody>';
 
@@ -788,6 +820,80 @@ final class ToolsPage
         $this->renderFileCells($id);
         $this->renderScannedCell($id);
         echo '</tr>';
+    }
+
+    // ---------------------------------------------------------- table headers
+
+    /**
+     * The header row of either listing, where the header *is* the sort control.
+     *
+     * WordPress's own convention, transcribed rather than reinvented: the same
+     * `sortable`/`sorted` classes, the same paired sorting indicators, the same
+     * `aria-sort` on the one column that carries the order, and the same
+     * screen-reader sentence on the ones that do not. It is copied from
+     * WP_List_Table::print_column_headers() because these tables are hand-rolled
+     * — the list-table CSS these classes hook into is not scoped to a list
+     * table, so `widefat` is enough and no stylesheet of ours is involved.
+     *
+     * One inversion in it looks like a mistake and is core's: an unsorted column
+     * is given the class *opposite* to the direction its link would apply. It is
+     * kept as core has it rather than corrected.
+     *
+     * Which columns are offered is not a display choice. A sort orders files,
+     * and the listings page one row per file, so only what survives the grouping
+     * can be ordered on — the path, the earliest upload date, and the size.
+     * Type, References and Scanned are properties of an attachment row rather
+     * than of the file behind it, so they are headers and nothing more.
+     *
+     * @param array<string, string> $columns Column key => label; a key that is
+     *                                       one of ResultSort's is sortable.
+     */
+    private function renderColumnHeaders(array $columns, string $tab): void
+    {
+        $sort = $this->sort();
+        $sortable = ResultSort::columns();
+
+        foreach ($columns as $key => $label) {
+            $classes = ['manage-column', 'column-' . $key];
+
+            if (!in_array($key, $sortable, true)) {
+                printf('<th scope="col" class="%s">%s</th>', esc_attr(implode(' ', $classes)), esc_html($label));
+
+                continue;
+            }
+
+            $args = $sort->linkArgs($key);
+            $order = $args[ResultSort::ARG_ORDER];
+            $ariaSort = '';
+            $hint = '';
+
+            if ($sort->isSortedBy($key)) {
+                $classes[] = 'sorted';
+                $classes[] = $sort->direction;
+                $ariaSort = $sort->isDescending() ? ' aria-sort="descending"' : ' aria-sort="ascending"';
+            } else {
+                $classes[] = 'sortable';
+                $classes[] = $order === ResultSort::DESC ? 'asc' : 'desc';
+                $hint = $order === ResultSort::ASC
+                    /* translators: Hidden accessibility text. */
+                    ? __('Sort ascending.', 'freshet-unused-media')
+                    /* translators: Hidden accessibility text. */
+                    : __('Sort descending.', 'freshet-unused-media');
+            }
+
+            printf(
+                '<th scope="col" class="%1$s"%2$s><a href="%3$s"><span>%4$s</span>'
+                    . '<span class="sorting-indicators">'
+                        . '<span class="sorting-indicator asc" aria-hidden="true"></span>'
+                        . '<span class="sorting-indicator desc" aria-hidden="true"></span>'
+                    . '</span>%5$s</a></th>',
+                esc_attr(implode(' ', $classes)),
+                $ariaSort, // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- one of two literals above.
+                esc_url(add_query_arg($args, $this->tabUrl($tab))),
+                esc_html($label),
+                $hint === '' ? '' : ' <span class="screen-reader-text">' . esc_html($hint) . '</span>'
+            );
+        }
     }
 
     // ------------------------------------------------------------ table cells

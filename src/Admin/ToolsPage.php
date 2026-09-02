@@ -13,8 +13,9 @@ use FreshetUnusedMedia\Scan\ScanState;
 defined('ABSPATH') || exit;
 
 /**
- * The Media → Usage screen, in four tabs: the scan and what it found, the used
- * files, the unused files with their delete actions, and the license.
+ * The Media → Usage screen: the scan and what it found, the unused files with
+ * their delete actions, the license, and — on a licensed site only — the used
+ * files.
  */
 final class ToolsPage
 {
@@ -38,8 +39,9 @@ final class ToolsPage
      *
      * $license is not one of them: LicenseInterface and NoLicense ship in every
      * build, and Plugin falls back to NoLicense when the paid files are absent.
-     * That is what the header pill reads, so the free build can say "Free"
-     * without a single paid class existing.
+     * That is what the header pill and the Used tab both read, so the free
+     * build can say "Free" and omit the paid listing without a single paid
+     * class existing.
      */
     public function __construct(
         private readonly ResultStore $store,
@@ -147,19 +149,31 @@ final class ToolsPage
     }
 
     /**
-     * The tabs, in order. License appears only where there is a license stack
-     * to show — the wordpress.org build has none, and an empty tab is worse
-     * than no tab. The other three are free surfaces and always present.
+     * The tabs, in order. Two are conditional, on two different questions, and
+     * keeping them apart is the point:
+     *
+     * - Used is the paid listing, so it appears where the site is *entitled* to
+     *   it: LicenseInterface::isPro(), the one read UsedView, SpaceTotals and
+     *   EvidenceReport already make. Remove the key and the tab is gone on the
+     *   next load, because nothing here asks a second question.
+     * - License appears where there is a license stack to show *at all* — the
+     *   wordpress.org build has none, and an empty tab is worse than no tab.
+     *
+     * Scan and Unused are free surfaces and always present. Nothing is ever
+     * rendered locked or as a teaser (directory guidelines 5 & 8): an
+     * unentitled site simply has one tab fewer.
      *
      * @return array<string, string>
      */
     private function tabs(): array
     {
-        $tabs = [
-            self::TAB_SCAN => __('Scan', 'freshet-unused-media'),
-            self::TAB_USED => __('Used', 'freshet-unused-media'),
-            self::TAB_UNUSED => __('Unused', 'freshet-unused-media'),
-        ];
+        $tabs = [self::TAB_SCAN => __('Scan', 'freshet-unused-media')];
+
+        if ($this->license->isPro()) {
+            $tabs[self::TAB_USED] = __('Used', 'freshet-unused-media');
+        }
+
+        $tabs[self::TAB_UNUSED] = __('Unused', 'freshet-unused-media');
 
         if ($this->licenseSection !== null) {
             $tabs[self::TAB_LICENSE] = __('License', 'freshet-unused-media');
@@ -438,6 +452,15 @@ final class ToolsPage
      */
     private function renderUsedTable(): void
     {
+        // The same read the tab strip makes, and deliberately not a different
+        // one: currentTab() already drops an unknown ?tab back to the default,
+        // so on an unentitled site this is unreachable through the URL. It is
+        // here so the listing cannot be rendered by any future caller that
+        // reaches it another way — the routing is not the entitlement.
+        if (!$this->license->isPro()) {
+            return;
+        }
+
         $page = max(1, absint($_GET['used_page'] ?? 1)); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only pagination.
         $filters = $this->filters();
         $list = $this->store->byStatus(ResultStore::STATUS_USED, $page, self::PER_PAGE, $filters);

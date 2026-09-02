@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace FreshetUnusedMedia\Admin;
 
+use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\ResultStore;
 
 defined('ABSPATH') || exit;
@@ -26,7 +27,7 @@ final class MediaColumn
         add_action('manage_media_custom_column', [$this, 'renderColumn'], 10, 2);
         add_filter('media_row_actions', [$this, 'rowActions'], 10, 2);
         add_action('restrict_manage_posts', [$this, 'filterDropdown'], 10, 2);
-        add_action('pre_get_posts', [$this, 'applyFilter']);
+        add_filter('posts_where', [$this, 'applyFilter'], 10, 2);
         add_action('admin_enqueue_scripts', [$this, 'enqueue']);
     }
 
@@ -56,13 +57,10 @@ final class MediaColumn
             return;
         }
 
-        $status = $this->store->status($attachmentId);
-        $count = $status === ResultStore::STATUS_USED ? $this->store->refs($attachmentId)['count'] : 0;
-
         printf(
             '<span class="freshet-unusedmedia-cell" data-id="%d">%s</span>',
             (int) $attachmentId,
-            StatusBadge::render($status, $count) // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- badge HTML escaped in StatusBadge::render().
+            StatusBadge::forRow($attachmentId, $this->store) // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- badge HTML escaped in StatusBadge.
         );
     }
 
@@ -99,7 +97,7 @@ final class MediaColumn
             '' => __('Any usage status', 'freshet-unused-media'),
             ResultStore::STATUS_USED => __('Used', 'freshet-unused-media'),
             ResultStore::STATUS_UNUSED => __('Unused', 'freshet-unused-media'),
-            'unscanned' => __('Not scanned', 'freshet-unused-media'),
+            FileGroups::STATUS_UNSCANNED => __('Not scanned', 'freshet-unused-media'),
         ];
 
         echo '<select name="freshet_unusedmedia_status">';
@@ -116,32 +114,36 @@ final class MediaColumn
         echo '</select>';
     }
 
-    public function applyFilter(\WP_Query $query): void
+    /**
+     * Narrow the library to the rows whose **file** carries the chosen verdict.
+     *
+     * A meta_query on the row's own scan status is the defect the badges above
+     * it just stopped having: it lists rows the Tools screen will never offer
+     * for deletion, and hides rows whose badge beside it reads used. The set
+     * comes from the same grouped subquery every count and every listing reads
+     * — see FileGroups::rowsWithStatusSql(), which is also why this is a WHERE
+     * fragment and not a meta_query.
+     *
+     * "Not scanned" changes meaning with it, and correctly: it now selects
+     * files nothing has decided about — some rows scanned and some not, or a
+     * copy in the trash — rather than rows missing a meta key. That is the set
+     * the Tools screen counts under the same word.
+     */
+    public function applyFilter(string $where, \WP_Query $query): string
     {
         if (!is_admin() || !$query->is_main_query() || $query->get('post_type') !== 'attachment') {
-            return;
+            return $where;
         }
 
         $status = sanitize_key(wp_unslash($_GET['freshet_unusedmedia_status'] ?? '')); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only list filter.
 
-        if ($status === '') {
-            return;
+        if (!in_array($status, [ResultStore::STATUS_USED, ResultStore::STATUS_UNUSED, FileGroups::STATUS_UNSCANNED], true)) {
+            return $where;
         }
 
-        if ($status === 'unscanned') {
-            $query->set('meta_query', [[
-                'key' => ResultStore::META_STATUS,
-                'compare' => 'NOT EXISTS',
-            ]]);
+        global $wpdb;
 
-            return;
-        }
-
-        if (in_array($status, [ResultStore::STATUS_USED, ResultStore::STATUS_UNUSED], true)) {
-            $query->set('meta_query', [[
-                'key' => ResultStore::META_STATUS,
-                'value' => $status,
-            ]]);
-        }
+        // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- literal SQL built from this plugin's own constants; $status is one of the three checked above.
+        return $where . ' AND ' . $wpdb->posts . '.ID IN (' . FileGroups::rowsWithStatusSql($status) . ')';
     }
 }

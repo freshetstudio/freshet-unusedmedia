@@ -51,11 +51,13 @@ final class Ajax
         }
 
         $result = $this->scanner->scan($id);
-        $count = $this->store->refs($id)['count'];
 
+        // The scan decides this row; the badge reports its file. Rendering what
+        // the scan just returned would put "Unused" back on a row whose file a
+        // sibling keeps, one click after the column stopped saying it.
         wp_send_json_success([
             'status' => $result['status'],
-            'badge' => StatusBadge::render($result['status'], $result['status'] === ResultStore::STATUS_USED ? $count : 0),
+            'badge' => StatusBadge::forRow($id, $this->store),
             'evidence' => $this->metaBox->renderEvidence($id),
         ]);
     }

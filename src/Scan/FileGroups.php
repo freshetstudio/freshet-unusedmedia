@@ -44,6 +44,15 @@ final class FileGroups
     /** A file nothing has decided about yet — some rows scanned, some not. */
     public const STATUS_UNSCANNED = 'unscanned';
 
+    /** A row reaching its group's verdict on its own terms. */
+    public const HELD_NONE = '';
+
+    /** A row kept because another entry on the same path is in use. */
+    public const HELD_SIBLING = 'sibling';
+
+    /** A row kept because a copy of its file is in the trash. */
+    public const HELD_TRASH = 'trash';
+
     /**
      * Rows with no `_wp_attached_file` at all have no file to share, so each is
      * its own group. A stored path can never start with this, so the two key
@@ -146,6 +155,102 @@ final class FileGroups
             . ' END';
     }
 
+    /**
+     * One row's file, judged as a file — the verdict a per-row screen has to
+     * show, and the rows that decided it.
+     *
+     * The Media Library lists rows; everything else in this plugin lists files.
+     * This is the bridge: it tallies the group the way statusSql() tallies it in
+     * SQL and hands the numbers to verdict(), which stays the only place the
+     * rule lives. A screen reading the row's own `_freshet_unusedmedia_status`
+     * instead draws **Unused** against a file this plugin is deliberately
+     * keeping, and offers a deletion the delete loop would refuse.
+     *
+     * `held` names why a row is not the verdict it would have reached alone, for
+     * the surface that has to say so in words: HELD_SIBLING when another entry
+     * on the same path is in use, HELD_TRASH when a copy of the file is in the
+     * trash and every live row has been scanned. Both are the group's doing
+     * rather than the row's, which is exactly what a user cannot see from the
+     * row.
+     *
+     * One query per row, and it is the sibling lookup — the postmeta cache for
+     * the siblings is primed here so the status reads that follow cost nothing.
+     *
+     * @return array{status: string, siblings: int[], used: int[], trashed: int[], unscanned: int, held: string}
+     */
+    public static function fileStatus(int $attachmentId): array
+    {
+        $siblings = self::siblings($attachmentId);
+
+        if (count($siblings) > 1) {
+            update_postmeta_cache($siblings);
+        }
+
+        $live = 0;
+        $unused = 0;
+        $unscanned = 0;
+        $used = [];
+        $trashed = [];
+
+        foreach ($siblings as $rowId) {
+            if (get_post_status($rowId) === 'trash') {
+                $trashed[] = $rowId;
+
+                continue;
+            }
+
+            ++$live;
+            $status = (string) get_post_meta($rowId, ResultStore::META_STATUS, true);
+
+            if ($status === ResultStore::STATUS_USED) {
+                $used[] = $rowId;
+            } elseif ($status === ResultStore::STATUS_UNUSED) {
+                ++$unused;
+            } else {
+                ++$unscanned;
+            }
+        }
+
+        $status = self::verdict($live, count($trashed), count($used), $unused);
+        $held = self::HELD_NONE;
+
+        if ($status === ResultStore::STATUS_USED && !in_array($attachmentId, $used, true)) {
+            $held = self::HELD_SIBLING;
+        } elseif ($status === self::STATUS_UNSCANNED && $trashed !== [] && $live > 0 && $unscanned === 0) {
+            // Every live row has a verdict and none of them is used, so the only
+            // thing standing between this file and the unused list is the trash.
+            $held = self::HELD_TRASH;
+        }
+
+        return [
+            'status' => $status,
+            'siblings' => $siblings,
+            'used' => $used,
+            'trashed' => $trashed,
+            'unscanned' => $unscanned,
+            'held' => $held,
+        ];
+    }
+
+    /**
+     * Why a row on a shared file is not the verdict it would have reached
+     * alone, in the one sentence pattern this plugin uses wherever it is
+     * protecting a file rather than offering it (freshet-D95):
+     * "Held back — <why>", em dash, lower case, no alarm.
+     *
+     * UploadGrace::heldBack() is the same shape for the upload grace. These are
+     * its siblings rather than a second idea, which is the whole point of the
+     * ruling: a user meets one pattern instead of three inventions.
+     */
+    public static function heldBackReason(string $held): string
+    {
+        return match ($held) {
+            self::HELD_SIBLING => __('Held back — another library entry uses this file', 'freshet-unused-media'),
+            self::HELD_TRASH => __('Held back — a copy of this file is in the trash', 'freshet-unused-media'),
+            default => '',
+        };
+    }
+
     // ------------------------------------------------------- the subquery
 
     /**
@@ -215,6 +320,35 @@ final class FileGroups
             . ' HAVING ' . implode(' AND ', $having);
 
         return ['sql' => $sql, 'params' => $params];
+    }
+
+    /**
+     * Every attachment **row** whose file carries a given verdict, as a SELECT
+     * for an `IN (…)` in someone else's WHERE clause.
+     *
+     * The Media Library is the one screen that lists rows rather than files, so
+     * a file-level filter has to come back down: the grouped subquery decides
+     * which *files* match, and this maps those back to every row standing on
+     * them. Both halves of that sentence are the same builder the counts and
+     * the listings read, so a filtered library cannot select a set the badges
+     * beside it disagree with.
+     *
+     * It is a WHERE fragment rather than a meta_query because no meta_query can
+     * express it: "every row on this path agrees" is a property of the group,
+     * and a meta_query only ever sees one row's meta.
+     *
+     * `$status` is one of this plugin's own constants and `subquery()` takes no
+     * placeholders without filters, so there is nothing here to prepare.
+     */
+    public static function rowsWithStatusSql(string $status): string
+    {
+        global $wpdb;
+
+        return 'SELECT p.ID'
+            . " FROM {$wpdb->posts} p"
+            . " LEFT JOIN {$wpdb->postmeta} fgf ON fgf.post_id = p.ID AND fgf.meta_key = " . self::quote(self::META_FILE)
+            . " WHERE p.post_type = 'attachment'"
+            . ' AND ' . self::keySql() . ' IN (SELECT fg.fg_key FROM (' . self::subquery($status)['sql'] . ') fg)';
     }
 
     // ------------------------------------------------------------ fragments

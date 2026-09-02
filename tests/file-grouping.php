@@ -18,6 +18,11 @@ declare(strict_types=1);
  * are counted once. And the mirror of it: grouping is on the whole path, never
  * on a basename, or two unrelated files merge and a live one goes.
  *
+ * The last section reads the same invariant from the render side, because the
+ * Media Library is the one screen that lists rows rather than files: whatever a
+ * held-back row says, it must never be a word that invites a deletion the
+ * delete loop would refuse.
+ *
  * What it cannot do is run the grouped SQL — that needs a database. The SQL
  * half is asserted structurally here (it is built from one builder, it groups
  * on the whole meta value, both the count and the listing wrap it) and read
@@ -179,6 +184,21 @@ function __(string $text, string $domain = ''): string
     return $text;
 }
 
+function _n(string $single, string $plural, int $number, string $domain = ''): string
+{
+    return $number === 1 ? $single : $plural;
+}
+
+function esc_html(string $text): string
+{
+    return htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
+}
+
+function esc_html__(string $text, string $domain = ''): string
+{
+    return esc_html($text);
+}
+
 /**
  * Two hooks matter here. The detector list is emptied, so Scanner runs no SQL
  * and the verdict for one row comes from the fixture instead — the point of
@@ -302,11 +322,13 @@ foreach ([
     'src/Detector/TermMetaDetector.php',
     'src/Detector/UserMetaDetector.php',
     'src/Admin/DeleteController.php',
+    'src/Admin/StatusBadge.php',
 ] as $file) {
     require_once ABSPATH . $file;
 }
 
 use FreshetUnusedMedia\Admin\DeleteController;
+use FreshetUnusedMedia\Admin\StatusBadge;
 use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\ReclaimedLedger;
 use FreshetUnusedMedia\Scan\ResultFilters;
@@ -589,6 +611,96 @@ $result = $deleter()->deleteVerified([600]);
 
 check('a trashed sibling holds the file', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0]);
 check('the trashed row can still be restored to its file', onDisk('2026/02/poster.jpg'), true);
+
+// ------------------------------------------- the badge a library row shows
+//
+// The Media Library is the one screen that lists rows rather than files, so it
+// is the one that can draw "Unused" against a file the delete loop refuses to
+// touch. Same contradiction as above, read from the render side: whatever a
+// held-back row says, it must not be a word that invites a deletion.
+
+$scan = static fn(int $id): array => (new Scanner(new ResultStore()))->scan($id);
+
+library([
+    100 => ['file' => '2024/01/logo.png', 'used' => true],
+    200 => ['file' => '2024/01/logo.png', 'used' => false],
+]);
+
+$scan(100);
+$scan(200);
+
+$store = new ResultStore();
+$badge100 = StatusBadge::forRow(100, $store);
+$badge200 = StatusBadge::forRow(200, $store);
+
+check('the used row of a contradictory pair reads used', str_contains($badge100, 'Used'), true);
+check('neither row of a contradictory pair reads Unused', str_contains($badge100, 'Unused') || str_contains($badge200, 'Unused'), false);
+check('the unused row says why it is held', str_contains($badge200, 'Held back — another library entry uses this file'), true);
+check('a held row is not offered as used either', str_contains($badge200, 'Used ('), false);
+
+// The sibling case is a property of the group, not of the row: the same row
+// with no sibling is unused, and must still say so.
+library([
+    200 => ['file' => '2024/01/logo.png', 'used' => false],
+]);
+
+$scan(200);
+
+check('a lone unused row still reads unused', str_contains(StatusBadge::forRow(200, new ResultStore()), 'Unused'), true);
+
+// Every row unused: the file is unused and both rows say so, or the Tools
+// screen offers a file the library calls something else.
+library([
+    100 => ['file' => '2024/01/logo.png', 'used' => false],
+    200 => ['file' => '2024/01/logo.png', 'used' => false],
+]);
+
+$scan(100);
+$scan(200);
+
+$store = new ResultStore();
+
+check('an agreed-unused file reads unused on every row', [
+    str_contains(StatusBadge::forRow(100, $store), 'Unused'),
+    str_contains(StatusBadge::forRow(200, $store), 'Unused'),
+], [true, true]);
+
+// A trashed copy holds the file back, and the row it holds back was scanned —
+// so "Not scanned" would be a lie and "Unused" a dangerous one.
+library([
+    600 => ['file' => '2026/02/poster.jpg', 'used' => false],
+    601 => ['file' => '2026/02/poster.jpg', 'status' => 'trash', 'used' => false],
+]);
+
+$scan(600);
+
+$badge600 = StatusBadge::forRow(600, new ResultStore());
+
+check('a trashed copy holds the row back', str_contains($badge600, 'Held back — a copy of this file is in the trash'), true);
+check('and the held row does not read unused', str_contains($badge600, 'Unused'), false);
+
+// One row scanned, one not: the file has no verdict yet, and the honest badge
+// is the one the Tools screen counts it under.
+library([
+    100 => ['file' => '2024/01/logo.png', 'used' => false],
+    200 => ['file' => '2024/01/logo.png', 'used' => false],
+]);
+
+$scan(100);
+
+$badge100 = StatusBadge::forRow(100, new ResultStore());
+
+check('an unscanned sibling leaves the file undecided', str_contains($badge100, 'Not scanned'), true);
+check('an undecided file is never offered as unused', str_contains($badge100, 'Unused'), false);
+
+// The filter above the badges reads the same grouped set they do. A meta_query
+// on the row's own status is the disagreement, not the plumbing.
+$rowsSql = FileGroups::rowsWithStatusSql(ResultStore::STATUS_UNUSED);
+
+check('the library filter wraps the grouped subquery', str_contains($rowsSql, FileGroups::subquery(ResultStore::STATUS_UNUSED)['sql']), true);
+check('the library filter comes back down to rows', str_contains($rowsSql, 'SELECT p.ID'), true);
+check('the library filter matches rows on the whole path', str_contains($rowsSql, FileGroups::keySql() . ' IN ('), true);
+check('the group is the only thing narrowing it', substr_count($rowsSql, 'IN (SELECT fg.fg_key FROM ('), 1);
 
 // ------------------------------------------------------------------ tidy
 

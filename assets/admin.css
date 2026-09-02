@@ -108,6 +108,15 @@
     color: #50575e;
 }
 
+/* A file being protected rather than offered. It carries a sentence rather
+   than a word, so it is the one badge that may wrap — nowrap here would push
+   the Usage column wide enough to squeeze the rest of the media list. */
+.freshet-unusedmedia-badge--held {
+    background: #fcf9e8;
+    color: #7d5b02;
+    white-space: normal;
+}
+
 /* Content sections, and they are sections rather than surfaces: Feeds and the
    WordPress admin both put a list table straight onto the page background at the
    full width of the content column, so there is nothing here to draw

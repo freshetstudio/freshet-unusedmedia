@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace FreshetUnusedMedia\Admin;
 
+use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\Reference;
 use FreshetUnusedMedia\Scan\ResultStore;
 
@@ -100,13 +101,17 @@ final class AttachmentMetaBox
     /** Full evidence fragment (status + list) for an attachment. Escaped HTML. */
     public function renderEvidence(int $attachmentId): string
     {
+        $file = FileGroups::fileStatus($attachmentId);
         $status = $this->store->status($attachmentId);
         $scannedAt = $this->store->scannedAt($attachmentId);
         $data = $this->store->refs($attachmentId);
 
-        $html = '<p>' . StatusBadge::render($status, $data['count']) . '</p>';
+        $html = '<p>' . StatusBadge::forRow($attachmentId, $this->store) . '</p>';
 
-        if ($status === null) {
+        // A row held back by a sibling may never have been scanned itself, and
+        // "not scanned yet" under a badge saying the file is in use is the
+        // blank this whole panel exists to stop showing.
+        if ($status === null && $file['held'] === FileGroups::HELD_NONE) {
             return $html . '<p class="description">' . esc_html__('Not scanned yet.', 'freshet-unused-media') . '</p>';
         }
 
@@ -124,6 +129,13 @@ final class AttachmentMetaBox
             }
 
             $html .= '<p class="description">' . esc_html($note) . '</p>';
+        }
+
+        // The reason lives on another row, so this one's own evidence list is
+        // empty and would read as "nothing refers to it" directly under a badge
+        // saying the file is in use.
+        if ($file['held'] === FileGroups::HELD_SIBLING) {
+            return $html . $this->siblingEvidence($file['used'][0]);
         }
 
         if ($data['refs'] === []) {
@@ -147,6 +159,47 @@ final class AttachmentMetaBox
         }
 
         return $html;
+    }
+
+    /**
+     * The evidence for a row whose file is kept by another library entry.
+     *
+     * The choice this makes, and it is the point of the method: it names the
+     * entry that holds the file and shows *that* entry's references, through
+     * the same renderer this row's own would use. The alternatives were a bare
+     * "the file is shared", which leaves the user to go looking, and the row's
+     * own empty list, which says the opposite of the truth. The reason is one
+     * click away instead of on another screen.
+     *
+     * Escaped HTML.
+     */
+    private function siblingEvidence(int $otherId): string
+    {
+        $title = get_the_title($otherId);
+        $title = $title !== '' ? $title : sprintf('#%d', $otherId);
+        $link = get_edit_post_link($otherId);
+
+        $html = '<p class="description">' . sprintf(
+            /* translators: %s: link to the other library entry that holds the file */
+            esc_html__('The reference is on another library entry pointing at the same file: %s', 'freshet-unused-media'),
+            $link !== null
+                ? '<a href="' . esc_url($link) . '">' . esc_html($title) . '</a>'
+                : '<strong>' . esc_html($title) . '</strong>'
+        ) . '</p>';
+
+        $data = $this->store->refs($otherId);
+
+        if ($data['refs'] === []) {
+            return $html;
+        }
+
+        $html .= '<ul class="freshet-unusedmedia-refs">';
+
+        foreach ($data['refs'] as $ref) {
+            $html .= '<li>' . $this->renderReference($ref) . '</li>';
+        }
+
+        return $html . '</ul>';
     }
 
     /** One reference, as a line of escaped HTML. Shared with the Used view. */

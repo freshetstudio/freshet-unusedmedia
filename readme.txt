@@ -12,7 +12,7 @@ Determines whether media is still in use — ACF, page builders, options and raw
 
 == Description ==
 
-WordPress' own "Uploaded to" column only tracks where a file was first attached — it says nothing about where a file is actually *used*. Images referenced from ACF fields, featured images, galleries, widgets, the customizer logo, WooCommerce product galleries or plain URLs in content all look "unattached", and genuinely unused files look no different from files your site depends on.
+WordPress' own "Uploaded to" column only tracks where a file was first attached — it says nothing about where a file is actually *used*. Files referenced from ACF fields, featured images, galleries, widgets, the customizer logo, WooCommerce product galleries or plain URLs in content all look "unattached", and genuinely unused files look no different from files your site depends on.
 
 Freshet Unused Media scans everywhere a reference can hide and tells you, per attachment, exactly where it is used — or that it provably isn't.
 

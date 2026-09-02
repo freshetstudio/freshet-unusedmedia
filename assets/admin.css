@@ -176,6 +176,21 @@
     width: 130px;
 }
 
+/* Usage panel in the media modal. Core renders the compat fields as a
+   two-column table with a narrow label column; the reference list needs the
+   whole width, so this one row stacks instead. */
+
+.compat-field-freshet-unusedmedia-usage th.label,
+.compat-field-freshet-unusedmedia-usage td.field {
+    display: block;
+    width: auto;
+    padding-left: 0;
+}
+
+.compat-field-freshet-unusedmedia-usage .freshet-unusedmedia-refs {
+    margin-bottom: 0;
+}
+
 /* Used view (licensed) — the complete reference list on an attachment */
 
 .freshet-unusedmedia-used {

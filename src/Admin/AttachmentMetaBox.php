@@ -10,9 +10,10 @@ use FreshetUnusedMedia\Scan\ResultStore;
 defined('ABSPATH') || exit;
 
 /**
- * "Usage" meta box on the attachment edit screen: status, scan time and the
- * evidence list. Also the single shared renderer for evidence fragments
- * (reused by the AJAX single-check response).
+ * "Usage" on the attachment edit screen (a meta box) and in the media modal (a
+ * compat field): status, scan time and the evidence list. Also the single
+ * shared renderer for evidence fragments (reused by the AJAX single-check
+ * response).
  */
 final class AttachmentMetaBox
 {
@@ -25,6 +26,7 @@ final class AttachmentMetaBox
     public function hooks(): void
     {
         add_action('add_meta_boxes_attachment', [$this, 'register']);
+        add_filter('attachment_fields_to_edit', [$this, 'modalField'], 10, 2);
     }
 
     public function register(): void
@@ -45,18 +47,54 @@ final class AttachmentMetaBox
 
     public function render(\WP_Post $post): void
     {
-        echo '<div class="freshet-unusedmedia-box" data-attachment="' . esc_attr((string) $post->ID) . '">';
-        echo wp_kses_post($this->renderEvidence($post->ID));
+        echo $this->panelHtml($post->ID); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in panelHtml().
+    }
 
-        printf(
-            '<p><button type="button" class="button freshet-unusedmedia-check" data-id="%s">%s</button></p>',
-            esc_attr((string) $post->ID),
-            esc_html($this->store->status($post->ID) === null
-                ? __('Check usage', 'freshet-unused-media')
-                : __('Rescan', 'freshet-unused-media'))
-        );
+    /**
+     * Adds the same panel to the media modal.
+     *
+     * The modal has no meta boxes at all: 'add_meta_boxes_attachment' fires
+     * only from register_and_do_post_meta_boxes(), whose only callers are the
+     * two post.php edit forms. The one place core lets a plugin put its own
+     * markup on the modal's details panel is this field list — built by
+     * get_compat_media_markup() with 'in_modal' => true and handed to the
+     * modal inside wp_prepare_attachment_for_js()'s 'compat' key.
+     *
+     * 'show_in_edit' => false keeps it out of the same field list on the
+     * attachment edit screen, where the meta box above already renders it.
+     *
+     * @param array<string, mixed> $fields
+     * @return array<string, mixed>
+     */
+    public function modalField(array $fields, \WP_Post $post): array
+    {
+        if ($post->post_type !== 'attachment' || !current_user_can(self::CAP)) {
+            return $fields;
+        }
 
-        echo '</div>';
+        $fields['freshet-unusedmedia-usage'] = [
+            'label' => __('Usage', 'freshet-unused-media'),
+            'input' => 'html',
+            'html' => $this->panelHtml($post->ID),
+            'show_in_edit' => false,
+        ];
+
+        return $fields;
+    }
+
+    /** The whole panel — evidence plus the check button. Escaped HTML. */
+    public function panelHtml(int $attachmentId): string
+    {
+        return '<div class="freshet-unusedmedia-box" data-attachment="' . esc_attr((string) $attachmentId) . '">'
+            . wp_kses_post($this->renderEvidence($attachmentId))
+            . sprintf(
+                '<p><button type="button" class="button freshet-unusedmedia-check" data-id="%s">%s</button></p>',
+                esc_attr((string) $attachmentId),
+                esc_html($this->store->status($attachmentId) === null
+                    ? __('Check usage', 'freshet-unused-media')
+                    : __('Rescan', 'freshet-unused-media'))
+            )
+            . '</div>';
     }
 
     /** Full evidence fragment (status + list) for an attachment. Escaped HTML. */

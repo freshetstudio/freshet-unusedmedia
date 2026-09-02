@@ -6,6 +6,7 @@ namespace FreshetUnusedMedia\Admin;
 
 use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\ResultStore;
+use FreshetUnusedMedia\Scan\UploadGrace;
 
 defined('ABSPATH') || exit;
 
@@ -28,6 +29,12 @@ final class StatusBadge
      * A held-back row says why instead of naming a verdict it did not reach on
      * its own, in the settled sentence pattern (freshet-D95).
      *
+     * Three things can hold one row, and it says **one** sentence. The order is
+     * the group's reasons first, the upload grace last, because the group's
+     * reasons are the durable ones: a sibling that uses the file, or a copy in
+     * the trash, still holds it tomorrow, while the grace expires by the clock.
+     * Naming the reason that outlives the other is the one a person can act on.
+     *
      * Escaped HTML.
      */
     public static function forRow(int $attachmentId, ResultStore $store): string
@@ -38,12 +45,23 @@ final class StatusBadge
             return self::heldBack(FileGroups::heldBackReason($file['held']));
         }
 
+        if ($file['status'] !== ResultStore::STATUS_USED) {
+            return self::render($file['status'] === FileGroups::STATUS_UNSCANNED ? null : $file['status']);
+        }
+
+        $refs = $store->refs($attachmentId);
+
+        // "Used (1 reference)" for a file the plugin is holding back for a day
+        // is the number someone goes hunting behind (freshet-D92 (4)): the row
+        // is used by nothing, it is being protected. Same answer as the
+        // References column on Tools, from the same method.
+        if (UploadGrace::holdsAlone($attachmentId, $refs)) {
+            return self::heldBack(UploadGrace::heldBack());
+        }
+
         // The reference count belongs to this row, and on this branch the row
         // is one of the reasons the file is used — so the number is its own.
-        return self::render(
-            $file['status'] === FileGroups::STATUS_UNSCANNED ? null : $file['status'],
-            $file['status'] === ResultStore::STATUS_USED ? $store->refs($attachmentId)['count'] : 0
-        );
+        return self::render(ResultStore::STATUS_USED, $refs['count']);
     }
 
     /** A file the plugin is protecting rather than offering. Escaped HTML. */

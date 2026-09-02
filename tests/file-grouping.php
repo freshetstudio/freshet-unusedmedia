@@ -42,6 +42,11 @@ define('UPLOADS', sys_get_temp_dir() . '/freshet-unusedmedia-tests');
 /** wpdb's row shape, the one ResultStore::counts() asks for. */
 const ARRAY_A = 'ARRAY_A';
 
+/** Core's time constants, for the upload grace. */
+const MINUTE_IN_SECONDS = 60;
+const HOUR_IN_SECONDS = 3600;
+const DAY_IN_SECONDS = 86400;
+
 // --------------------------------------------------------------- WP stubs
 
 /**
@@ -119,6 +124,16 @@ function get_post_status(int $id): string|false
     return $GLOBALS['rows'][$id]['status'] ?? false;
 }
 
+/**
+ * When the row was uploaded. The upload grace is a clock, so the fixture owns
+ * one: a row scanned inside the window and read again after it has passed is
+ * the state the stored refs cannot tell apart on their own.
+ */
+function get_post_timestamp(int $id, string $field = 'date'): int|false
+{
+    return $GLOBALS['rows'][$id]['uploaded'] ?? false;
+}
+
 function current_user_can(string $cap, mixed ...$args): bool
 {
     return true;
@@ -189,6 +204,11 @@ function _n(string $single, string $plural, int $number, string $domain = ''): s
     return $number === 1 ? $single : $plural;
 }
 
+function number_format_i18n(int|float $number, int $decimals = 0): string
+{
+    return (string) $number;
+}
+
 function esc_html(string $text): string
 {
     return htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
@@ -203,11 +223,15 @@ function esc_html__(string $text, string $domain = ''): string
  * Two hooks matter here. The detector list is emptied, so Scanner runs no SQL
  * and the verdict for one row comes from the fixture instead — the point of
  * these cases is what happens *between* rows, not what a detector finds.
+ *
+ * `$GLOBALS['detectors']` puts one back where a case needs a real reference in
+ * the stored meta rather than a bare verdict — the upload grace, whose whole
+ * behaviour is what the badge does with the reference the detector wrote.
  */
 function apply_filters(string $hook, mixed $value, mixed ...$rest): mixed
 {
     if ($hook === 'freshet_unusedmedia_detectors') {
-        return [];
+        return $GLOBALS['detectors'] ?? [];
     }
 
     if ($hook === 'freshet_unusedmedia_is_used') {
@@ -329,11 +353,14 @@ foreach ([
 
 use FreshetUnusedMedia\Admin\DeleteController;
 use FreshetUnusedMedia\Admin\StatusBadge;
+use FreshetUnusedMedia\Detector\RecentUploadDetector;
 use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\ReclaimedLedger;
+use FreshetUnusedMedia\Scan\Reference;
 use FreshetUnusedMedia\Scan\ResultFilters;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\Scanner;
+use FreshetUnusedMedia\Scan\UploadGrace;
 
 // ------------------------------------------------------------- assertions
 
@@ -359,7 +386,7 @@ function check(string $label, mixed $actual, mixed $expected): void
  * Rebuild the fixture library and write its files to disk. Every row names the
  * path it points at, so two rows on one path really do share one file.
  *
- * @param array<int, array{file: string, status?: string, used?: bool, bytes?: int}> $rows
+ * @param array<int, array{file: string, status?: string, used?: bool, bytes?: int, uploaded?: int}> $rows
  */
 function library(array $rows): void
 {
@@ -376,6 +403,7 @@ function library(array $rows): void
             'file' => $row['file'],
             'status' => $row['status'] ?? 'inherit',
             'used' => $row['used'] ?? false,
+            'uploaded' => $row['uploaded'] ?? time(),
         ];
 
         if ($row['file'] === '') {
@@ -692,6 +720,96 @@ $badge100 = StatusBadge::forRow(100, new ResultStore());
 
 check('an unscanned sibling leaves the file undecided', str_contains($badge100, 'Not scanned'), true);
 check('an undecided file is never offered as unused', str_contains($badge100, 'Unused'), false);
+
+// ------------------------------------------ the file the grace is holding
+//
+// A fresh upload is *used* — the grace is a reference, so the delete loop
+// refuses it — and the badge that reports that verdict as "Used (1 reference)"
+// is the number someone then goes hunting behind, for a file the plugin is
+// deliberately protecting (freshet-D92 (4), freshet-D95 (4)). The Tools
+// References column has said so since 112; this is the same question asked one
+// click away, and it must reach the same answer from the same method.
+//
+// The real detector runs for these cases: the point is what the badge does with
+// the reference it wrote, so a hand-written meta payload would test the badge
+// against a fixture rather than against the plugin.
+
+$GLOBALS['detectors'] = [new RecentUploadDetector()];
+
+library([
+    700 => ['file' => '2026/03/fresh.jpg', 'used' => true],
+]);
+
+$scan(700);
+
+$store = new ResultStore();
+
+check('the fresh upload is held by exactly one reference', $store->refs(700)['count'], 1);
+
+$badge700 = StatusBadge::forRow(700, $store);
+
+check('a file held only by the grace says so', str_contains($badge700, 'Held back — uploaded in the last 24 hours'), true);
+check('and it is not reported as a reference count', str_contains($badge700, 'Used ('), false);
+
+// The grace is a clock, and the stored refs cannot hear it. The same meta read
+// after the window has passed must go back to the number: a row uploaded last
+// week saying "uploaded in the last 24 hours" is the screen lying about the one
+// thing it is there to explain.
+$GLOBALS['rows'][700]['uploaded'] = time() - 3 * DAY_IN_SECONDS;
+
+$badge700 = StatusBadge::forRow(700, new ResultStore());
+
+check('an expired grace stops claiming the file was just uploaded', str_contains($badge700, 'Held back'), false);
+check('and the row reads as the reference it holds', str_contains($badge700, 'Used (1 reference)'), true);
+
+// Stored refs are capped. A file with more references than were kept cannot be
+// grace-only however the kept ones read — calling it held on the strength of a
+// truncated list is how a used file gets marked as protected.
+$grace = new Reference(
+    detector: 'recent-upload',
+    objectType: 'post',
+    objectId: 700,
+    detail: 'recent-upload',
+    match: 'recent-upload',
+    confidence: Reference::POSSIBLE,
+);
+
+$GLOBALS['rows'][700]['uploaded'] = time();
+$store->save(700, ResultStore::STATUS_USED, [$grace]);
+
+check('one grace reference and nothing else is grace-only', UploadGrace::holdsAlone(700, $store->refs(700)), true);
+
+$store->save(700, ResultStore::STATUS_USED, array_merge(array_fill(0, 20, $grace), [new Reference(
+    detector: 'postmeta',
+    objectType: 'post',
+    objectId: 42,
+    detail: '_thumbnail_id',
+    match: 'thumbnail',
+    confidence: Reference::CONFIRMED,
+)]));
+
+check('a truncated list is never read as grace-only', UploadGrace::holdsAlone(700, $store->refs(700)), false);
+
+// Two reasons to hold one row, and the row says one of them. The group's reason
+// wins: a sibling that uses the file still holds it tomorrow, while the grace
+// expires by the clock — so the sentence that survives is the one named.
+library([
+    100 => ['file' => '2024/01/logo.png', 'used' => true],
+    200 => ['file' => '2024/01/logo.png', 'used' => false],
+]);
+
+$scan(100);
+$scan(200);
+
+$store = new ResultStore();
+$badge200 = StatusBadge::forRow(200, $store);
+
+check('a row is grace-only and sibling-held at once', UploadGrace::holdsAlone(200, $store->refs(200)), true);
+check('and it says the reason that outlives the other', str_contains($badge200, 'Held back — another library entry uses this file'), true);
+check('one held row, one sentence', substr_count($badge200, 'Held back'), 1);
+check('the row the grace holds still says the grace', str_contains(StatusBadge::forRow(100, $store), 'Held back — uploaded in the last 24 hours'), true);
+
+unset($GLOBALS['detectors']);
 
 // The filter above the badges reads the same grouped set they do. A meta_query
 // on the row's own status is the disagreement, not the plumbing.

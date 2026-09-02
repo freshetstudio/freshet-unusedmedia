@@ -89,9 +89,55 @@ final class UploadGrace
     }
 
     /**
+     * Is the grace the only thing keeping this file out of the unused pool?
+     *
+     * The one place this is decided. It used to be a local variable inside
+     * ToolsPage::renderReferencesCell(), which is why the Media Library badge
+     * went on printing "Used (1 reference)" for a file the plugin was holding
+     * for 24 hours — the number a person then goes hunting behind
+     * (freshet-D92 (4), freshet-D95 (4)). A rule discovered in one screen's
+     * private method belongs to the class that owns the concept, so both
+     * screens ask rather than the second one re-deriving it (freshet-D97 (3)).
+     *
+     * Three things have to hold, and dropping any one of them makes the
+     * sentence a lie:
+     *
+     * - the grace is on, and this file is *still* inside it. Stored refs are a
+     *   record of what a scan found when it ran; a day later the same meta
+     *   would have the screen claim a file was "uploaded in the last 24 hours"
+     *   when it was uploaded last week. The window is read now, not then.
+     * - every reference kept is the grace's own.
+     * - nothing was truncated. Refs are capped at storage, so a file with more
+     *   references than were kept cannot be grace-only however the kept ones
+     *   read — believing a truncated list is how a used file gets called held.
+     *
+     * @param array{count: int, refs: Reference[]} $data exactly what ResultStore::refs() returns
+     */
+    public static function holdsAlone(int $attachmentId, array $data): bool
+    {
+        if ($data['refs'] === [] || $data['count'] !== count($data['refs'])) {
+            return false;
+        }
+
+        foreach ($data['refs'] as $ref) {
+            if ($ref->match !== 'recent-upload') {
+                return false;
+            }
+        }
+
+        $grace = self::seconds();
+        $uploaded = get_post_timestamp($attachmentId);
+
+        // The same three-part test RecentUploadDetector makes, read from the
+        // other end: it decides whether the reference is created, this decides
+        // whether the reference still means what it says.
+        return $grace > 0 && $uploaded !== false && time() - $uploaded < $grace;
+    }
+
+    /**
      * How a held-back fresh upload reads wherever one file is named — the
-     * listing cell, and any later surface that has to say why a file it is
-     * showing is not on offer.
+     * listing cell, the Media Library badge, and any later surface that has to
+     * say why a file it is showing is not on offer.
      */
     public static function heldBack(): string
     {

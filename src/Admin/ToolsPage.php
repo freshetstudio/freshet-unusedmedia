@@ -906,24 +906,16 @@ final class ToolsPage
      * anything — it is held back, and reporting "1" here is precisely how
      * someone goes hunting for a file the plugin is deliberately protecting
      * (freshet-D92 (4)). It says so instead.
+     *
+     * Whether that holds is UploadGrace's to answer, not this method's: the
+     * Media Library badge asks the same question one click away and the two
+     * screens must not each have their own opinion (freshet-D97 (3)).
      */
     private function renderReferencesCell(int $id): void
     {
         $data = $this->store->refs($id);
 
-        // Stored refs are capped, so a file with more references than were kept
-        // cannot be grace-only however the kept ones read.
-        $graceOnly = $data['refs'] !== [] && $data['count'] === count($data['refs']);
-
-        foreach ($data['refs'] as $ref) {
-            if ($ref->match !== 'recent-upload') {
-                $graceOnly = false;
-
-                break;
-            }
-        }
-
-        echo '<td>' . esc_html($graceOnly
+        echo '<td>' . esc_html(UploadGrace::holdsAlone($id, $data)
             ? UploadGrace::heldBack()
             : number_format_i18n($data['count'])) . '</td>';
     }

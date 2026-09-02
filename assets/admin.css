@@ -1,5 +1,18 @@
 /* Freshet Unused Media — admin styles */
 
+/* The `hidden` attribute has to be restored on our own screens. The UA sheet's
+   `[hidden] { display: none }` is beaten by core's author rule
+   `.wp-core-ui .button { display: inline-block }` (wp-includes/css/buttons.css),
+   so a control carrying the attribute still renders at full size — the Scan tab
+   offered a Stop button with nothing to stop. Scoped to the plugin's own
+   containers rather than to one id, so every control hidden this way is covered. */
+
+.freshet-unusedmedia-wrap [hidden],
+.freshet-unusedmedia-box [hidden],
+.frst-header [hidden] {
+    display: none !important;
+}
+
 /* Brand strip (matches the Freshet Feeds header) */
 
 .frst-header {

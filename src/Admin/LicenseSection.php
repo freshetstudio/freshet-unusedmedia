@@ -34,13 +34,14 @@ final class LicenseSection
     {
         add_action('admin_post_freshet_unusedmedia_activate_license', [$this, 'activate']);
         add_action('admin_post_freshet_unusedmedia_deactivate_license', [$this, 'deactivate']);
+        add_action('admin_notices', [$this, 'renderNotice']);
     }
 
     public function activate(): void
     {
         $this->authorize('freshet_unusedmedia_activate_license');
 
-        $key = sanitize_text_field(wp_unslash($_POST['license_key'] ?? ''));
+        $key = $this->normalizeKey(sanitize_text_field(wp_unslash($_POST['license_key'] ?? '')));
 
         if ($key === '') {
             $this->back('error', __('Enter a license key.', 'freshet-unused-media'));
@@ -48,8 +49,24 @@ final class LicenseSection
 
         $response = $this->client->activate($key, home_url());
 
+        // A transport failure is not an answer: the request may well have
+        // reached the server and been recorded before the connection died, in
+        // which case reporting failure is a lie about state that already
+        // changed. Activation is idempotent per site, so asking a second time
+        // is free — and whatever comes back is the server's word, not a guess.
+        if (($response['error_code'] ?? '') === 'http_error') {
+            $retry = $this->client->activate($key, home_url());
+
+            if (($retry['error_code'] ?? '') !== 'http_error') {
+                $response = $retry;
+            }
+        }
+
+        // The key is stored only on an explicit success from the server. No
+        // other branch reaches it, so an unanswered activation can never leave
+        // this site claiming a license the server never confirmed.
         if (!($response['success'] ?? false)) {
-            $this->back('error', (string) ($response['error'] ?? __('Activation failed.', 'freshet-unused-media')));
+            $this->back('error', $this->failureMessage($response));
         }
 
         update_option(RemoteLicense::OPTION_KEY, $key, false);
@@ -80,8 +97,8 @@ final class LicenseSection
     {
         echo '<h2>' . esc_html__('License', 'freshet-unused-media') . '</h2>';
 
-        $this->renderNotice();
-
+        // The activation outcome is announced on admin_notices at the top of
+        // the screen; the card shows the standing state, not the last event.
         $key = RemoteLicense::storedKey();
 
         if ($key === '') {
@@ -122,9 +139,19 @@ final class LicenseSection
         );
     }
 
-    private function renderNotice(): void
+    /**
+     * Activating is the first thing a paying customer does, so its outcome is
+     * announced where WordPress puts outcomes — the top of the screen, on
+     * `admin_notices` — and not inline in a card that sits below the scan
+     * panel and the whole unused-files table. Runs on our screen only.
+     */
+    public function renderNotice(): void
     {
         // phpcs:disable WordPress.Security.NonceVerification.Recommended -- display-only notice from our own redirect.
+        if (!current_user_can('manage_options') || sanitize_key(wp_unslash($_GET['page'] ?? '')) !== ToolsPage::SLUG) {
+            return;
+        }
+
         $notice = sanitize_key(wp_unslash($_GET[self::NOTICE_ARG] ?? ''));
         $message = sanitize_text_field(wp_unslash($_GET[self::MESSAGE_ARG] ?? ''));
         // phpcs:enable WordPress.Security.NonceVerification.Recommended
@@ -134,16 +161,59 @@ final class LicenseSection
         }
 
         $text = match ($notice) {
-            'activated' => __('License activated.', 'freshet-unused-media'),
+            'activated' => __('License activated. The Used view is now on every file that is in use.', 'freshet-unused-media'),
             'deactivated' => __('License removed from this site.', 'freshet-unused-media'),
             default => $message !== '' ? $message : __('Activation failed.', 'freshet-unused-media'),
         };
 
         printf(
-            '<div class="notice inline %s"><p>%s</p></div>',
+            '<div class="notice %s is-dismissible"><p>%s</p></div>',
             $notice === 'error' ? 'notice-error' : 'notice-success',
             esc_html($text)
         );
+    }
+
+    /**
+     * What to tell the customer when the key was not stored. Only the license
+     * server may call a key wrong: a connection that failed and a body that
+     * could not be parsed say nothing whatsoever about the key, and reporting
+     * either as a rejection sends someone hunting a fault that is ours.
+     *
+     * @param array{success?: bool, error?: string, error_code?: string} $response
+     */
+    private function failureMessage(array $response): string
+    {
+        $detail = trim((string) ($response['error'] ?? ''));
+
+        return match ((string) ($response['error_code'] ?? '')) {
+            'http_error' => sprintf(
+                /* translators: %s: the connection error reported by WordPress */
+                __('Could not reach the license server, so nothing on this site changed. This is not a verdict on your key — try again in a minute. (%s)', 'freshet-unused-media'),
+                $detail !== '' ? $detail : __('no response', 'freshet-unused-media')
+            ),
+            'invalid_response' => sprintf(
+                /* translators: %s: description of the unreadable response, including the HTTP status */
+                __('%s The key was not activated and this is not a verdict on your key — try again, and contact support if it keeps happening.', 'freshet-unused-media'),
+                $detail !== '' ? $detail : __('The license server sent a response this plugin could not read.', 'freshet-unused-media')
+            ),
+            // Anything else is the server's own answer about the key; it says
+            // it better than we can, so it is passed through as written.
+            default => $detail !== '' ? $detail : __('Activation failed.', 'freshet-unused-media'),
+        };
+    }
+
+    /**
+     * A key pasted out of an email routinely arrives wrapped in a non-breaking
+     * space or a zero-width character, neither of which sanitize_text_field()
+     * removes — and the server then correctly answers "unknown key" about a
+     * key that was copied correctly. Drop what is invisible and change nothing
+     * else: which characters a key may contain is the server's business.
+     */
+    private function normalizeKey(string $key): string
+    {
+        $stripped = preg_replace('/[\s\x{00A0}\x{00AD}\x{180E}\x{200B}-\x{200F}\x{2060}\x{FEFF}]/u', '', $key);
+
+        return is_string($stripped) ? $stripped : trim($key);
     }
 
     private function authorize(string $nonceAction): void

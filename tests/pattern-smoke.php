@@ -203,6 +203,7 @@ function wp_remote_retrieve_response_code(mixed $response): int
  */
 $GLOBALS['wpdb'] = new class {
     public string $posts = 'wp_posts';
+    public string $term_taxonomy = 'wp_term_taxonomy';
     public string $lastSql = '';
     public array $lastParams = [];
 
@@ -219,9 +220,12 @@ $GLOBALS['wpdb'] = new class {
         return $sql;
     }
 
+    /** Canned rows for the next get_results(); a detector's find() reads these. */
+    public array $rows = [];
+
     public function get_results(string $sql): array
     {
-        return [];
+        return $this->rows;
     }
 };
 
@@ -230,6 +234,7 @@ require_once ABSPATH . 'src/Scan/Reference.php';
 require_once ABSPATH . 'src/Detector/DetectorInterface.php';
 require_once ABSPATH . 'src/Detector/LikePatterns.php';
 require_once ABSPATH . 'src/Detector/PostContentDetector.php';
+require_once ABSPATH . 'src/Detector/TermDescriptionDetector.php';
 require_once ABSPATH . 'src/License/LicenseInterface.php';
 require_once ABSPATH . 'src/License/LicenseClient.php';
 require_once ABSPATH . 'src/License/RemoteLicense.php';
@@ -238,10 +243,12 @@ require_once ABSPATH . 'src/Scan/UploadGrace.php';
 
 use FreshetUnusedMedia\Detector\LikePatterns;
 use FreshetUnusedMedia\Detector\PostContentDetector;
+use FreshetUnusedMedia\Detector\TermDescriptionDetector;
 use FreshetUnusedMedia\License\LicenseClient;
 use FreshetUnusedMedia\License\NoLicense;
 use FreshetUnusedMedia\License\RemoteLicense;
 use FreshetUnusedMedia\Scan\AttachmentContext;
+use FreshetUnusedMedia\Scan\Reference;
 use FreshetUnusedMedia\Scan\UploadGrace;
 
 // ------------------------------------------------------------- assertions
@@ -336,6 +343,16 @@ check('json longer id', LikePatterns::hasJsonId('{"id":1234}', $id), false);
 check('json longer id as string', LikePatterns::hasJsonId('{"id":"1234"}', $id), false);
 check('json suffixed key is not id', LikePatterns::hasJsonId('{"media_id":123}', $id), false);
 check('json ids array is not a bare id', LikePatterns::hasJsonId('{"ids":[123]}', $id), false);
+
+// -------------------------------------------------- hasQuotedId
+
+check('quoted id in a shortcode attribute', LikePatterns::hasQuotedId('[gallery ids="123"]', $id), true);
+check('quoted id as a json string leaf', LikePatterns::hasQuotedId('{"image":"123"}', $id), true);
+check('quoted longer id', LikePatterns::hasQuotedId('[gallery ids="1234"]', $id), false);
+check('quoted prefixed id', LikePatterns::hasQuotedId('[gallery ids="9123"]', $id), false);
+check('quoted id inside a list is not a whole value', LikePatterns::hasQuotedId('[gallery ids="4,123,9"]', $id), false);
+check('unquoted id', LikePatterns::hasQuotedId('[gallery ids=123]', $id), false);
+check('single-quoted id is not reached by the broad pass', LikePatterns::hasQuotedId("[gallery ids='123']", $id), false);
 
 // -------------------------------------------------- structureContains
 
@@ -571,6 +588,100 @@ $admits = static function (string $content) use ($bound): bool {
 
 check('query admits a block attribute outside data', $admits('<!-- wp:acme/hero {"imageId":123} /-->'), true);
 check('query admits a block id nested under a non-data key', $admits('<!-- wp:acme/slider {"settings":{"slides":[{"image":123}]},"loop":true} /-->'), true);
+
+// -------------------------------------------------- term descriptions
+//
+// A category, tag or product-category description is free content and carries
+// images like any other: an <img> pasted into one is the routine case, and it
+// used to scan unused because nothing read that column at all.
+
+$termVerify = new ReflectionMethod(TermDescriptionDetector::class, 'verify');
+$termVerify->setAccessible(true);
+$termDetector = new TermDescriptionDetector();
+$termMatch = static fn(string $description): ?string => $termVerify->invoke($termDetector, $description, $ctx);
+
+check('image in a term description', $termMatch('<p>Our range</p><img src="/wp-content/uploads/2026/07/hero.jpg" alt="">'), 'url');
+check('resized image in a term description', $termMatch('<img src="https://example.test/wp-content/uploads/2026/07/hero-300x200.jpg">'), 'url');
+check('unrelated image in a term description', $termMatch('<img src="/wp-content/uploads/2026/07/other.jpg">'), null);
+check('bare id as the whole description', $termMatch('123'), 'exact');
+check('id in a quoted attribute', $termMatch('[gallery ids="123"]'), 'id-attribute');
+check('id in a comma list', $termMatch('[gallery ids="4,123,9"]'), 'comma-list');
+check('id in a json description', $termMatch('{"id":123}'), 'block-id');
+check('id under an arbitrary json key', $termMatch('{"hero":{"image":123}}'), 'serialized');
+check('id in a serialized description', $termMatch('a:1:{s:5:"image";i:123;}'), 'serialized');
+check('id as a substring of a longer number', $termMatch('[gallery ids="1234"]'), null);
+check('id as a prefixed number', $termMatch('[gallery ids="9123"]'), null);
+check('id inside a longer list member', $termMatch('[gallery ids="4,91230,9"]'), null);
+check('longer id in a json description', $termMatch('{"hero":{"image":1234}}'), null);
+check('empty description', $termMatch(''), null);
+check('description with no reference', $termMatch('<p>Everything for the workshop.</p>'), null);
+
+// The reference a hit emits: the Evidence report and the attachment meta box
+// both resolve a term link from objectType + objectId, so those two fields are
+// the whole of what makes a finding traceable back to a screen.
+$GLOBALS['wpdb']->rows = [
+    (object) ['term_id' => '42', 'description' => '<img src="/wp-content/uploads/2026/07/hero.jpg">'],
+    (object) ['term_id' => '43', 'description' => '[gallery ids="123"]'],
+    (object) ['term_id' => '44', 'description' => '<p>Nothing here — 1234.</p>'],
+];
+
+$termRefs = $termDetector->find($ctx);
+$GLOBALS['wpdb']->rows = [];
+
+check('one reference per matching term', count($termRefs), 2);
+check('reference points at a term', $termRefs[0]->objectType, 'term');
+check('reference carries the term id as an int', $termRefs[0]->objectId, 42);
+check('reference names the description', $termRefs[0]->detail, 'description');
+check('a file URL in a description is confirmed', $termRefs[0]->confidence, Reference::CONFIRMED);
+check('a URL match is labelled as one', $termRefs[0]->match, 'url');
+check('an id in a description is possible, not confirmed', $termRefs[1]->confidence, Reference::POSSIBLE);
+check('a possible reference still counts as used', $termRefs[1]->countsAsUsed(), true);
+check('the detector names itself', $termRefs[0]->detector, 'term-description');
+
+$termSql = $GLOBALS['wpdb']->lastSql;
+$termBound = $GLOBALS['wpdb']->lastParams;
+
+check('term description query placeholders match params', substr_count($termSql, '%s') + substr_count($termSql, '%d'), count($termBound));
+check('term description query reads the description column', str_contains($termSql, 'tt.description'), true);
+check('term description query skips empty descriptions', str_contains($termSql, "tt.description <> ''"), true);
+check('term description query binds ids and basenames', count($termBound), count($conditions) + count($names));
+
+// Same discipline as the post_content block above: a verifier the broad pass
+// never reaches does nothing, so every shape verified above is matched against
+// the conditions this query actually binds — the bare-id case exactly, the
+// rest as unwrapped LIKE needles.
+$termAdmits = static function (string $description) use ($termBound): bool {
+    foreach ($termBound as $param) {
+        if (!is_string($param)) {
+            continue;
+        }
+
+        if ($param === $description) {
+            return true; // the bare '= %s' condition
+        }
+
+        if (!str_starts_with($param, '%') || !str_ends_with($param, '%')) {
+            continue;
+        }
+
+        $needle = stripslashes(substr($param, 1, -1));
+
+        if ($needle !== '' && str_contains($description, $needle)) {
+            return true;
+        }
+    }
+
+    return false;
+};
+
+check('query admits an image in a description', $termAdmits('<img src="/wp-content/uploads/2026/07/hero.jpg">'), true);
+check('query admits a bare id', $termAdmits('123'), true);
+check('query admits a quoted id', $termAdmits('[gallery ids="123"]'), true);
+check('query admits an id in a comma list', $termAdmits('[gallery ids="4,123,9"]'), true);
+check('query admits a json id', $termAdmits('{"id":123}'), true);
+check('query admits an id under an arbitrary json key', $termAdmits('{"hero":{"image":123}}'), true);
+check('query admits a serialized id', $termAdmits('a:1:{s:5:"image";i:123;}'), true);
+check('query does not fetch an unrelated description', $termAdmits('<p>Everything for the workshop.</p>'), false);
 
 // --------------------------------------------------------- license states
 //

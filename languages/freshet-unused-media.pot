@@ -171,6 +171,10 @@ msgstr ""
 msgid "Shortcode attribute"
 msgstr ""
 
+#: src/Admin/AttachmentMetaBox.php:298
+msgid "ID in markup"
+msgstr ""
+
 #: src/Admin/AttachmentMetaBox.php:245
 msgid "Unsaved edit"
 msgstr ""

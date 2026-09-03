@@ -376,6 +376,7 @@ foreach ([
     'src/Detector/PostContentDetector.php',
     'src/Detector/PostmetaDetector.php',
     'src/Detector/RecentUploadDetector.php',
+    'src/Detector/TermDescriptionDetector.php',
     'src/Detector/TermMetaDetector.php',
     'src/Detector/UserMetaDetector.php',
     'src/Admin/DeleteController.php',

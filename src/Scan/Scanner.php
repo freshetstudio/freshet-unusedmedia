@@ -11,6 +11,7 @@ use FreshetUnusedMedia\Detector\OptionsDetector;
 use FreshetUnusedMedia\Detector\PostContentDetector;
 use FreshetUnusedMedia\Detector\PostmetaDetector;
 use FreshetUnusedMedia\Detector\RecentUploadDetector;
+use FreshetUnusedMedia\Detector\TermDescriptionDetector;
 use FreshetUnusedMedia\Detector\TermMetaDetector;
 use FreshetUnusedMedia\Detector\UserMetaDetector;
 
@@ -38,6 +39,7 @@ final class Scanner
             new PostContentDetector(),
             new OptionsDetector(),
             new TermMetaDetector(),
+            new TermDescriptionDetector(),
             new UserMetaDetector(),
             new CommentDetector(),
             new RecentUploadDetector(),

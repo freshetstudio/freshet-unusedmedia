@@ -135,6 +135,19 @@ final class LikePatterns
     }
 
     /**
+     * The ID as a whole double-quoted value — "123" — anywhere in a string:
+     * a shortcode attribute, a data- attribute, a JSON string leaf in markup
+     * that is not itself decodable. The quotes are the boundary, so "1234"
+     * cannot satisfy 123. This is the verifier for the '%"123"%' condition
+     * idConditions() binds; single quotes are deliberately not matched here,
+     * because no condition there admits them.
+     */
+    public static function hasQuotedId(string $text, int $id): bool
+    {
+        return str_contains($text, '"' . $id . '"');
+    }
+
+    /**
      * Recursively search an unserialized/decoded structure for the ID or a
      * basename. A string leaf that is itself a JSON object/array is decoded and
      * searched too — settings blobs keep IDs under arbitrary keys, and

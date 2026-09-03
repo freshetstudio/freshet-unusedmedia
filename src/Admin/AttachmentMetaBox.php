@@ -295,6 +295,7 @@ final class AttachmentMetaBox
             'acf' => __('ACF field', 'freshet-unused-media'),
             'acf-block' => __('Block field', 'freshet-unused-media'),
             'shortcode' => __('Shortcode attribute', 'freshet-unused-media'),
+            'id-attribute' => __('ID in markup', 'freshet-unused-media'),
             'autosave' => __('Unsaved edit', 'freshet-unused-media'),
             'recent-upload' => __('Uploaded recently', 'freshet-unused-media'),
             'thumbnail' => __('Featured image', 'freshet-unused-media'),

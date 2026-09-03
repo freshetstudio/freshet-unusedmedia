@@ -26,6 +26,7 @@ Freshet Unused Media scans everywhere a reference can hide and tells you, per at
 * Elementor page data
 * Options and theme mods: site icon, custom logo, widgets, customizer settings — serialized or JSON
 * Term meta and user meta (ACF fields on categories and profiles)
+* Term descriptions — an image or an ID in a category, tag or product-category description
 * Comments and comment meta (a file linked in a reply, review photos)
 * Excerpts, and unsaved edits held in autosaves
 
@@ -77,7 +78,7 @@ Tip: add `define( 'MEDIA_TRASH', true );` to `wp-config.php` so deletions go to 
 
 Detection is deliberately conservative: filename and structural matches are boundary-checked (attachment 123 never matches `wp-image-1234`), ambiguous ID matches count as used, and every file is re-verified right before deletion.
 
-What it cannot see is anything outside the tables it reads — posts, postmeta, options, term meta, user meta, comments and comment meta. The blind spot most worth knowing about is inside your database, not outside it: **references stored in a plugin's own custom database tables** — form entries, slider or page-builder records, any plugin that keeps attachment IDs or file URLs in a table of its own. No query-based scanner can find a reference in a table whose shape it has never seen. The same applies to references hard-coded in theme or plugin files, references held by an external service, references on other sites of a multisite network (network-wide options included), and the legacy Links manager.
+What it cannot see is anything outside the tables it reads — posts, postmeta, options, term descriptions, term meta, user meta, comments and comment meta. The blind spot most worth knowing about is inside your database, not outside it: **references stored in a plugin's own custom database tables** — form entries, slider or page-builder records, any plugin that keeps attachment IDs or file URLs in a table of its own. No query-based scanner can find a reference in a table whose shape it has never seen. The same applies to references hard-coded in theme or plugin files, references held by an external service, references on other sites of a multisite network (network-wide options included), and the legacy Links manager.
 
 Two deliberate choices are worth knowing too. Old post revisions are not counted as usage — a file removed from a post is meant to be found — but autosaves are, because they hold edits nobody has saved yet. And the re-check before deletion is not atomic: a reference written in the instant between the re-check and the deletion is not seen. That window is a fraction of a second; the recent-upload grace period covers the realistic case (a file placed in the editor before its post is saved), and `MEDIA_TRASH` covers the rest.
 
@@ -106,6 +107,7 @@ Never. Scanning only reads and caches results. Deletion happens exclusively when
 * Detects IDs in shortcode attributes beyond `[gallery]` — `[playlist]` and page-builder shortcodes included.
 * Detects IDs inside JSON stored in meta and options under any key, including JSON nested in serialized settings.
 * Scans comments and comment meta, and post excerpts.
+* Scans term descriptions — an image pasted into a category, tag or product-category description used to read as unused.
 * Counts autosaves (unsaved edits) as usage; old revisions still do not count.
 * Matches percent-encoded and JSON-escaped spellings of non-ASCII filenames, and alternate-format (WebP/AVIF) sources recorded in attachment metadata.
 * Files uploaded in the last 24 hours count as in use (`freshet_unusedmedia_upload_grace` to tune).

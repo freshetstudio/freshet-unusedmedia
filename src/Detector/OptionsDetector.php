@@ -97,6 +97,14 @@ final class OptionsDetector implements DetectorInterface
                 return $make('theme_mod', 'theme-mod', Reference::CONFIRMED);
             }
 
+            // A mod holding markup rather than an ID — a footer blob, a custom
+            // HTML mod — carries the attachment as a quoted attribute the walk
+            // above cannot see. Possible, not confirmed: the structure did not
+            // resolve it, only the raw value did.
+            if (LikePatterns::hasQuotedId($value, $ctx->id)) {
+                return $make('theme_mod', 'id-attribute', Reference::POSSIBLE);
+            }
+
             return null;
         }
 
@@ -112,6 +120,13 @@ final class OptionsDetector implements DetectorInterface
                 return $make('option', 'widget', Reference::POSSIBLE);
             }
 
+            // A text or custom-HTML widget stores markup, so the shortcode or
+            // data- attribute naming the attachment survives unserialization as
+            // an opaque string leaf. The raw value is where it is still legible.
+            if (LikePatterns::hasQuotedId($value, $ctx->id)) {
+                return $make('option', 'id-attribute', Reference::POSSIBLE);
+            }
+
             return null;
         }
 
@@ -125,13 +140,19 @@ final class OptionsDetector implements DetectorInterface
         $decoded = LikePatterns::decodeStored($value);
 
         if (is_array($decoded) || is_object($decoded)) {
-            return LikePatterns::structureContains($decoded, $ctx->id, $ctx->basenames)
-                ? $make('option', 'serialized', Reference::POSSIBLE)
-                : null;
+            if (LikePatterns::structureContains($decoded, $ctx->id, $ctx->basenames)) {
+                return $make('option', 'serialized', Reference::POSSIBLE);
+            }
+        } elseif (LikePatterns::isExactId($value, $ctx->id) || LikePatterns::hasJsonId($value, $ctx->id)) {
+            return $make('option', 'exact', Reference::POSSIBLE);
         }
 
-        if (LikePatterns::isExactId($value, $ctx->id) || LikePatterns::hasJsonId($value, $ctx->id)) {
-            return $make('option', 'exact', Reference::POSSIBLE);
+        // Last, after every decode-based branch above: the ID as a quoted
+        // attribute the structure walk cannot see — markup stored whole, or a
+        // string leaf inside a blob that unserializes but does not resolve. It
+        // is the '%"123"%' condition the query binds and nothing answered.
+        if (LikePatterns::hasQuotedId($value, $ctx->id)) {
+            return $make('option', 'id-attribute', Reference::POSSIBLE);
         }
 
         return null;

@@ -122,6 +122,15 @@ final class PostmetaDetector implements DetectorInterface
             $idMatch = 'serialized';
         }
 
+        // Last, so a value that decodes keeps its more specific verdict: the ID
+        // as a quoted attribute in a value that is neither serialized nor JSON
+        // — a text field holding [gallery ids="123"] or data-id="123" — which
+        // the broad pass fetches on its '%"123"%' condition and nothing here
+        // answered.
+        if ($idMatch === null && LikePatterns::hasQuotedId($value, $ctx->id)) {
+            $idMatch = 'id-attribute';
+        }
+
         if ($idMatch === null) {
             return null; // LIKE candidate failed precise verification (e.g. id 1234 vs 123).
         }

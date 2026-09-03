@@ -69,6 +69,14 @@ final class TermMetaDetector implements DetectorInterface
                 $idMatch = 'serialized'; // JSON blob or nested JSON in serialized data.
             }
 
+            // Last, so a value that decodes keeps its more specific verdict: the
+            // ID as a quoted attribute in a value that is neither serialized nor
+            // JSON — [gallery ids="123"], data-id="123" — which the broad pass
+            // fetches on its '%"123"%' condition and nothing here answered.
+            if ($idMatch === null && LikePatterns::hasQuotedId($value, $ctx->id)) {
+                $idMatch = 'id-attribute';
+            }
+
             if ($idMatch === null) {
                 continue;
             }

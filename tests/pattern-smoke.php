@@ -55,6 +55,38 @@ function get_post_meta(int $id, string $key, bool $single = false): string
     };
 }
 
+/**
+ * The ACF sibling lookup every meta detector makes ('_<key>' = field_…). No
+ * fixture carries one, so a match here is the detector's own verdict rather
+ * than an ACF upgrade of it.
+ */
+function get_term_meta(int $id, string $key, bool $single = false): string
+{
+    return '';
+}
+
+function get_user_meta(int $id, string $key, bool $single = false): string
+{
+    return '';
+}
+
+function get_comment_meta(int $id, string $key, bool $single = false): string
+{
+    return '';
+}
+
+/** Enough of core's maybe_unserialize() for the theme-mod and widget branches. */
+function maybe_unserialize(string $value): mixed
+{
+    if (!is_serialized($value)) {
+        return $value;
+    }
+
+    $data = @unserialize(trim($value), ['allowed_classes' => false]);
+
+    return $data === false ? $value : $data;
+}
+
 function wp_get_attachment_metadata(int $id): array|false
 {
     return $id === FIXTURE_ID
@@ -203,7 +235,13 @@ function wp_remote_retrieve_response_code(mixed $response): int
  */
 $GLOBALS['wpdb'] = new class {
     public string $posts = 'wp_posts';
+    public string $postmeta = 'wp_postmeta';
     public string $term_taxonomy = 'wp_term_taxonomy';
+    public string $termmeta = 'wp_termmeta';
+    public string $usermeta = 'wp_usermeta';
+    public string $options = 'wp_options';
+    public string $comments = 'wp_comments';
+    public string $commentmeta = 'wp_commentmeta';
     public string $lastSql = '';
     public array $lastParams = [];
 
@@ -235,6 +273,11 @@ require_once ABSPATH . 'src/Detector/DetectorInterface.php';
 require_once ABSPATH . 'src/Detector/LikePatterns.php';
 require_once ABSPATH . 'src/Detector/PostContentDetector.php';
 require_once ABSPATH . 'src/Detector/TermDescriptionDetector.php';
+require_once ABSPATH . 'src/Detector/TermMetaDetector.php';
+require_once ABSPATH . 'src/Detector/UserMetaDetector.php';
+require_once ABSPATH . 'src/Detector/CommentDetector.php';
+require_once ABSPATH . 'src/Detector/PostmetaDetector.php';
+require_once ABSPATH . 'src/Detector/OptionsDetector.php';
 require_once ABSPATH . 'src/License/LicenseInterface.php';
 require_once ABSPATH . 'src/License/LicenseClient.php';
 require_once ABSPATH . 'src/License/RemoteLicense.php';
@@ -243,7 +286,12 @@ require_once ABSPATH . 'src/Scan/UploadGrace.php';
 
 use FreshetUnusedMedia\Detector\LikePatterns;
 use FreshetUnusedMedia\Detector\PostContentDetector;
+use FreshetUnusedMedia\Detector\CommentDetector;
+use FreshetUnusedMedia\Detector\OptionsDetector;
+use FreshetUnusedMedia\Detector\PostmetaDetector;
 use FreshetUnusedMedia\Detector\TermDescriptionDetector;
+use FreshetUnusedMedia\Detector\TermMetaDetector;
+use FreshetUnusedMedia\Detector\UserMetaDetector;
 use FreshetUnusedMedia\License\LicenseClient;
 use FreshetUnusedMedia\License\NoLicense;
 use FreshetUnusedMedia\License\RemoteLicense;
@@ -791,6 +839,181 @@ check('query admits a json id', $termAdmits('{"id":123}'), true);
 check('query admits an id under an arbitrary json key', $termAdmits('{"hero":{"image":123}}'), true);
 check('query admits a serialized id', $termAdmits('a:1:{s:5:"image";i:123;}'), true);
 check('query does not fetch an unrelated description', $termAdmits('<p>Everything for the workshop.</p>'), false);
+
+// ------------------------------- quoted ids in stored values (termmeta,
+//                                 usermeta, commentmeta, postmeta, options)
+//
+// idConditions() binds a '%"123"%' condition on every column it is handed, and
+// only TermDescriptionDetector could answer it. The five detectors below fell
+// through to structureContains(decodeStored(…)), which speaks for a value that
+// decodes and says nothing about one that does not: a [gallery ids="123"] in a
+// text widget, an ACF wysiwyg field or a data-id="123" in stored markup was
+// fetched by the broad pass and then discarded, so the file scanned unused.
+//
+// Each gets the positive, the two substring negatives, and a value that does
+// decode — which must keep its more specific verdict, because the new branch
+// sits after the decode-based ones, never in front of them. Then the same
+// reachability discipline as the sections above: a shape the chain accepts is
+// matched against the conditions its own query actually binds.
+
+$quotedShortcode = '[gallery ids="123"]';
+$quotedMarkup = '<p>Team</p><img data-id="123">';
+$longerId = '[gallery ids="1234"]';
+$prefixedId = '[gallery ids="9123"]';
+
+/** True when a query's bound params admit $value — the fetch the SQL would do. */
+$admits = static function (array $bound, string $value): bool {
+    foreach ($bound as $param) {
+        if (!is_string($param)) {
+            continue;
+        }
+
+        if ($param === $value) {
+            return true; // the bare '= %s' condition
+        }
+
+        if (!str_starts_with($param, '%') || !str_ends_with($param, '%')) {
+            continue;
+        }
+
+        $needle = stripslashes(substr($param, 1, -1));
+
+        if ($needle !== '' && str_contains($value, $needle)) {
+            return true;
+        }
+    }
+
+    return false;
+};
+
+// --- termmeta
+
+$GLOBALS['wpdb']->rows = [
+    (object) ['term_id' => '42', 'meta_key' => 'blurb', 'meta_value' => $quotedShortcode],
+    (object) ['term_id' => '43', 'meta_key' => 'blurb', 'meta_value' => $longerId],
+    (object) ['term_id' => '44', 'meta_key' => 'blurb', 'meta_value' => $prefixedId],
+    (object) ['term_id' => '45', 'meta_key' => 'blurb', 'meta_value' => '{"id":123}'],
+];
+
+$termMetaRefs = (new TermMetaDetector())->find($ctx);
+$termMetaBound = $GLOBALS['wpdb']->lastParams;
+$GLOBALS['wpdb']->rows = [];
+
+check('a quoted id in termmeta resolves, a longer or prefixed one does not', count($termMetaRefs), 2);
+check('the termmeta quoted id is labelled as markup', $termMetaRefs[0]->match, 'id-attribute');
+check('the termmeta quoted id is possible, not confirmed', $termMetaRefs[0]->confidence, Reference::POSSIBLE);
+check('a possible termmeta reference still counts as used', $termMetaRefs[0]->countsAsUsed(), true);
+check('the termmeta reference points at its term', $termMetaRefs[0]->objectId, 42);
+check('a termmeta value that decodes keeps its block-id verdict', $termMetaRefs[1]->match, 'block-id');
+check('the termmeta query admits a quoted id', $admits($termMetaBound, $quotedShortcode), true);
+
+// --- usermeta
+
+$GLOBALS['wpdb']->rows = [
+    (object) ['user_id' => '5', 'meta_key' => 'profile_html', 'meta_value' => $quotedMarkup],
+    (object) ['user_id' => '6', 'meta_key' => 'profile_html', 'meta_value' => $longerId],
+    (object) ['user_id' => '7', 'meta_key' => 'profile_html', 'meta_value' => $prefixedId],
+    (object) ['user_id' => '8', 'meta_key' => 'profile_html', 'meta_value' => '{"hero":{"image":"123"}}'],
+];
+
+$userMetaRefs = (new UserMetaDetector())->find($ctx);
+$userMetaBound = $GLOBALS['wpdb']->lastParams;
+$GLOBALS['wpdb']->rows = [];
+
+check('a quoted id in usermeta resolves, a longer or prefixed one does not', count($userMetaRefs), 2);
+check('the usermeta quoted id is labelled as markup', $userMetaRefs[0]->match, 'id-attribute');
+check('the usermeta reference points at its user', $userMetaRefs[0]->objectId, 5);
+check('a usermeta value that decodes keeps its serialized verdict', $userMetaRefs[1]->match, 'serialized');
+check('the usermeta query admits a quoted id in markup', $admits($userMetaBound, $quotedMarkup), true);
+
+// --- commentmeta, and comment_content deliberately left alone
+
+$commentDetector = new CommentDetector();
+$inMeta = new ReflectionMethod(CommentDetector::class, 'inMeta');
+$inMeta->setAccessible(true);
+
+$GLOBALS['wpdb']->rows = [
+    (object) ['comment_id' => '11', 'meta_key' => 'review_media', 'meta_value' => $quotedShortcode, 'comment_approved' => '1'],
+    (object) ['comment_id' => '12', 'meta_key' => 'review_media', 'meta_value' => $longerId, 'comment_approved' => '1'],
+    (object) ['comment_id' => '13', 'meta_key' => 'review_media', 'meta_value' => $prefixedId, 'comment_approved' => '1'],
+    (object) ['comment_id' => '14', 'meta_key' => 'review_media', 'meta_value' => 'a:1:{s:5:"image";i:123;}', 'comment_approved' => '1'],
+];
+
+$commentMetaRefs = $inMeta->invoke($commentDetector, $ctx);
+$commentMetaBound = $GLOBALS['wpdb']->lastParams;
+$GLOBALS['wpdb']->rows = [];
+
+check('a quoted id in commentmeta resolves, a longer or prefixed one does not', count($commentMetaRefs), 2);
+check('the commentmeta quoted id is labelled as markup', $commentMetaRefs[0]->match, 'id-attribute');
+check('the commentmeta reference points at its comment', $commentMetaRefs[0]->objectId, 11);
+check('a commentmeta value that decodes keeps its serialized verdict', $commentMetaRefs[1]->match, 'serialized');
+check('the commentmeta query admits a quoted id', $admits($commentMetaBound, $quotedShortcode), true);
+
+// The other half of the detector is out of scope on purpose: comment_content is
+// queried on basenames only, so it binds no id condition and therefore has no
+// unverified one. Asserted rather than assumed — if that ever changes, this
+// fails and the chain has to answer for it.
+$inContent = new ReflectionMethod(CommentDetector::class, 'inContent');
+$inContent->setAccessible(true);
+$inContent->invoke($commentDetector, $ctx);
+$contentBound = $GLOBALS['wpdb']->lastParams;
+
+check('comment_content binds basenames and nothing else', count($contentBound), count($names));
+check('comment_content never fetches a quoted id', $admits($contentBound, $quotedShortcode), false);
+
+// --- postmeta
+
+$GLOBALS['wpdb']->rows = [
+    (object) ['post_id' => '31', 'meta_key' => 'intro_html', 'meta_value' => $quotedMarkup, 'post_status' => 'publish'],
+    (object) ['post_id' => '32', 'meta_key' => 'intro_html', 'meta_value' => $longerId, 'post_status' => 'publish'],
+    (object) ['post_id' => '33', 'meta_key' => 'intro_html', 'meta_value' => $prefixedId, 'post_status' => 'publish'],
+    (object) ['post_id' => '34', 'meta_key' => 'settings', 'meta_value' => '{"hero":{"image":123}}', 'post_status' => 'publish'],
+];
+
+$postMetaRefs = (new PostmetaDetector())->find($ctx);
+$postMetaBound = $GLOBALS['wpdb']->lastParams;
+$GLOBALS['wpdb']->rows = [];
+
+check('a quoted id in postmeta resolves, a longer or prefixed one does not', count($postMetaRefs), 2);
+check('the postmeta quoted id is labelled as markup', $postMetaRefs[0]->match, 'id-attribute');
+check('the postmeta reference points at its post', $postMetaRefs[0]->objectId, 31);
+check('a postmeta value that decodes keeps its serialized verdict', $postMetaRefs[1]->match, 'serialized');
+check('the postmeta query admits a quoted id in markup', $admits($postMetaBound, $quotedMarkup), true);
+
+// --- options: all three branches, because all three are behind one query
+
+$widgetValue = serialize([2 => ['title' => '', 'text' => $quotedShortcode]]);
+$themeModValue = serialize(['footer_html' => $quotedMarkup]);
+$blobValue = serialize(['intro' => $quotedShortcode]);
+
+$GLOBALS['wpdb']->rows = [
+    (object) ['option_name' => 'my_plugin_intro', 'option_value' => $quotedMarkup],
+    (object) ['option_name' => 'my_plugin_intro', 'option_value' => $longerId],
+    (object) ['option_name' => 'my_plugin_intro', 'option_value' => $prefixedId],
+    (object) ['option_name' => 'widget_text', 'option_value' => $widgetValue],
+    (object) ['option_name' => 'theme_mods_freshet', 'option_value' => $themeModValue],
+    (object) ['option_name' => 'my_plugin_settings', 'option_value' => $blobValue],
+    (object) ['option_name' => 'my_plugin_settings', 'option_value' => '{"hero":{"image":123}}'],
+];
+
+$optionRefs = (new OptionsDetector())->find($ctx);
+$optionBound = $GLOBALS['wpdb']->lastParams;
+$GLOBALS['wpdb']->rows = [];
+
+check('every options branch answers a quoted id, and neither near-miss does', count($optionRefs), 5);
+check('a quoted id in a plain option is labelled as markup', $optionRefs[0]->match, 'id-attribute');
+check('a quoted id in a plain option is possible, not confirmed', $optionRefs[0]->confidence, Reference::POSSIBLE);
+check('a shortcode in a text widget resolves', $optionRefs[1]->match, 'id-attribute');
+check('a widget hit is still reported as an option', $optionRefs[1]->objectType, 'option');
+check('markup in a theme mod resolves', $optionRefs[2]->match, 'id-attribute');
+check('a theme-mod hit keeps its object type', $optionRefs[2]->objectType, 'theme_mod');
+check('a shortcode inside a serialized blob resolves', $optionRefs[3]->match, 'id-attribute');
+check('an option that decodes keeps its serialized verdict', $optionRefs[4]->match, 'serialized');
+check('the options query admits a quoted id in markup', $admits($optionBound, $quotedMarkup), true);
+check('the options query admits a widget carrying one', $admits($optionBound, $widgetValue), true);
+check('the options query admits a theme mod carrying one', $admits($optionBound, $themeModValue), true);
+check('the options query does not fetch a longer id', $admits($optionBound, $longerId), false);
+check('the options query does not fetch a prefixed id', $admits($optionBound, $prefixedId), false);
 
 // --------------------------------------------------------- license states
 //

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace FreshetUnusedMedia\Cli;
 
 use FreshetUnusedMedia\License\LicenseInterface;
+use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\FileSize;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\Scanner;
@@ -53,6 +54,10 @@ final class ScanCommand
      * fetched in chunks (freshet_unusedmedia_batch_size, 100 here) so a large
      * library never lands in memory at once, and the cursor is written after
      * every chunk, so an interrupted run resumes with --resume.
+     *
+     * Memory is bounded by the chunk rather than by the library: what the
+     * chunk cached is released once the cursor has moved past it. See
+     * releaseBatchMemory().
      *
      * ## OPTIONS
      *
@@ -130,6 +135,8 @@ final class ScanCommand
             }
 
             $state = $this->state->advance($last, $processed);
+
+            $this->releaseBatchMemory();
         }
 
         $progress?->finish();
@@ -275,6 +282,75 @@ final class ScanCommand
             'bytes' => $bytes,
             'scanned_at' => $scannedAt > 0 ? gmdate('Y-m-d H:i:s', $scannedAt) : '',
         ];
+    }
+
+    /**
+     * Release what the batch just cached, now that the cursor has moved past it.
+     *
+     * A request ends and takes its object cache with it; a WP-CLI process does
+     * not. Every post, meta row, term, user and comment the detectors touched
+     * therefore stays in WP_Object_Cache for the whole invocation, and a
+     * full-library run climbs toward gigabytes before it finishes — the
+     * difference between a long scan and one that dies at hour three. Called
+     * after advance(), so nothing is dropped that the cursor has not already
+     * been written past: the state lives in an option row, the results in
+     * postmeta, and both are on disk before this runs. An interrupted run
+     * resumes from the same place it would have without it.
+     *
+     * The browser scan needs none of this and does not call it. Each of its
+     * batches is its own request, which ends; that is what makes it batch in
+     * the first place.
+     *
+     * What this must not do is empty a persistent object cache. On a site
+     * running Redis or Memcached, wp_cache_flush() throws away the cache every
+     * visitor is being served from, and a command that only reports has no
+     * business doing that to a live site to save itself some memory. So the
+     * runtime flush is used wherever the implementation says it has one, and
+     * every fallback below stays inside this process.
+     */
+    private function releaseBatchMemory(): void
+    {
+        global $wpdb, $wp_object_cache;
+
+        // Membership resolved for a page of rows, and derived from rows that are
+        // about to be evicted. The scan itself never primes it — no detector
+        // touches FileGroups — but a site-registered detector could, and a memo
+        // outliving its rows is how a wrong verdict happens. It is also the one
+        // structure here that would otherwise grow for the whole run.
+        FileGroups::flush();
+
+        // SAVEQUERIES keeps every query of the run, which on a six-figure scan is
+        // the larger half of the problem.
+        if (is_array($wpdb->queries ?? null)) {
+            $wpdb->queries = [];
+        }
+
+        // WP 6.1+: drop the in-process copy and leave any shared backend alone.
+        // Core's own cache supports it, and so do the current drop-ins.
+        if (wp_cache_supports('flush_runtime')) {
+            wp_cache_flush_runtime();
+
+            return;
+        }
+
+        // No external cache: the whole thing is this process's own array, so
+        // emptying it costs nobody else anything.
+        if (!wp_using_ext_object_cache()) {
+            wp_cache_flush();
+
+            return;
+        }
+
+        // A drop-in older than the runtime flush. Empty the in-memory arrays the
+        // long-lived implementations keep — the backend is not touched, so the
+        // site keeps its cache and the next lookup simply fetches again.
+        if (is_object($wp_object_cache)) {
+            foreach (['cache', 'group_ops', 'stats', 'memcache_debug'] as $property) {
+                if (isset($wp_object_cache->$property)) {
+                    $wp_object_cache->$property = [];
+                }
+            }
+        }
     }
 
     /**

@@ -57,6 +57,19 @@ final class PostContentDetector implements DetectorInterface
             '[' . $id . ',',      // JSON array start
             ',' . $id . ']',      // JSON array end
             '[' . $id . ']',      // JSON single-item array
+            // Pretty-printed JSON: {"imageId": 123}, several spaces, or the
+            // number on its own indented line. Every needle above puts the
+            // delimiter hard against the digits, so none of those forms is
+            // fetched at all and the verifier — which is already whitespace-
+            // tolerant — never gets to rule. A LIKE cannot express "a run of
+            // whitespace", but it does not need to: whatever the run contains,
+            // the character immediately before the number is one of these
+            // three. Anchoring there costs the right-hand digit boundary (' 123'
+            // also admits ' 1234'), which verify() then holds — over-fetching
+            // is paid for in one rejected row, under-fetching in a deleted file.
+            ' ' . $id,            // space before the value
+            "\n" . $id,           // newline before the value
+            "\t" . $id,           // tab-indented value
         ];
 
         $conditions = [];

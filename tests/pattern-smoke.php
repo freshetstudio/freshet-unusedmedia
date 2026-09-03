@@ -561,6 +561,19 @@ check('namespaced block attribute, id inside a longer number', $match('<!-- wp:a
 check('namespaced block nested attribute, longer id', $match('<!-- wp:acme/slider {"settings":{"slides":[{"image":1234}]}} /-->'), null);
 check('namespaced block dimension matching the id is kept, not lost', $match('<!-- wp:vendor/spacer {"height":123,"unit":"px"} /-->'), 'acf-block');
 
+// Pretty-printed JSON — whitespace between the colon and the number. The
+// verifier decodes the delimiter so it never cared about the spacing; the SQL
+// pass did, and the query rows further down are the half that was broken.
+check('namespaced block attribute, one space after the colon', $match('<!-- wp:acme/hero {"imageId": 123} /-->'), 'acf-block');
+check('namespaced block attribute, several spaces after the colon', $match('<!-- wp:acme/hero {"imageId":    123} /-->'), 'acf-block');
+check('namespaced block attribute, newline and indent after the colon', $match("<!-- wp:acme/hero {\n    \"imageId\":\n        123\n} /-->"), 'acf-block');
+check('namespaced block array element on its own indented line', $match("<!-- wp:acme/gallery {\n    \"slides\": [\n        456,\n        123\n    ]\n} /-->"), 'acf-block');
+check('namespaced block array element, tab-indented', $match("<!-- wp:acme/gallery {\n\t\"slides\": [\n\t\t123\n\t]\n} /-->"), 'acf-block');
+check('pretty-printed gallery ids array', $match("<!-- wp:gallery {\n    \"ids\": [\n        456,\n        123\n    ]\n} -->"), 'gallery');
+check('namespaced block attribute, spaced longer id', $match('<!-- wp:acme/hero {"imageId": 1234} /-->'), null);
+check('namespaced block attribute, spaced id inside a longer number', $match('<!-- wp:acme/hero {"imageId": 91230} /-->'), null);
+check('namespaced block array element, longer id on its own line', $match("<!-- wp:acme/gallery {\n    \"slides\": [\n        1234\n    ]\n} /-->"), null);
+
 // Core blocks stay out of it, and this row is the deliberate boundary rather
 // than an oversight: core's attribute schemas are finite and core-defined,
 // every core block carrying an attachment names it "id"/"ids" — verified above
@@ -644,6 +657,46 @@ check('query admits a class-only wp-att marker', $admits('<a class="wp-att-123" 
 check('query admits a data-id attribute', $admits('<figure data-id="123"></figure>'), true);
 check('query admits a single-quoted data-id attribute', $admits("<figure data-id='123'></figure>"), true);
 check('query admits an unquoted data-id attribute', $admits('<figure data-id=123></figure>'), true);
+
+// The pretty-printed forms, which no needle admitted before: hand-edited
+// content, a block written programmatically, or a prettified export. Every one
+// of these verified as a reference above while never being fetched at all.
+check('query admits one space after the colon', $admits('<!-- wp:acme/hero {"imageId": 123} /-->'), true);
+check('query admits several spaces after the colon', $admits('<!-- wp:acme/hero {"imageId":    123} /-->'), true);
+check('query admits a newline and indent after the colon', $admits("<!-- wp:acme/hero {\n    \"imageId\":\n        123\n} /-->"), true);
+check('query admits a pretty-printed array element', $admits("<!-- wp:acme/gallery {\n    \"ids\": [\n        456,\n        123\n    ]\n} /-->"), true);
+check('query admits a tab-indented array element', $admits("<!-- wp:acme/gallery {\n\t\"ids\": [\n\t\t123\n\t]\n} /-->"), true);
+check('query admits a pretty-printed core block id', $admits('<!-- wp:image {"id": 123,"sizeSlug":"large"} -->'), true);
+
+// The cost of that, stated as a pair rather than left implicit: the whitespace
+// needles carry no right-hand delimiter, so the prefilter deliberately fetches
+// neighbours of the id and verify() is what throws them away. Over-fetching
+// costs one rejected row; the under-fetching it replaces cost a used file.
+check('query admits a spaced longer id, having no right boundary', $admits('<!-- wp:acme/hero {"imageId": 1234} /-->'), true);
+check('the verifier rejects the spaced longer id the query admitted', $match('<!-- wp:acme/hero {"imageId": 1234} /-->'), null);
+check('query admits a spaced id in prose, having no right boundary', $admits('<p>Order 123 shipped.</p>'), true);
+check('the verifier rejects the prose the query admitted', $match('<p>Order 123 shipped.</p>'), null);
+
+// End to end: the row the query now fetches becomes a reference. Both halves
+// had to change hands for this — the needle admits it, the verifier confirms it.
+$GLOBALS['wpdb']->rows = [
+    (object) [
+        'ID' => '9',
+        'post_parent' => '0',
+        'post_type' => 'page',
+        'post_status' => 'publish',
+        'post_content' => '<!-- wp:acme/hero {"imageId": 123} /-->',
+        'post_excerpt' => '',
+    ],
+];
+
+$prettyRefs = $detector->find($ctx);
+$GLOBALS['wpdb']->rows = [];
+
+check('a pretty-printed block attribute yields one reference', count($prettyRefs), 1);
+check('the pretty-printed reference is a block field match', $prettyRefs[0]->match, 'acf-block');
+check('the pretty-printed reference points at the post', $prettyRefs[0]->objectId, 9);
+check('the pretty-printed reference is confirmed', $prettyRefs[0]->confidence, Reference::CONFIRMED);
 
 // -------------------------------------------------- term descriptions
 //

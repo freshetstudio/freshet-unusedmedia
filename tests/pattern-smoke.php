@@ -359,6 +359,82 @@ check('json string leaf, basename', LikePatterns::structureContains('{"bg":"http
 check('non-json string containing digits', LikePatterns::structureContains('ticket 123 closed', $id, $names), false);
 check('invalid json is not decoded', LikePatterns::structureContains('{"logo":123', $id, $names), false);
 
+// Cyclic structures — serialized r:/R: reference tokens unserialize into a graph
+// that points back at itself. Every check here is also a termination check: the
+// pre-guard walk did not return from any of them.
+
+$selfArray = [];
+$selfArray['self'] = &$selfArray;
+check('array reference cycle terminates on a miss', LikePatterns::structureContains($selfArray, $id, $names), false);
+
+$selfArrayHit = [];
+$selfArrayHit['self'] = &$selfArrayHit;
+$selfArrayHit['img'] = 123;
+check('array reference cycle still finds the id', LikePatterns::structureContains($selfArrayHit, $id, $names), true);
+
+$parent = new stdClass();
+$child = new stdClass();
+$parent->child = $child;
+$child->parent = $parent;
+check('object cycle terminates on a miss', LikePatterns::structureContains($parent, $id, $names), false);
+
+$child->image = 123;
+check('object cycle still finds the id past the loop', LikePatterns::structureContains($parent, $id, $names), true);
+
+// Serialized round trip: the shape the detectors actually receive.
+check('serialized R: cycle terminates on a miss', LikePatterns::structureContains(LikePatterns::decodeStored('a:1:{s:4:"self";R:1;}'), $id, $names), false);
+check('serialized r: cycle terminates on a miss', LikePatterns::structureContains(LikePatterns::decodeStored('O:8:"stdClass":1:{s:4:"self";r:1;}'), $id, $names), false);
+check('serialized r: cycle still finds the id', LikePatterns::structureContains(LikePatterns::decodeStored('O:8:"stdClass":2:{s:4:"self";r:1;s:3:"img";i:123;}'), $id, $names), true);
+
+// Deep but acyclic data is walked exactly, either side of the marker threshold.
+$deepHit = 123;
+$deepMiss = 1234;
+for ($level = 0; $level < 60; ++$level) {
+    $deepHit = ['level' => $deepHit];
+    $deepMiss = ['level' => $deepMiss];
+}
+check('deep acyclic structure finds the id', LikePatterns::structureContains($deepHit, $id, $names), true);
+check('deep acyclic structure misses cleanly', LikePatterns::structureContains($deepMiss, $id, $names), false);
+
+// Past the ceiling the walk gives up, and giving up means "used" — over-keeping
+// a file is recoverable, deleting a used one is not.
+$overDeep = 1234;
+for ($level = 0; $level < 400; ++$level) {
+    $overDeep = ['level' => $overDeep];
+}
+check('a structure too deep to resolve is kept, not reported unused', LikePatterns::structureContains($overDeep, $id, $names), true);
+
+// A notices-shaped option: nested objects, cross-links and a self-reference, in
+// the size range the multilingual plugins store. Bounded time and memory is the
+// assertion — unguarded, this is the walk that never returned.
+$notice = new stdClass();
+$notice->id = 'notice-1';
+$notice->text = str_repeat('Translation status copy for a stored notice. ', 180);
+$notice->actions = ['dismiss' => ['label' => 'Dismiss', 'url' => 'https://example.test/x']];
+
+$group = new stdClass();
+$group->notices = ['notice-1' => $notice];
+$group->parent = $group;
+$notice->group = $group;
+$notice->siblings = [$notice];
+
+$payload = serialize($group);
+check('reference fixture is option-sized', strlen($payload) >= 8259, true);
+check('reference fixture carries object references', substr_count($payload, 'r:') >= 3, true);
+
+$peakBefore = memory_get_peak_usage();
+$startedAt = microtime(true);
+$fixtureVerdict = LikePatterns::structureContains(LikePatterns::decodeStored($payload), $id, $names);
+$elapsed = microtime(true) - $startedAt;
+$peakGrowth = memory_get_peak_usage() - $peakBefore;
+
+check('reference fixture resolves to a verdict', $fixtureVerdict, false);
+check('reference fixture completes in bounded time', $elapsed < 2.0, true);
+check('reference fixture completes in bounded memory', $peakGrowth < 8 * 1024 * 1024, true);
+
+$notice->image = 123;
+check('reference fixture still finds the id', LikePatterns::structureContains(LikePatterns::decodeStored(serialize($group)), $id, $names), true);
+
 // -------------------------------------------------- decodeStored / decodeJson
 
 check('decodeJson object', LikePatterns::decodeJson(' {"a":1}'), ['a' => 1]);

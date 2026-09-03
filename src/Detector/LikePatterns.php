@@ -15,6 +15,15 @@ defined('ABSPATH') || exit;
  */
 final class LikePatterns
 {
+    /** Hard ceiling on how deep a stored structure is walked before it is called used. */
+    private const MAX_STRUCTURE_DEPTH = 128;
+
+    /** Depth past which arrays carry a path marker, so reference cycles become visible. */
+    private const CYCLE_WATCH_DEPTH = 16;
+
+    /** The path marker's key. NUL-wrapped, so no stored key can collide with it. */
+    private const CYCLE_MARK = "\0freshet_unusedmedia_path\0";
+
     /**
      * OR'd SQL conditions matching an attachment ID inside a text column:
      * exact value, comma lists, serialized int/string, JSON "id", and JSON
@@ -130,9 +139,51 @@ final class LikePatterns
      * basename. A string leaf that is itself a JSON object/array is decoded and
      * searched too — settings blobs keep IDs under arbitrary keys, and
      * serialized theme mods nest JSON strings.
+     *
+     * A stored value is not guaranteed to be a tree. Serialized reference
+     * tokens (r:/R:) unserialize into a graph that points back at itself, and
+     * walking one of those without a guard never returns — it climbs until the
+     * process runs out of memory, with no chance for the scan time-box to
+     * interrupt it. The walk is bounded three ways, in order of precision:
+     * object identity, a path marker on arrays, and a hard depth cap.
+     *
+     * @param string[] $basenames
      */
     public static function structureContains(mixed $value, int $id, array $basenames): bool
     {
+        $seenObjects = [];
+
+        return self::searchStructure($value, $id, $basenames, $seenObjects, 0);
+    }
+
+    /**
+     * The bounded walk behind structureContains().
+     *
+     * $value is taken by reference so a cyclic array can be marked in place:
+     * a reference cycle is only visible if the array the cycle points back at
+     * is the one carrying the mark, and a copy would not be. Marking costs a
+     * copy-on-write separation per array, so it only starts at
+     * CYCLE_WATCH_DEPTH — stored data nests shallowly, a cycle does not, so the
+     * common path stays allocation-free and a cycle is still caught within a
+     * few levels of entering it.
+     *
+     * @param string[]           $basenames
+     * @param array<int, true>   $seenObjects Objects already walked, by identity.
+     */
+    private static function searchStructure(
+        mixed &$value,
+        int $id,
+        array $basenames,
+        array &$seenObjects,
+        int $depth
+    ): bool {
+        // The only inexact bound, and the only one that can be reached by data
+        // that is merely deep rather than cyclic. It answers "used": keeping a
+        // file we cannot resolve is recoverable, deleting a used one is not.
+        if ($depth > self::MAX_STRUCTURE_DEPTH) {
+            return true;
+        }
+
         if (is_int($value)) {
             return $value === $id;
         }
@@ -144,19 +195,58 @@ final class LikePatterns
 
             $decoded = self::decodeJson($value);
 
-            return $decoded !== null && self::structureContains($decoded, $id, $basenames);
-        }
-
-        if (is_array($value)) {
-            foreach ($value as $item) {
-                if (self::structureContains($item, $id, $basenames)) {
-                    return true;
-                }
-            }
+            return $decoded !== null
+                && self::searchStructure($decoded, $id, $basenames, $seenObjects, $depth + 1);
         }
 
         if (is_object($value)) {
-            return self::structureContains(get_object_vars($value), $id, $basenames);
+            $handle = spl_object_id($value);
+
+            // Walked already: its verdict was false, or it is an ancestor of
+            // this frame and still being walked. Either way there is nothing
+            // here that the caller is not already looking at.
+            if (isset($seenObjects[$handle])) {
+                return false;
+            }
+
+            $seenObjects[$handle] = true;
+            $properties = get_object_vars($value);
+
+            return self::searchStructure($properties, $id, $basenames, $seenObjects, $depth + 1);
+        }
+
+        if (!is_array($value)) {
+            return false;
+        }
+
+        if ($depth < self::CYCLE_WATCH_DEPTH) {
+            foreach ($value as $item) {
+                if (self::searchStructure($item, $id, $basenames, $seenObjects, $depth + 1)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        if (isset($value[self::CYCLE_MARK])) {
+            return false; // On the current path already — this branch is walked.
+        }
+
+        $value[self::CYCLE_MARK] = true;
+
+        try {
+            foreach (array_keys($value) as $key) {
+                if ($key === self::CYCLE_MARK) {
+                    continue;
+                }
+
+                if (self::searchStructure($value[$key], $id, $basenames, $seenObjects, $depth + 1)) {
+                    return true;
+                }
+            }
+        } finally {
+            unset($value[self::CYCLE_MARK]);
         }
 
         return false;

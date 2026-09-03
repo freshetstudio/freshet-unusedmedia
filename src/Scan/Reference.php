@@ -21,7 +21,7 @@ final class Reference
         public readonly string $objectType, // 'post' | 'option' | 'theme_mod' | 'term' | 'user' | 'comment'
         public readonly int $objectId,      // 0 for option / theme_mod
         public readonly string $detail,     // meta_key / option_name / short description
-        public readonly string $match,      // 'acf' | 'acf-block' | 'thumbnail' | 'woo-gallery' | 'elementor' | 'block-id' | 'wp-image-class' | 'gallery' | 'shortcode' | 'id-attribute' | 'url' | 'serialized' | 'comma-list' | 'exact' | 'widget' | 'theme-mod' | 'site-option' | 'autosave' | 'recent-upload' | 'attached'
+        public readonly string $match,      // 'acf' | 'acf-block' | 'thumbnail' | 'woo-gallery' | 'elementor' | 'block-id' | 'wp-image-class' | 'gallery' | 'shortcode' | 'id-attribute' | 'attachment-page' | 'url' | 'serialized' | 'comma-list' | 'exact' | 'widget' | 'theme-mod' | 'site-option' | 'autosave' | 'recent-upload' | 'attached'
         public readonly string $confidence, // self::CONFIRMED | self::POSSIBLE | self::INFO
     ) {
     }

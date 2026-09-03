@@ -354,6 +354,36 @@ check('quoted id inside a list is not a whole value', LikePatterns::hasQuotedId(
 check('unquoted id', LikePatterns::hasQuotedId('[gallery ids=123]', $id), false);
 check('single-quoted id is not reached by the broad pass', LikePatterns::hasQuotedId("[gallery ids='123']", $id), false);
 
+// ------------------------------- attachment-page links (hasAttachmentIdQuery,
+//                                 hasAttachmentLinkId, hasDataId)
+//
+// A document is linked to, not embedded, so these three forms are the whole
+// record of the reference: a PDF whose only use is a text link to its own
+// attachment page used to scan unused.
+
+check('attachment_id query arg', LikePatterns::hasAttachmentIdQuery('<a href="https://example.test/?attachment_id=123">PDF</a>', $id), true);
+check('attachment_id after another arg', LikePatterns::hasAttachmentIdQuery('/?p=9&attachment_id=123', $id), true);
+check('attachment_id with an encoded ampersand', LikePatterns::hasAttachmentIdQuery('/?p=9&#038;attachment_id=123', $id), true);
+check('attachment_id followed by another arg', LikePatterns::hasAttachmentIdQuery('/?attachment_id=123&preview=true', $id), true);
+check('attachment_id, longer id', LikePatterns::hasAttachmentIdQuery('/?attachment_id=1234', $id), false);
+check('attachment_id, prefixed id', LikePatterns::hasAttachmentIdQuery('/?attachment_id=9123', $id), false);
+check('a plain post id is not an attachment_id', LikePatterns::hasAttachmentIdQuery('/?p=123', $id), false);
+
+check('wp-att in a rel attribute', LikePatterns::hasAttachmentLinkId('<a href="/hero" rel="attachment wp-att-123">hero</a>', $id), true);
+check('wp-att in a class attribute', LikePatterns::hasAttachmentLinkId('<a class="link wp-att-123" href="/hero">hero</a>', $id), true);
+check('wp-att, longer id', LikePatterns::hasAttachmentLinkId('<a rel="attachment wp-att-1234">x</a>', $id), false);
+check('wp-att, prefixed id', LikePatterns::hasAttachmentLinkId('<a rel="attachment wp-att-9123">x</a>', $id), false);
+check('wp-image is not wp-att', LikePatterns::hasAttachmentLinkId('<img class="wp-image-123">', $id), false);
+
+check('data-id attribute', LikePatterns::hasDataId('<figure data-id="123"></figure>', $id), true);
+check('data-id, single quoted', LikePatterns::hasDataId("<figure data-id='123'></figure>", $id), true);
+check('data-id, unquoted', LikePatterns::hasDataId('<figure data-id=123></figure>', $id), true);
+check('data-id, longer id', LikePatterns::hasDataId('<figure data-id="1234"></figure>', $id), false);
+check('data-id, prefixed id', LikePatterns::hasDataId('<figure data-id="9123"></figure>', $id), false);
+check('data-id, unquoted longer id', LikePatterns::hasDataId('<figure data-id=1234></figure>', $id), false);
+check('data-id, id inside a list', LikePatterns::hasDataId('<figure data-id="4,123,9"></figure>', $id), false);
+check('another data attribute is not data-id', LikePatterns::hasDataId('<figure data-slide-id="123"></figure>', $id), false);
+
 // -------------------------------------------------- structureContains
 
 check('int in nested array', LikePatterns::structureContains(['a' => ['b' => [4, 123]]], $id, $names), true);
@@ -557,6 +587,26 @@ check('shortcode without attributes', $match('[gallery]'), null);
 check('json array is not a shortcode', $match('{"images":["123"]}'), null);
 check('markdown-style link is not a shortcode', $match('[read more](https://example.test/?p=123)'), null);
 
+// Links to the attachment's own page. This is what a reference to a document
+// looks like — a PDF or a .docx is linked to, never embedded — so all three
+// forms verifying to null meant a linked document scanned as orphaned.
+check('attachment page link, query arg', $match('<p><a href="https://example.test/?attachment_id=123">Download the brochure</a></p>'), 'attachment-page');
+check('attachment page link, editor rel marker', $match('<p><a href="https://example.test/brochure/" rel="attachment wp-att-123">Brochure</a></p>'), 'attachment-page');
+check('attachment page link, class marker', $match('<p><a class="wp-att-123" href="https://example.test/brochure/">Brochure</a></p>'), 'attachment-page');
+check('attachment page link, pretty permalink with the id appended', $match('<a href="/2026/07/brochure/?attachment_id=123&#038;preview=1">Brochure</a>'), 'attachment-page');
+check('attachment page link, longer id in the query arg', $match('<a href="/?attachment_id=1234">x</a>'), null);
+check('attachment page link, prefixed id in the query arg', $match('<a href="/?attachment_id=9123">x</a>'), null);
+check('attachment page link, longer id in the rel marker', $match('<a rel="attachment wp-att-1234">x</a>'), null);
+check('attachment page link, prefixed id in the rel marker', $match('<a rel="attachment wp-att-9123">x</a>'), null);
+check('a post permalink carrying the same number is not an attachment link', $match('<a href="/?p=123">x</a>'), null);
+
+// data-id="123" — carried by gallery, slider and lightbox markup. The broad
+// pass always admitted it (the quoted-value needle); nothing verified it.
+check('data-id attribute in markup', $match('<div class="slider"><figure data-id="123"></figure></div>'), 'id-attribute');
+check('data-id attribute, single quoted', $match("<figure data-id='123'></figure>"), 'id-attribute');
+check('data-id attribute, longer id', $match('<figure data-id="1234"></figure>'), null);
+check('data-id attribute, prefixed id', $match('<figure data-id="9123"></figure>'), null);
+
 // The rewritten query: every placeholder bound, autosave filter first, own ID excluded.
 $detector->find($ctx);
 $sql = $GLOBALS['wpdb']->lastSql;
@@ -588,6 +638,12 @@ $admits = static function (string $content) use ($bound): bool {
 
 check('query admits a block attribute outside data', $admits('<!-- wp:acme/hero {"imageId":123} /-->'), true);
 check('query admits a block id nested under a non-data key', $admits('<!-- wp:acme/slider {"settings":{"slides":[{"image":123}]},"loop":true} /-->'), true);
+check('query admits an attachment_id query arg', $admits('<a href="https://example.test/?attachment_id=123">PDF</a>'), true);
+check('query admits the editor rel marker', $admits('<a href="/brochure/" rel="attachment wp-att-123">Brochure</a>'), true);
+check('query admits a class-only wp-att marker', $admits('<a class="wp-att-123" href="/brochure/">Brochure</a>'), true);
+check('query admits a data-id attribute', $admits('<figure data-id="123"></figure>'), true);
+check('query admits a single-quoted data-id attribute', $admits("<figure data-id='123'></figure>"), true);
+check('query admits an unquoted data-id attribute', $admits('<figure data-id=123></figure>'), true);
 
 // -------------------------------------------------- term descriptions
 //

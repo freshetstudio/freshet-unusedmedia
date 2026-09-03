@@ -148,6 +148,39 @@ final class LikePatterns
     }
 
     /**
+     * A link to the attachment's own page: ?attachment_id=123 in a URL. This is
+     * what a document reference usually looks like — a PDF is linked to, not
+     * embedded — so a file whose only use is a text link scanned unused before
+     * this. The literal '=' anchors the left boundary and (?!\d) the right, so
+     * attachment_id=1234 can never satisfy 123.
+     */
+    public static function hasAttachmentIdQuery(string $text, int $id): bool
+    {
+        return (bool) preg_match('/attachment_id=' . $id . '(?!\d)/', $text);
+    }
+
+    /**
+     * The marker the editor writes on a link whose target is the attachment
+     * page: rel="attachment wp-att-123", and the class="wp-att-123" the same
+     * markup carries. Anchored on the wp-att- prefix, digit-bounded on the
+     * right, so wp-att-1234 is not a match for 123.
+     */
+    public static function hasAttachmentLinkId(string $text, int $id): bool
+    {
+        return (bool) preg_match('/wp-att-' . $id . '(?!\d)/', $text);
+    }
+
+    /**
+     * data-id="123" — the attribute galleries, sliders and lightboxes carry the
+     * attachment they render in. The quote closes the boundary; where the value
+     * is written bare the digit boundary does, so 1234 satisfies neither.
+     */
+    public static function hasDataId(string $text, int $id): bool
+    {
+        return (bool) preg_match('/data-id=(["\']?)' . $id . '\1(?!\d)/', $text);
+    }
+
+    /**
      * Recursively search an unserialized/decoded structure for the ID or a
      * basename. A string leaf that is itself a JSON object/array is decoded and
      * searched too — settings blobs keep IDs under arbitrary keys, and

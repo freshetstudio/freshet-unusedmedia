@@ -42,6 +42,7 @@ final class PostContentDetector implements DetectorInterface
         // on the site; PHP verification makes the final call.
         $needles = [
             'wp-image-' . $id,    // editor image class
+            'wp-att-' . $id,      // link to the attachment page (rel/class marker)
             '"id":' . $id,        // block attribute
             '"' . $id . '"',      // JSON string value / quoted shortcode attribute
             "'" . $id . "'",      // single-quoted shortcode attribute
@@ -145,6 +146,23 @@ final class PostContentDetector implements DetectorInterface
 
         if (self::shortcodeAttributeContains($content, $id)) {
             return 'shortcode';
+        }
+
+        // A link to the file's own attachment page. For a document this is the
+        // usual reference rather than an exotic one — a PDF is linked to, not
+        // embedded — so before this a linked PDF read as orphaned. Two forms,
+        // both written by the editor's "Link to: attachment page": the query
+        // arg in the href, and the rel/class marker on the anchor.
+        if (LikePatterns::hasAttachmentIdQuery($content, $id)
+            || LikePatterns::hasAttachmentLinkId($content, $id)) {
+            return 'attachment-page';
+        }
+
+        // data-id="123" on a gallery, slider or lightbox element. The broad
+        // pass already admitted it (the quoted-value needle); nothing here
+        // confirmed it, so the row was fetched and then thrown away.
+        if (LikePatterns::hasDataId($content, $id)) {
+            return 'id-attribute';
         }
 
         return null;

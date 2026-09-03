@@ -548,12 +548,13 @@ check('decodeStored broken serialized falls back to string', LikePatterns::decod
 
 [$conditions, $params] = LikePatterns::idConditions('pm.meta_value', $id);
 check('id conditions and params align', count($conditions) === count($params), true);
-check('id conditions cover every verifier', count($conditions), 11);
+check('id conditions cover every verifier', count($conditions), 14);
 check('exact condition is bare', $params[0], '123');
 check('comma-start pattern', $params[1], '123,%');
 check('serialized int pattern is wildcarded', $params[4], '%i:123;%');
 check('json string value pattern', $params[8], '%"123"%');
 check('json number value patterns', [$params[9], $params[10]], ['%:123,%', '%:123}%']);
+check('whitespace-anchored number patterns', [$params[11], $params[12], $params[13]], ['% 123%', "%\n123%", "%\t123%"]);
 
 [$nameConditions, $nameParams] = LikePatterns::basenameConditions('p.post_content', $names);
 check('one condition per basename', count($nameConditions), count($names));
@@ -1014,6 +1015,165 @@ check('the options query admits a widget carrying one', $admits($optionBound, $w
 check('the options query admits a theme mod carrying one', $admits($optionBound, $themeModValue), true);
 check('the options query does not fetch a longer id', $admits($optionBound, $longerId), false);
 check('the options query does not fetch a prefixed id', $admits($optionBound, $prefixedId), false);
+
+// ------------------------------ pretty-printed JSON numbers in stored values
+//                                (termmeta, usermeta, commentmeta, postmeta,
+//                                options)
+//
+// Every condition idConditions() bound put its delimiter hard against the
+// digits — ':123,', ':123}', '"id":123' — so {"imageId": 123} with a single
+// space matched none of them and the row was never fetched at all. The
+// verifier half was never the problem: decodeStored() throws the spacing away
+// before structureContains() ever sees the number, so it answered correctly
+// the moment it was handed the row, and nothing handed it one. The same gap
+// closed for post_content above; these are the five columns behind the shared
+// helper, which is paid for by six detectors on every attachment.
+//
+// Each detector gets the three shapes that matter — one space, several spaces,
+// a newline plus indent — and the array-element position, driven through the
+// real find() so "fetched" and "resolves as a reference" are one assertion
+// rather than two. The SQL half is then checked against the params that same
+// call bound. The near-misses sit in the same fixture set with ids of their
+// own, so a row that is fetched and then thrown away is asserted as an
+// absence, not left implicit in a count.
+
+$prettyOne = '{"imageId": 123}';
+$prettySpaces = '{"imageId":     123}';
+$prettyIndented = "{\n    \"imageId\":\n        123\n}";
+$prettyArray = "{\n    \"ids\": [\n        456,\n        123\n    ]\n}";
+$prettyTabbed = "{\n\t\"ids\": [\n\t\t123\n\t]\n}";
+$prettyLonger = '{"imageId": 1234}';
+$prettyProse = 'Delivered 123 boxes on Tuesday.';
+
+// The control for every row that follows, and the reason a zero here would be
+// a real zero: the eleven conditions that predate this task fetch none of
+// these shapes, and the three appended after them are the whole of the
+// difference. Half of this pair failing means the widening has been dropped;
+// the other half failing means it never did anything.
+[, $prettyIdParams] = LikePatterns::idConditions('pm.meta_value', $id);
+$prettyBefore = array_slice($prettyIdParams, 0, count($prettyIdParams) - 3);
+$prettyShapes = [$prettyOne, $prettySpaces, $prettyIndented, $prettyArray, $prettyTabbed];
+
+check('the conditions that predate this fetch none of the pretty-printed shapes', array_map(static fn(string $v): bool => $admits($prettyBefore, $v), $prettyShapes), [false, false, false, false, false]);
+check('the three appended conditions fetch every one of them', array_map(static fn(string $v): bool => $admits($prettyIdParams, $v), $prettyShapes), [true, true, true, true, true]);
+
+/** The five shapes, each on its own object id, then the two near-misses. */
+$prettyRows = [
+    71 => $prettyOne,
+    72 => $prettySpaces,
+    73 => $prettyIndented,
+    74 => $prettyArray,
+    75 => $prettyTabbed,
+    78 => $prettyLonger,
+    79 => $prettyProse,
+];
+
+// --- termmeta
+
+$GLOBALS['wpdb']->rows = [];
+foreach ($prettyRows as $termId => $value) {
+    $GLOBALS['wpdb']->rows[] = (object) ['term_id' => (string) $termId, 'meta_key' => 'settings', 'meta_value' => $value];
+}
+
+$prettyTermRefs = (new TermMetaDetector())->find($ctx);
+$prettyTermBound = $GLOBALS['wpdb']->lastParams;
+$GLOBALS['wpdb']->rows = [];
+
+check('every pretty-printed shape in termmeta resolves, neither near-miss does', array_map(static fn($r) => $r->objectId, $prettyTermRefs), [71, 72, 73, 74, 75]);
+check('a pretty-printed termmeta value is resolved in the structure', $prettyTermRefs[0]->match, 'serialized');
+check('a pretty-printed termmeta reference still counts as used', $prettyTermRefs[0]->countsAsUsed(), true);
+check('the termmeta query admits one space after the colon', $admits($prettyTermBound, $prettyOne), true);
+check('the termmeta query admits several spaces after the colon', $admits($prettyTermBound, $prettySpaces), true);
+check('the termmeta query admits a newline and indent', $admits($prettyTermBound, $prettyIndented), true);
+check('the termmeta query admits an indented array element', $admits($prettyTermBound, $prettyArray), true);
+check('the termmeta query admits a tab-indented array element', $admits($prettyTermBound, $prettyTabbed), true);
+
+// --- usermeta
+
+$GLOBALS['wpdb']->rows = [];
+foreach ($prettyRows as $userId => $value) {
+    $GLOBALS['wpdb']->rows[] = (object) ['user_id' => (string) $userId, 'meta_key' => 'settings', 'meta_value' => $value];
+}
+
+$prettyUserRefs = (new UserMetaDetector())->find($ctx);
+$prettyUserBound = $GLOBALS['wpdb']->lastParams;
+$GLOBALS['wpdb']->rows = [];
+
+check('every pretty-printed shape in usermeta resolves, neither near-miss does', array_map(static fn($r) => $r->objectId, $prettyUserRefs), [71, 72, 73, 74, 75]);
+check('a pretty-printed usermeta value is resolved in the structure', $prettyUserRefs[0]->match, 'serialized');
+check('the usermeta query admits one space after the colon', $admits($prettyUserBound, $prettyOne), true);
+check('the usermeta query admits several spaces after the colon', $admits($prettyUserBound, $prettySpaces), true);
+check('the usermeta query admits a newline and indent', $admits($prettyUserBound, $prettyIndented), true);
+check('the usermeta query admits an indented array element', $admits($prettyUserBound, $prettyArray), true);
+
+// --- commentmeta
+
+$GLOBALS['wpdb']->rows = [];
+foreach ($prettyRows as $commentId => $value) {
+    $GLOBALS['wpdb']->rows[] = (object) ['comment_id' => (string) $commentId, 'meta_key' => 'settings', 'meta_value' => $value, 'comment_approved' => '1'];
+}
+
+$prettyCommentRefs = $inMeta->invoke($commentDetector, $ctx);
+$prettyCommentBound = $GLOBALS['wpdb']->lastParams;
+$GLOBALS['wpdb']->rows = [];
+
+check('every pretty-printed shape in commentmeta resolves, neither near-miss does', array_map(static fn($r) => $r->objectId, $prettyCommentRefs), [71, 72, 73, 74, 75]);
+check('a pretty-printed commentmeta value is resolved in the structure', $prettyCommentRefs[0]->match, 'serialized');
+check('the commentmeta query admits one space after the colon', $admits($prettyCommentBound, $prettyOne), true);
+check('the commentmeta query admits several spaces after the colon', $admits($prettyCommentBound, $prettySpaces), true);
+check('the commentmeta query admits a newline and indent', $admits($prettyCommentBound, $prettyIndented), true);
+check('the commentmeta query admits an indented array element', $admits($prettyCommentBound, $prettyArray), true);
+
+// --- postmeta
+
+$GLOBALS['wpdb']->rows = [];
+foreach ($prettyRows as $postId => $value) {
+    $GLOBALS['wpdb']->rows[] = (object) ['post_id' => (string) $postId, 'meta_key' => 'settings', 'meta_value' => $value, 'post_status' => 'publish'];
+}
+
+$prettyPostRefs = (new PostmetaDetector())->find($ctx);
+$prettyPostBound = $GLOBALS['wpdb']->lastParams;
+$GLOBALS['wpdb']->rows = [];
+
+check('every pretty-printed shape in postmeta resolves, neither near-miss does', array_map(static fn($r) => $r->objectId, $prettyPostRefs), [71, 72, 73, 74, 75]);
+check('a pretty-printed postmeta value is resolved in the structure', $prettyPostRefs[0]->match, 'serialized');
+check('the postmeta query admits one space after the colon', $admits($prettyPostBound, $prettyOne), true);
+check('the postmeta query admits several spaces after the colon', $admits($prettyPostBound, $prettySpaces), true);
+check('the postmeta query admits a newline and indent', $admits($prettyPostBound, $prettyIndented), true);
+check('the postmeta query admits an indented array element', $admits($prettyPostBound, $prettyArray), true);
+check('the postmeta query admits a tab-indented array element', $admits($prettyPostBound, $prettyTabbed), true);
+
+// --- options
+
+$GLOBALS['wpdb']->rows = [];
+foreach ($prettyRows as $value) {
+    $GLOBALS['wpdb']->rows[] = (object) ['option_name' => 'my_plugin_settings', 'option_value' => $value];
+}
+
+$prettyOptionRefs = (new OptionsDetector())->find($ctx);
+$prettyOptionBound = $GLOBALS['wpdb']->lastParams;
+$GLOBALS['wpdb']->rows = [];
+
+check('every pretty-printed option resolves, neither near-miss does', count($prettyOptionRefs), 5);
+check('a pretty-printed option is resolved in the structure', $prettyOptionRefs[0]->match, 'serialized');
+check('the options query admits one space after the colon', $admits($prettyOptionBound, $prettyOne), true);
+check('the options query admits several spaces after the colon', $admits($prettyOptionBound, $prettySpaces), true);
+check('the options query admits a newline and indent', $admits($prettyOptionBound, $prettyIndented), true);
+check('the options query admits an indented array element', $admits($prettyOptionBound, $prettyArray), true);
+check('the options query admits a tab-indented array element', $admits($prettyOptionBound, $prettyTabbed), true);
+
+// The cost of a whitespace-anchored needle, stated as pairs rather than left
+// implicit: it carries no right-hand delimiter, so the prefilter deliberately
+// fetches the id's longer neighbours and any prose that happens to name the
+// number, and verification is what throws them away. Over-fetching costs a
+// rejected row; the under-fetching it replaces cost a used file. A later
+// widening cannot drop half of a pair without failing here.
+check('the query admits a spaced longer id, having no right boundary', $admits($prettyPostBound, $prettyLonger), true);
+check('the verifier rejects the spaced longer id the query admitted', in_array(78, array_map(static fn($r) => $r->objectId, $prettyPostRefs), true), false);
+check('the query admits a spaced id in prose, having no right boundary', $admits($prettyPostBound, $prettyProse), true);
+check('the verifier rejects the prose the query admitted', in_array(79, array_map(static fn($r) => $r->objectId, $prettyPostRefs), true), false);
+check('the options query admits a spaced longer id too', $admits($prettyOptionBound, $prettyLonger), true);
+check('the options verifier rejects both near-misses it fetched', count($prettyOptionRefs), 5);
 
 // --------------------------------------------------------- license states
 //

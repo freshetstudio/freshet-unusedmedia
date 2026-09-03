@@ -50,6 +50,22 @@ final class LikePatterns
             "{$column} LIKE %s",       // JSON string value "123" (any key, or array member)
             "{$column} LIKE %s",       // JSON number value :123, (any key)
             "{$column} LIKE %s",       // JSON number value :123} (last key)
+            // Pretty-printed JSON: {"imageId": 123}, several spaces, or the
+            // number on its own indented line — a plugin writing prettified
+            // JSON into a meta value, a hand-edited option, an imported
+            // payload. Every condition above puts its delimiter hard against
+            // the digits, so none of those forms is fetched at all and the
+            // verifier — structureContains(decodeStored(…)), which decodes the
+            // spacing away and never cared about it — is never given the row.
+            // A LIKE cannot express "a run of whitespace", but it does not need
+            // to: whatever the run contains, the character immediately before
+            // the number is one of these three. Anchoring there costs the
+            // right-hand digit boundary (' 123' also admits ' 1234'), which
+            // verification then holds — over-fetching is paid for in a rejected
+            // row, under-fetching in a deleted file.
+            "{$column} LIKE %s",       // whitespace-preceded number, one space
+            "{$column} LIKE %s",       // whitespace-preceded number, newline
+            "{$column} LIKE %s",       // whitespace-preceded number, tab indent
         ];
 
         $params = [
@@ -64,6 +80,9 @@ final class LikePatterns
             '%' . $wpdb->esc_like('"' . $id . '"') . '%',
             '%' . $wpdb->esc_like(':' . $id . ',') . '%',
             '%' . $wpdb->esc_like(':' . $id . '}') . '%',
+            '%' . $wpdb->esc_like(' ' . $id) . '%',
+            '%' . $wpdb->esc_like("\n" . $id) . '%',
+            '%' . $wpdb->esc_like("\t" . $id) . '%',
         ];
 
         return [$conditions, $params];

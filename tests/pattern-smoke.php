@@ -499,8 +499,28 @@ check('acf block, pretty-printed json', $match("<!-- wp:acf/card {\n    \"id\": 
 check('acf block, longer id', $match('<!-- wp:acf/hero {"name":"acf/hero","data":{"image":"1234","_image":"field_b2"},"mode":"edit"} /-->'), null);
 check('acf block, id in a text field', $match('<!-- wp:acf/hero {"name":"acf/hero","data":{"note":"ticket 123","_note":"field_b2"},"mode":"edit"} /-->'), null);
 check('acf block, block id is not the attachment', $match('<!-- wp:acf/hero {"id":"block_123","name":"acf/hero","data":{"title":"x","_title":"field_a1"},"mode":"edit"} /-->'), null);
-check('namespaced block without data is not searched', $match('<!-- wp:vendor/spacer {"height":123,"unit":"px"} /-->'), null);
-check('core block attrs are not data', $match('<!-- wp:spacer {"height":123} --><div style="height:123px"></div><!-- /wp:spacer -->'), null);
+
+// The whole attribute object of a namespaced block is searched, not only its
+// "data" key — "data" is one field framework's convention, and a vendor block
+// that keeps its ID at the top level (or under any other key) is the case that
+// used to scan unused. The spacer row is the accepted cost of that: a dimension
+// that happens to equal the ID keeps one file too many, which is recoverable,
+// where the miss it replaces deleted a file that was in use.
+check('namespaced block attribute outside data', $match('<!-- wp:acme/hero {"imageId":123} /-->'), 'acf-block');
+check('namespaced block attribute outside data, as a string', $match('<!-- wp:acme/hero {"imageId":"123"} /-->'), 'acf-block');
+check('namespaced block id nested under a non-data key', $match('<!-- wp:acme/slider {"settings":{"slides":[{"image":123}]},"loop":true} /-->'), 'acf-block');
+check('namespaced block attribute, longer id', $match('<!-- wp:acme/hero {"imageId":1234} /-->'), null);
+check('namespaced block attribute, id inside a longer number', $match('<!-- wp:acme/hero {"imageId":91230} /-->'), null);
+check('namespaced block nested attribute, longer id', $match('<!-- wp:acme/slider {"settings":{"slides":[{"image":1234}]}} /-->'), null);
+check('namespaced block dimension matching the id is kept, not lost', $match('<!-- wp:vendor/spacer {"height":123,"unit":"px"} /-->'), 'acf-block');
+
+// Core blocks stay out of it, and this row is the deliberate boundary rather
+// than an oversight: core's attribute schemas are finite and core-defined,
+// every core block carrying an attachment names it "id"/"ids" — verified above
+// with digit boundaries — and each also saves the URL or a wp-image-N class
+// into its markup. Nothing is missed by leaving them out, while core's numeric
+// attributes are on every page.
+check('core block attrs are not searched as block fields', $match('<!-- wp:spacer {"height":123} --><div style="height:123px"></div><!-- /wp:spacer -->'), null);
 check('undecodable namespaced block keeps a bounded id', $match('<!-- wp:acf/hero {"data":{"image":"123",} /-->'), 'acf-block');
 check('undecodable namespaced block, longer id', $match('<!-- wp:acf/hero {"data":{"image":"1234",} /-->'), null);
 
@@ -529,6 +549,28 @@ check('post_content query first binds the autosave name', $bound[0], '%-autosave
 check('post_content query second binds the own id', $bound[1], 123);
 check('post_content query reaches the excerpt', str_contains($sql, 'p.post_excerpt LIKE'), true);
 check('post_content query admits autosave revisions only', str_contains($sql, "(p.post_type <> 'revision' OR p.post_name LIKE %s)"), true);
+
+// A verifier the broad pass never reaches is a verifier that does nothing, so
+// the block shapes above are checked against the LIKE needles the query
+// actually binds: unwrap each '%…%' param and match it in PHP.
+$admits = static function (string $content) use ($bound): bool {
+    foreach ($bound as $param) {
+        if (!is_string($param) || !str_starts_with($param, '%') || !str_ends_with($param, '%')) {
+            continue;
+        }
+
+        $needle = stripslashes(substr($param, 1, -1));
+
+        if ($needle !== '' && str_contains($content, $needle)) {
+            return true;
+        }
+    }
+
+    return false;
+};
+
+check('query admits a block attribute outside data', $admits('<!-- wp:acme/hero {"imageId":123} /-->'), true);
+check('query admits a block id nested under a non-data key', $admits('<!-- wp:acme/slider {"settings":{"slides":[{"image":123}]},"loop":true} /-->'), true);
 
 // --------------------------------------------------------- license states
 //

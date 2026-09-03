@@ -26,8 +26,8 @@ final class LikePatterns
 
     /**
      * OR'd SQL conditions matching an attachment ID inside a text column:
-     * exact value, comma lists, serialized int/string, JSON "id", and JSON
-     * values under any other key.
+     * exact value, comma lists, serialized int/string, JSON "id", compact
+     * JSON array members, and JSON values under any other key.
      *
      * @return array{0: string[], 1: array<int, string>} [conditions, params]
      */
@@ -50,6 +50,22 @@ final class LikePatterns
             "{$column} LIKE %s",       // JSON string value "123" (any key, or array member)
             "{$column} LIKE %s",       // JSON number value :123, (any key)
             "{$column} LIKE %s",       // JSON number value :123} (last key)
+            // A compact JSON array member. Every condition above needs a
+            // delimiter that a bracket terminates: the number-value ones want
+            // ":123," or ":123}", the comma-list ones want the column to start
+            // "123,", end ",123" or carry ",123,". So [483], {"gallery":[483]}
+            // and the first member of [123,456] were never fetched at all, and
+            // the verifier — structureContains(decodeStored(…)), which decodes
+            // the array and compares the int — was never handed the row.
+            // wp_json_encode() emits exactly this form, so it is the common one.
+            // Both ends are delimiters here, unlike the whitespace needles below,
+            // so [1234] cannot satisfy 123 and nothing is over-fetched. These are
+            // the three array needles PostContentDetector already carries; the
+            // same shapes stored as a meta value, an option or a term description
+            // are the columns this helper serves.
+            "{$column} LIKE %s",       // compact JSON array, first member [123,
+            "{$column} LIKE %s",       // compact JSON array, sole member  [123]
+            "{$column} LIKE %s",       // compact JSON array, last member  ,123]
             // Pretty-printed JSON: {"imageId": 123}, several spaces, or the
             // number on its own indented line — a plugin writing prettified
             // JSON into a meta value, a hand-edited option, an imported
@@ -80,6 +96,9 @@ final class LikePatterns
             '%' . $wpdb->esc_like('"' . $id . '"') . '%',
             '%' . $wpdb->esc_like(':' . $id . ',') . '%',
             '%' . $wpdb->esc_like(':' . $id . '}') . '%',
+            '%' . $wpdb->esc_like('[' . $id . ',') . '%',
+            '%' . $wpdb->esc_like('[' . $id . ']') . '%',
+            '%' . $wpdb->esc_like(',' . $id . ']') . '%',
             '%' . $wpdb->esc_like(' ' . $id) . '%',
             '%' . $wpdb->esc_like("\n" . $id) . '%',
             '%' . $wpdb->esc_like("\t" . $id) . '%',

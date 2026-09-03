@@ -548,13 +548,14 @@ check('decodeStored broken serialized falls back to string', LikePatterns::decod
 
 [$conditions, $params] = LikePatterns::idConditions('pm.meta_value', $id);
 check('id conditions and params align', count($conditions) === count($params), true);
-check('id conditions cover every verifier', count($conditions), 14);
+check('id conditions cover every verifier', count($conditions), 17);
 check('exact condition is bare', $params[0], '123');
 check('comma-start pattern', $params[1], '123,%');
 check('serialized int pattern is wildcarded', $params[4], '%i:123;%');
 check('json string value pattern', $params[8], '%"123"%');
 check('json number value patterns', [$params[9], $params[10]], ['%:123,%', '%:123}%']);
-check('whitespace-anchored number patterns', [$params[11], $params[12], $params[13]], ['% 123%', "%\n123%", "%\t123%"]);
+check('compact array member patterns', [$params[11], $params[12], $params[13]], ['%[123,%', '%[123]%', '%,123]%']);
+check('whitespace-anchored number patterns', [$params[14], $params[15], $params[16]], ['% 123%', "%\n123%", "%\t123%"]);
 
 [$nameConditions, $nameParams] = LikePatterns::basenameConditions('p.post_content', $names);
 check('one condition per basename', count($nameConditions), count($names));
@@ -1046,10 +1047,11 @@ $prettyLonger = '{"imageId": 1234}';
 $prettyProse = 'Delivered 123 boxes on Tuesday.';
 
 // The control for every row that follows, and the reason a zero here would be
-// a real zero: the eleven conditions that predate this task fetch none of
-// these shapes, and the three appended after them are the whole of the
-// difference. Half of this pair failing means the widening has been dropped;
-// the other half failing means it never did anything.
+// a real zero: every condition that predates this task fetches none of these
+// shapes, and the three whitespace-anchored ones — which stay last in the list,
+// so this slice keeps meaning what it says — are the whole of the difference.
+// Half of this pair failing means the widening has been dropped; the other half
+// failing means it never did anything.
 [, $prettyIdParams] = LikePatterns::idConditions('pm.meta_value', $id);
 $prettyBefore = array_slice($prettyIdParams, 0, count($prettyIdParams) - 3);
 $prettyShapes = [$prettyOne, $prettySpaces, $prettyIndented, $prettyArray, $prettyTabbed];
@@ -1174,6 +1176,203 @@ check('the query admits a spaced id in prose, having no right boundary', $admits
 check('the verifier rejects the prose the query admitted', in_array(79, array_map(static fn($r) => $r->objectId, $prettyPostRefs), true), false);
 check('the options query admits a spaced longer id too', $admits($prettyOptionBound, $prettyLonger), true);
 check('the options verifier rejects both near-misses it fetched', count($prettyOptionRefs), 5);
+
+// ------------------------------ compact JSON arrays in stored values
+//                                (termmeta, usermeta, commentmeta, postmeta,
+//                                options, term descriptions)
+//
+// wp_json_encode() writes an id list with no space anywhere: [483],
+// {"gallery":[483]}, [123,456]. Every condition on this helper wanted a
+// delimiter a bracket terminates — the number-value ones ':123,' / ':123}',
+// the comma-list ones a column that starts '123,', ends ',123' or carries
+// ',123,' — so the compact form was never fetched at all, and the verifier,
+// which decodes the array and compares the int, was never handed the row.
+// That is the "JSON under arbitrary keys" mechanism the product is sold on
+// failing on the commonest spelling of it.
+//
+// The three needles are the ones PostContentDetector already carries, so one
+// product does not spell the same shape two ways. Both ends are delimiters, so
+// unlike the whitespace trio above these over-fetch nothing: [1234] is not
+// admitted for 123 and [12,34] is not admitted for 1234, which is asserted
+// below as a fetch that does not happen rather than a rejection that does.
+
+$compactSole = '[123]';
+$compactKeyed = '{"gallery":[123]}';
+$compactPair = '[123,456]';
+$compactSpaced = '[123, 456]';
+$compactKey = '{"123":{"src":"/x.jpg"}}';
+$compactSerializedKey = 'a:1:{s:3:"123";a:1:{s:3:"src";s:6:"/x.jpg";}}';
+$compactLonger = '[1234]';
+$compactSplit = '[12,34]';
+
+$ctx456 = AttachmentContext::forAttachment(456);
+$ctx1234 = AttachmentContext::forAttachment(1234);
+
+// The control, in the same shape as the pretty-printed one above: the fourteen
+// conditions that predate this task fetch none of the compact shapes, and the
+// three appended for them are the whole of the difference.
+[, $compactIdParams] = LikePatterns::idConditions('pm.meta_value', $id);
+$compactBefore = array_merge(array_slice($compactIdParams, 0, 11), array_slice($compactIdParams, 14));
+$compactShapes = [$compactSole, $compactKeyed, $compactPair, $compactSpaced];
+
+check('the conditions that predate this fetch no compact array member', array_map(static fn(string $v): bool => $admits($compactBefore, $v), $compactShapes), [false, false, false, false]);
+check('the three appended conditions fetch every compact shape', array_map(static fn(string $v): bool => $admits($compactIdParams, $v), $compactShapes), [true, true, true, true]);
+
+// The spaced pair's second member was already fetched before this task, by the
+// whitespace needle freshet-130 added. Asserted so a later change to either
+// widening cannot silently drop it.
+[, $compact456Params] = LikePatterns::idConditions('pm.meta_value', 456);
+$compact456Before = array_merge(array_slice($compact456Params, 0, 11), array_slice($compact456Params, 14));
+check('the spaced pair second member was already fetched', $admits($compact456Before, $compactSpaced), true);
+check('the compact pair second member is fetched only now', [$admits($compact456Before, $compactPair), $admits($compact456Params, $compactPair)], [false, true]);
+
+/** The four compact shapes, then the two id-in-key shapes, then the two near-misses. */
+$compactRows = [
+    81 => $compactSole,
+    82 => $compactKeyed,
+    83 => $compactPair,
+    84 => $compactSpaced,
+    85 => $compactKey,
+    86 => $compactSerializedKey,
+    88 => $compactLonger,
+    89 => $compactSplit,
+];
+
+/** Drives one detector over $compactRows and returns [objectIds, boundParams]. */
+$runCompact = static function (callable $rows, callable $run) use ($compactRows): array {
+    $GLOBALS['wpdb']->rows = [];
+    foreach ($compactRows as $objectId => $value) {
+        $GLOBALS['wpdb']->rows[] = $rows($objectId, $value);
+    }
+
+    $refs = $run();
+    $bound = $GLOBALS['wpdb']->lastParams;
+    $GLOBALS['wpdb']->rows = [];
+
+    return [array_map(static fn($r) => $r->objectId, $refs), $bound, $refs];
+};
+
+// --- termmeta
+
+[$compactTermIds, $compactTermBound, $compactTermRefs] = $runCompact(
+    static fn(int $oid, string $v): object => (object) ['term_id' => (string) $oid, 'meta_key' => 'settings', 'meta_value' => $v],
+    static fn(): array => (new TermMetaDetector())->find($ctx)
+);
+
+check('every compact and keyed shape in termmeta resolves, neither near-miss does', $compactTermIds, [81, 82, 83, 84, 85, 86]);
+check('a compact array in termmeta is resolved in the structure', $compactTermRefs[0]->match, 'serialized');
+check('a compact array reference in termmeta still counts as used', $compactTermRefs[0]->countsAsUsed(), true);
+check('the termmeta query admits a sole compact member', $admits($compactTermBound, $compactSole), true);
+check('the termmeta query admits a compact member under a key', $admits($compactTermBound, $compactKeyed), true);
+check('the termmeta query admits the compact pair', $admits($compactTermBound, $compactPair), true);
+check('the termmeta query admits the spaced pair', $admits($compactTermBound, $compactSpaced), true);
+
+// --- usermeta
+
+[$compactUserIds, $compactUserBound] = $runCompact(
+    static fn(int $oid, string $v): object => (object) ['user_id' => (string) $oid, 'meta_key' => 'settings', 'meta_value' => $v],
+    static fn(): array => (new UserMetaDetector())->find($ctx)
+);
+
+check('every compact and keyed shape in usermeta resolves, neither near-miss does', $compactUserIds, [81, 82, 83, 84, 85, 86]);
+check('the usermeta query admits a sole compact member', $admits($compactUserBound, $compactSole), true);
+check('the usermeta query admits a compact member under a key', $admits($compactUserBound, $compactKeyed), true);
+check('the usermeta query admits the compact pair', $admits($compactUserBound, $compactPair), true);
+
+// --- commentmeta
+
+[$compactCommentIds, $compactCommentBound] = $runCompact(
+    static fn(int $oid, string $v): object => (object) ['comment_id' => (string) $oid, 'meta_key' => 'settings', 'meta_value' => $v, 'comment_approved' => '1'],
+    static fn(): array => $inMeta->invoke($commentDetector, $ctx)
+);
+
+check('every compact and keyed shape in commentmeta resolves, neither near-miss does', $compactCommentIds, [81, 82, 83, 84, 85, 86]);
+check('the commentmeta query admits a sole compact member', $admits($compactCommentBound, $compactSole), true);
+check('the commentmeta query admits a compact member under a key', $admits($compactCommentBound, $compactKeyed), true);
+check('the commentmeta query admits the compact pair', $admits($compactCommentBound, $compactPair), true);
+
+// --- postmeta
+
+[$compactPostIds, $compactPostBound, $compactPostRefs] = $runCompact(
+    static fn(int $oid, string $v): object => (object) ['post_id' => (string) $oid, 'meta_key' => 'settings', 'meta_value' => $v, 'post_status' => 'publish'],
+    static fn(): array => (new PostmetaDetector())->find($ctx)
+);
+
+check('every compact and keyed shape in postmeta resolves, neither near-miss does', $compactPostIds, [81, 82, 83, 84, 85, 86]);
+check('a compact array in postmeta is resolved in the structure', $compactPostRefs[0]->match, 'serialized');
+check('the postmeta query admits a sole compact member', $admits($compactPostBound, $compactSole), true);
+check('the postmeta query admits a compact member under a key', $admits($compactPostBound, $compactKeyed), true);
+check('the postmeta query admits the compact pair', $admits($compactPostBound, $compactPair), true);
+check('the postmeta query admits the spaced pair', $admits($compactPostBound, $compactSpaced), true);
+
+// --- options
+
+[$compactOptionIds, $compactOptionBound] = $runCompact(
+    static fn(int $oid, string $v): object => (object) ['option_name' => 'my_plugin_settings', 'option_value' => $v],
+    static fn(): array => (new OptionsDetector())->find($ctx)
+);
+
+check('every compact and keyed option resolves, neither near-miss does', count($compactOptionIds), 6);
+check('the options query admits a sole compact member', $admits($compactOptionBound, $compactSole), true);
+check('the options query admits a compact member under a key', $admits($compactOptionBound, $compactKeyed), true);
+check('the options query admits the compact pair', $admits($compactOptionBound, $compactPair), true);
+
+// --- term descriptions, the sixth column behind the same helper
+
+[$compactDescIds, $compactDescBound] = $runCompact(
+    static fn(int $oid, string $v): object => (object) ['term_id' => (string) $oid, 'description' => $v],
+    static fn(): array => $termDetector->find($ctx)
+);
+
+check('every compact and keyed description resolves, neither near-miss does', $compactDescIds, [81, 82, 83, 84, 85, 86]);
+check('the term description query admits a sole compact member', $admits($compactDescBound, $compactSole), true);
+check('the term description query admits a compact member under a key', $admits($compactDescBound, $compactKeyed), true);
+check('the term description query admits the compact pair', $admits($compactDescBound, $compactPair), true);
+
+// Acceptance 2: the compact pair resolves for BOTH members, not only the one
+// the leading bracket anchors. Driven on a context for 456, whose only route in
+// is the ',456]' needle.
+
+$GLOBALS['wpdb']->rows = [(object) ['post_id' => '90', 'meta_key' => 'settings', 'meta_value' => $compactPair, 'post_status' => 'publish']];
+$compactSecond = (new PostmetaDetector())->find($ctx456);
+$compactSecondBound = $GLOBALS['wpdb']->lastParams;
+$GLOBALS['wpdb']->rows = [];
+
+check('the compact pair resolves for its second member too', array_map(static fn($r) => $r->objectId, $compactSecond), [90]);
+check('the second member is fetched by the closing-bracket needle', $admits($compactSecondBound, $compactPair), true);
+
+$GLOBALS['wpdb']->rows = [(object) ['post_id' => '91', 'meta_key' => 'settings', 'meta_value' => $compactSpaced, 'post_status' => 'publish']];
+$compactSpacedSecond = (new PostmetaDetector())->find($ctx456);
+$GLOBALS['wpdb']->rows = [];
+
+check('the spaced pair still resolves for its second member', array_map(static fn($r) => $r->objectId, $compactSpacedSecond), [91]);
+
+// Acceptance 3: the id-in-key shapes are pinned, not built. Both were already
+// admitted by the '%"123"%' condition — the JSON key carries the same quotes a
+// string value does, and a serialized key is indistinguishable from a
+// serialized value — and both are answered by hasQuotedId()/hasSerializedString().
+// Nothing here is new; the point is that it stops being incidental.
+
+check('the id-in-key shapes were admitted before this task', [$admits($compactBefore, $compactKey), $admits($compactBefore, $compactSerializedKey)], [true, true]);
+check('a json key that is the id is verified as a quoted id', $compactPostRefs[4]->match, 'id-attribute');
+check('a serialized key that is the id is verified as a serialized string', $compactPostRefs[5]->match, 'serialized');
+check('no condition was added for the key position', count(LikePatterns::idConditions('pm.meta_value', $id)[0]), 17);
+
+// Acceptance 4: the boundaries. Both ends of these three needles are
+// delimiters, so unlike the whitespace trio the near-misses are never fetched
+// at all — asserted as the fetch that does not happen, and then again as the
+// absence from the references, so a later widening cannot half-drop either.
+
+check('a longer id in a compact array is not fetched', $admits($compactPostBound, $compactLonger), false);
+check('the verifier returns nothing for the longer id either', in_array(88, $compactPostIds, true), false);
+check('a split pair is not fetched for the joined id', $admits(LikePatterns::idConditions('pm.meta_value', 1234)[1], $compactSplit), false);
+
+$GLOBALS['wpdb']->rows = [(object) ['post_id' => '92', 'meta_key' => 'settings', 'meta_value' => $compactSplit, 'post_status' => 'publish']];
+$compactSplitRefs = (new PostmetaDetector())->find($ctx1234);
+$GLOBALS['wpdb']->rows = [];
+
+check('the verifier returns nothing for a split pair either', $compactSplitRefs, []);
+check('the longer-id array is not fetched on any of the six columns', array_map(static fn(array $b): bool => $admits($b, $compactLonger), [$compactTermBound, $compactUserBound, $compactCommentBound, $compactPostBound, $compactOptionBound, $compactDescBound]), [false, false, false, false, false, false]);
 
 // --------------------------------------------------------- license states
 //

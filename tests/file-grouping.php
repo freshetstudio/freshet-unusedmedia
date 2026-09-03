@@ -71,6 +71,37 @@ class WP_Post
     }
 }
 
+/**
+ * Just enough WP_Query for the Media Library's own list query. The primer reads
+ * these two and nothing else, and the defaults are what upload.php hands it.
+ */
+class WP_Query
+{
+    public function __construct(private readonly string $postType = 'attachment', private readonly bool $main = true)
+    {
+    }
+
+    public function is_main_query(): bool
+    {
+        return $this->main;
+    }
+
+    public function get(string $var, mixed $default = ''): mixed
+    {
+        return $var === 'post_type' ? $this->postType : $default;
+    }
+}
+
+function is_admin(): bool
+{
+    return true;
+}
+
+function wp_list_pluck(array $list, string $field): array
+{
+    return array_map(static fn(object $item): mixed => $item->$field, $list);
+}
+
 function wp_basename(string $path): string
 {
     return basename(str_replace('\\', '/', $path));
@@ -286,26 +317,29 @@ $GLOBALS['wpdb'] = new class {
     {
         $query = $this->resolve($sql);
 
-        if (str_contains($query['sql'], 'pm.meta_value = %s')) {
-            $ids = [];
-
-            foreach ($GLOBALS['rows'] as $id => $row) {
-                if ($row['file'] === $query['params'][1]) {
-                    $ids[] = $id;
-                }
-            }
-
-            sort($ids);
-
-            return array_map('strval', $ids);
-        }
-
         return [];
     }
 
     public function get_results(string $sql, mixed $output = null): array
     {
-        $this->resolve($sql);
+        $query = $this->resolve($sql);
+
+        // Every attachment row standing on any of these paths — the sibling
+        // lookup, and it takes a whole page of paths at a time.
+        if (str_contains($query['sql'], 'pm.meta_value IN')) {
+            $paths = array_slice($query['params'], 1);
+            $found = [];
+
+            foreach ($GLOBALS['rows'] as $id => $row) {
+                if (in_array($row['file'], $paths, true)) {
+                    $found[] = ['fg_id' => (string) $id, 'fg_key' => $row['file']];
+                }
+            }
+
+            usort($found, static fn(array $a, array $b): int => (int) $a['fg_id'] <=> (int) $b['fg_id']);
+
+            return $found;
+        }
 
         return [];
     }
@@ -346,12 +380,14 @@ foreach ([
     'src/Detector/TermMetaDetector.php',
     'src/Detector/UserMetaDetector.php',
     'src/Admin/DeleteController.php',
+    'src/Admin/MediaColumn.php',
     'src/Admin/StatusBadge.php',
 ] as $file) {
     require_once ABSPATH . $file;
 }
 
 use FreshetUnusedMedia\Admin\DeleteController;
+use FreshetUnusedMedia\Admin\MediaColumn;
 use FreshetUnusedMedia\Admin\StatusBadge;
 use FreshetUnusedMedia\Detector\RecentUploadDetector;
 use FreshetUnusedMedia\Scan\FileGroups;
@@ -397,6 +433,10 @@ function library(array $rows): void
     $GLOBALS['rows'] = [];
     $GLOBALS['meta'] = [];
     $GLOBALS['options'] = [];
+
+    // A new library is a new request: the sibling groups memoised for the last
+    // fixture describe rows that no longer exist.
+    FileGroups::flush();
 
     foreach ($rows as $id => $row) {
         $GLOBALS['rows'][$id] = [
@@ -454,10 +494,126 @@ check('siblings are the rows on the same path', FileGroups::siblings(100), [100,
 check('siblings never cross paths', FileGroups::siblings(300), [300]);
 check('a row with no file has only itself', FileGroups::siblings(900), [900]);
 
+FileGroups::flush();
 FileGroups::siblings(100);
 $siblingQuery = $GLOBALS['wpdb']->last();
 check('siblings match the whole path, not a fragment', $siblingQuery['params'], ['_wp_attached_file', '2024/01/logo.png']);
-check('siblings compare with =, never LIKE', str_contains($siblingQuery['sql'], 'LIKE'), false);
+check('siblings compare paths whole, never by LIKE', str_contains($siblingQuery['sql'], 'LIKE'), false);
+
+// ------------------------------------------------------- one lookup, not N
+//
+// wp_postmeta is indexed on meta_key and post_id, never on meta_value, so a
+// sibling lookup scans every attached-file row in the library. One per rendered
+// thumbnail is that scan twenty times over for a single Media Library page on a
+// large site. The memo and the primer are what make it one — and neither may
+// change an answer: whatever the cache does, the verdict is the cold one.
+
+/** How many times the sibling lookup has gone to the database this run. */
+function siblingLookups(): int
+{
+    $n = 0;
+
+    foreach ($GLOBALS['wpdb']->queries as $query) {
+        if (str_contains($query['sql'], 'pm.meta_value')) {
+            ++$n;
+        }
+    }
+
+    return $n;
+}
+
+library([
+    100 => ['file' => '2024/01/logo.png'],
+    200 => ['file' => '2024/01/logo.png'],
+    300 => ['file' => '2024/01/logo.png'],
+    400 => ['file' => '2025/06/logo.png'],
+    900 => ['file' => ''],
+]);
+
+$cold = [
+    100 => FileGroups::siblings(100),
+    200 => FileGroups::siblings(200),
+    300 => FileGroups::siblings(300),
+    400 => FileGroups::siblings(400),
+    900 => FileGroups::siblings(900),
+];
+
+check('a group is looked up once however many of its rows ask', $cold[100], [100, 200, 300]);
+
+$before = siblingLookups();
+FileGroups::siblings(100);
+FileGroups::siblings(200);
+FileGroups::siblings(300);
+check('a second call on a resolved group costs nothing', siblingLookups() - $before, 0);
+
+// The whole page in one query, and the same answers as the cold reads above —
+// the cache is an optimisation, never a precondition.
+library([
+    100 => ['file' => '2024/01/logo.png'],
+    200 => ['file' => '2024/01/logo.png'],
+    300 => ['file' => '2024/01/logo.png'],
+    400 => ['file' => '2025/06/logo.png'],
+    900 => ['file' => ''],
+]);
+
+$before = siblingLookups();
+FileGroups::prime([100, 200, 300, 400, 900]);
+check('priming a page of rows is one lookup', siblingLookups() - $before, 1);
+
+$primed = [];
+
+foreach ([100, 200, 300, 400, 900] as $id) {
+    $primed[$id] = FileGroups::siblings($id);
+}
+
+check('the primed answer is the cold answer', $primed, $cold);
+check('rendering a primed page adds no lookup', siblingLookups() - $before, 1);
+
+// Five rows, five badges, one lookup — the shape the Media Library renders in.
+library([
+    100 => ['file' => '2024/01/logo.png'],
+    200 => ['file' => '2024/01/logo.png'],
+    300 => ['file' => '2024/01/logo.png'],
+    400 => ['file' => '2024/01/logo.png'],
+    500 => ['file' => '2024/01/logo.png'],
+]);
+
+$before = siblingLookups();
+$column = new MediaColumn(new ResultStore());
+$column->primeGroups(array_map(static fn(int $id): WP_Post => new WP_Post($id), [100, 200, 300, 400, 500]), new WP_Query());
+
+foreach ([100, 200, 300, 400, 500] as $id) {
+    StatusBadge::forRow($id, new ResultStore());
+}
+
+check('five rows on one file cost one sibling lookup, not five', siblingLookups() - $before, 1);
+
+// Off the attachment list it does nothing at all: no query, and no memo that a
+// later cold read would have to be right in spite of.
+FileGroups::flush();
+$before = siblingLookups();
+$column->primeGroups([new WP_Post(100)], new WP_Query('post'));
+$column->primeGroups([new WP_Post(100)], new WP_Query('attachment', false));
+$column->primeGroups([], new WP_Query());
+check('the primer is a no-op off the attachment list', siblingLookups() - $before, 0);
+
+// Nothing primed this one: the badge still has to be right, so it queries.
+library([
+    100 => ['file' => '2024/01/logo.png'],
+    200 => ['file' => '2024/01/logo.png'],
+]);
+
+$before = siblingLookups();
+check('an unprimed row still reads its whole group', FileGroups::siblings(200), [100, 200]);
+check('and pays for the lookup it needed', siblingLookups() - $before, 1);
+
+// The meta box asks twice — fileStatus() for the evidence, then again inside the
+// badge. That is one query, not two.
+FileGroups::flush();
+$before = siblingLookups();
+FileGroups::fileStatus(100);
+StatusBadge::forRow(100, new ResultStore());
+check('the meta box asking twice costs one lookup', siblingLookups() - $before, 1);
 
 // ----------------------------------------------------------- the verdict
 //

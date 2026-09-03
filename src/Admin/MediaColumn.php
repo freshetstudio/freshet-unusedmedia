@@ -28,6 +28,7 @@ final class MediaColumn
         add_filter('media_row_actions', [$this, 'rowActions'], 10, 2);
         add_action('restrict_manage_posts', [$this, 'filterDropdown'], 10, 2);
         add_filter('posts_where', [$this, 'applyFilter'], 10, 2);
+        add_filter('the_posts', [$this, 'primeGroups'], 10, 2);
         add_action('admin_enqueue_scripts', [$this, 'enqueue']);
     }
 
@@ -42,6 +43,36 @@ final class MediaColumn
         if ($hookSuffix === 'upload.php' || $isAttachmentEdit) {
             Assets::enqueue();
         }
+    }
+
+    /**
+     * Resolve every listed row's sibling group in one query, before the column
+     * starts rendering.
+     *
+     * The Usage column judges a row by its **file**, so each cell has to know
+     * which other rows stand on that path. Left to the column that is one
+     * lookup per thumbnail, and it is the expensive shape: `wp_postmeta` is
+     * indexed on `meta_key` and `post_id`, never on `meta_value`, so each one
+     * scans every attached-file row in the library — twenty scans of a
+     * five-figure key for one default page of a large library. Once here it is
+     * one, and the column renders from the memo.
+     *
+     * A no-op on any other query, and never a precondition: FileGroups answers
+     * an unprimed row by querying for it, so every verdict is the same whether
+     * this ran or not.
+     *
+     * @param \WP_Post[] $posts
+     * @return \WP_Post[]
+     */
+    public function primeGroups(array $posts, \WP_Query $query): array
+    {
+        if ($posts === [] || !is_admin() || !$query->is_main_query() || $query->get('post_type') !== 'attachment') {
+            return $posts;
+        }
+
+        FileGroups::prime(wp_list_pluck($posts, 'ID'));
+
+        return $posts;
     }
 
     public function addColumn(array $columns): array

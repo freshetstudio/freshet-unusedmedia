@@ -60,6 +60,24 @@ final class FileGroups
      */
     private const ROW_KEY_PREFIX = '#';
 
+    /**
+     * Sibling groups resolved during this request: path => every attachment row
+     * standing on it, ascending.
+     *
+     * A static array, and deliberately not `wp_cache_*`. Group membership stops
+     * being true the moment a row is deleted, so a persistent cache would hand a
+     * later request rows that are gone — and a stale sibling set is a wrong
+     * verdict, which is worse than a slow one. This one dies with the request,
+     * and the delete loop drops it as it goes (DeleteController).
+     *
+     * Only the membership is remembered, never the verdict: statuses are read
+     * fresh on every fileStatus() call, so a row moving to the trash is seen at
+     * once.
+     *
+     * @var array<string, int[]>
+     */
+    private static array $groups = [];
+
     // ------------------------------------------------------------- the key
 
     /**
@@ -94,25 +112,116 @@ final class FileGroups
      */
     public static function siblings(int $attachmentId): array
     {
-        global $wpdb;
-
         $key = self::keyFor($attachmentId);
 
         if (str_starts_with($key, self::ROW_KEY_PREFIX)) {
             return [$attachmentId];
         }
 
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- rows sharing one file; no WP API groups on _wp_attached_file.
-        $ids = array_map('intval', (array) $wpdb->get_col($wpdb->prepare(
-            "SELECT p.ID FROM {$wpdb->posts} p
-             INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID AND pm.meta_key = %s
-             WHERE p.post_type = 'attachment' AND pm.meta_value = %s
-             ORDER BY p.ID ASC",
-            self::META_FILE,
-            $key
-        )));
+        if (!array_key_exists($key, self::$groups)) {
+            self::$groups[$key] = self::fetch([$key])[$key] ?? [];
+        }
+
+        $ids = self::$groups[$key];
 
         return in_array($attachmentId, $ids, true) ? $ids : array_merge($ids, [$attachmentId]);
+    }
+
+    /**
+     * Resolve the sibling groups for a whole page of rows at once.
+     *
+     * `wp_postmeta` is indexed on `meta_key` and `post_id`, never on
+     * `meta_value`, so every sibling lookup scans each attached-file row in the
+     * library. One per rendered thumbnail is twenty scans of a five-figure key
+     * on a default Media Library page; primed here it is one, however many rows
+     * the screen lists.
+     *
+     * An optimisation and never a precondition. siblings() answers a row nobody
+     * primed by querying for it, so every caller behaves identically whether
+     * this ran or not — it only decides how many round trips that costs.
+     *
+     * @param int[] $attachmentIds
+     */
+    public static function prime(array $attachmentIds): void
+    {
+        $attachmentIds = array_unique(array_map('intval', $attachmentIds));
+
+        if ($attachmentIds === []) {
+            return;
+        }
+
+        // keyFor() reads core's postmeta cache, which a list screen's own query
+        // has usually primed already; where it has not, this is the one round
+        // trip that fetches the paths, and core skips the rows it already holds.
+        update_postmeta_cache(array_values($attachmentIds));
+
+        $wanted = [];
+
+        foreach ($attachmentIds as $id) {
+            $key = self::keyFor($id);
+
+            if (!str_starts_with($key, self::ROW_KEY_PREFIX) && !array_key_exists($key, self::$groups)) {
+                $wanted[$key] = true;
+            }
+        }
+
+        if ($wanted === []) {
+            return;
+        }
+
+        $wanted = array_keys($wanted);
+        $found = self::fetch($wanted);
+
+        foreach ($wanted as $key) {
+            // A path that came back with no rows is still an answer, and caching
+            // it is what stops the next call querying for it again.
+            self::$groups[$key] = $found[$key] ?? [];
+        }
+    }
+
+    /**
+     * Forget every memoised group.
+     *
+     * The delete loop calls it as it goes: it removes whole groups, so what was
+     * remembered about them describes a library that no longer exists.
+     */
+    public static function flush(): void
+    {
+        self::$groups = [];
+    }
+
+    /**
+     * Every attachment row standing on any of these paths, grouped by path,
+     * ascending. One query however many paths are asked for.
+     *
+     * The comparison is on whole paths — an `IN` over equalities, never a LIKE
+     * on a basename, which is the mirror of the bug this class fixes.
+     *
+     * @param string[] $keys
+     * @return array<string, int[]>
+     */
+    private static function fetch(array $keys): array
+    {
+        global $wpdb;
+
+        $placeholders = implode(', ', array_fill(0, count($keys), '%s'));
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders -- rows sharing one file; no WP API groups on _wp_attached_file. Placeholders are counted from the key list and every value is prepared.
+        $rows = (array) $wpdb->get_results($wpdb->prepare(
+            "SELECT p.ID AS fg_id, pm.meta_value AS fg_key FROM {$wpdb->posts} p
+             INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID AND pm.meta_key = %s
+             WHERE p.post_type = 'attachment' AND pm.meta_value IN ({$placeholders})
+             ORDER BY p.ID ASC",
+            array_merge([self::META_FILE], $keys)
+        ), ARRAY_A);
+
+        $groups = [];
+
+        foreach ($rows as $row) {
+            $groups[(string) $row['fg_key']][] = (int) $row['fg_id'];
+        }
+
+        return $groups;
     }
 
     // --------------------------------------------------------- the verdict
@@ -173,8 +282,10 @@ final class FileGroups
      * rather than the row's, which is exactly what a user cannot see from the
      * row.
      *
-     * One query per row, and it is the sibling lookup — the postmeta cache for
-     * the siblings is primed here so the status reads that follow cost nothing.
+     * One sibling lookup per *file*, not per row: siblings() answers from the
+     * request's memo after the first call, and prime() resolves a whole screen
+     * of them in one query. The postmeta cache for the siblings is primed here
+     * so the status reads that follow cost nothing.
      *
      * @return array{status: string, siblings: int[], used: int[], trashed: int[], unscanned: int, held: string}
      */

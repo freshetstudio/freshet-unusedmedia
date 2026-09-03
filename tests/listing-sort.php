@@ -314,21 +314,6 @@ $GLOBALS['wpdb'] = new class {
         $query = $this->resolve($sql);
         $this->reads[] = $query['sql'];
 
-        // Every attachment row sharing one file — the delete path's own lookup.
-        if (str_contains($query['sql'], 'pm.meta_value = %s')) {
-            $ids = [];
-
-            foreach ($GLOBALS['rows'] as $id => $row) {
-                if ($row['file'] === $query['params'][1]) {
-                    $ids[] = $id;
-                }
-            }
-
-            sort($ids);
-
-            return array_map('strval', $ids);
-        }
-
         if (!str_contains($query['sql'], 'SELECT fg.fg_id')) {
             return [];
         }
@@ -354,6 +339,23 @@ $GLOBALS['wpdb'] = new class {
     {
         $query = $this->resolve($sql);
         $this->reads[] = $query['sql'];
+
+        // Every attachment row standing on any of these paths — the sibling
+        // lookup, and it takes a whole page of paths at a time.
+        if (str_contains($query['sql'], 'pm.meta_value IN')) {
+            $paths = array_slice($query['params'], 1);
+            $found = [];
+
+            foreach ($GLOBALS['rows'] as $id => $row) {
+                if (in_array($row['file'], $paths, true)) {
+                    $found[] = ['fg_id' => (string) $id, 'fg_key' => $row['file']];
+                }
+            }
+
+            usort($found, static fn(array $a, array $b): int => (int) $a['fg_id'] <=> (int) $b['fg_id']);
+
+            return $found;
+        }
 
         if (!str_contains($query['sql'], 'fg.fg_status AS status')) {
             return [];
@@ -596,6 +598,10 @@ function library(array $rows): void
     $GLOBALS['rows'] = [];
     $GLOBALS['meta'] = [];
     $GLOBALS['options'] = [];
+
+    // A new library is a new request: the sibling groups memoised for the last
+    // fixture describe rows that no longer exist.
+    FileGroups::flush();
     $GLOBALS['primed'] = [];
 
     foreach ($rows as $id => $row) {

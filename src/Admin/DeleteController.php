@@ -167,6 +167,11 @@ final class DeleteController
                 }
             }
 
+            // The rows just removed are a whole sibling group, so anything this
+            // request remembered about the library's grouping now describes rows
+            // that are gone. A stale sibling set is a wrong verdict.
+            FileGroups::flush();
+
             if (!$removed) {
                 // Some row survived, so the file may still be on disk. Clearing
                 // what is left takes the file out of the unused pool rather than

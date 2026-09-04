@@ -18,6 +18,11 @@ declare(strict_types=1);
  * are counted once. And the mirror of it: grouping is on the whole path, never
  * on a basename, or two unrelated files merge and a live one goes.
  *
+ * It also pins the other edge of that unit of work: a file on disk with no
+ * attachment row — a stale intermediate size left by a size change — is outside
+ * it entirely, neither reported nor reclaimed. That limit is deliberate, so it
+ * is asserted here rather than left to be rediscovered as a defect.
+ *
  * The last section reads the same invariant from the render side, because the
  * Media Library is the one screen that lists rows rather than files: whatever a
  * held-back row says, it must never be a word that invites a deletion the
@@ -135,9 +140,29 @@ function update_postmeta_cache(array $ids): bool
     return true;
 }
 
+/**
+ * Only the part of the metadata this suite needs: the `sizes` array.
+ *
+ * It is core's record of which generated files it believes exist. A size
+ * dropped out of it — a theme change, a re-registered size — leaves the file
+ * it generated last time on disk with nothing naming it. That leftover is what
+ * the tests below call a stale intermediate size.
+ */
 function wp_get_attachment_metadata(int $id): array|false
 {
-    return false;
+    $sizes = $GLOBALS['rows'][$id]['sizes'] ?? [];
+
+    if ($sizes === []) {
+        return false;
+    }
+
+    $meta = ['sizes' => []];
+
+    foreach ($sizes as $name => $file) {
+        $meta['sizes'][$name] = ['file' => $file];
+    }
+
+    return $meta;
 }
 
 function get_post(int $id): ?object
@@ -187,10 +212,27 @@ function wp_delete_attachment(int $id, bool $force = false): WP_Post|false|null
         return false;
     }
 
-    $file = UPLOADS . '/' . $GLOBALS['rows'][$id]['file'];
+    $row = $GLOBALS['rows'][$id];
+    $files = [$row['file']];
 
-    if (file_exists($file)) {
-        unlink($file);
+    // Core removes the original and every size its *current* metadata names.
+    // A generated file the metadata no longer lists is not touched, because
+    // core has no record that it exists — which is exactly how a stale
+    // intermediate size comes to outlive the attachment it was cut from.
+    foreach ($row['sizes'] ?? [] as $size) {
+        $files[] = dirname($row['file']) . '/' . $size;
+    }
+
+    foreach ($files as $file) {
+        if ($file === '') {
+            continue;
+        }
+
+        $path = UPLOADS . '/' . $file;
+
+        if (file_exists($path)) {
+            unlink($path);
+        }
     }
 
     unset($GLOBALS['rows'][$id], $GLOBALS['meta'][$id]);
@@ -391,7 +433,9 @@ use FreshetUnusedMedia\Admin\DeleteController;
 use FreshetUnusedMedia\Admin\MediaColumn;
 use FreshetUnusedMedia\Admin\StatusBadge;
 use FreshetUnusedMedia\Detector\RecentUploadDetector;
+use FreshetUnusedMedia\Scan\AttachmentContext;
 use FreshetUnusedMedia\Scan\FileGroups;
+use FreshetUnusedMedia\Scan\FileSize;
 use FreshetUnusedMedia\Scan\ReclaimedLedger;
 use FreshetUnusedMedia\Scan\Reference;
 use FreshetUnusedMedia\Scan\ResultFilters;
@@ -423,7 +467,11 @@ function check(string $label, mixed $actual, mixed $expected): void
  * Rebuild the fixture library and write its files to disk. Every row names the
  * path it points at, so two rows on one path really do share one file.
  *
- * @param array<int, array{file: string, status?: string, used?: bool, bytes?: int, uploaded?: int}> $rows
+ * `sizes` is the intermediate sizes the attachment's metadata still names, as
+ * size => basename; their files are written beside the original. A file with no
+ * row at all — a stale size — goes on disk through orphanFile() instead.
+ *
+ * @param array<int, array{file: string, status?: string, used?: bool, bytes?: int, uploaded?: int, sizes?: array<string, string>}> $rows
  */
 function library(array $rows): void
 {
@@ -445,6 +493,7 @@ function library(array $rows): void
             'status' => $row['status'] ?? 'inherit',
             'used' => $row['used'] ?? false,
             'uploaded' => $row['uploaded'] ?? time(),
+            'sizes' => $row['sizes'] ?? [],
         ];
 
         if ($row['file'] === '') {
@@ -458,7 +507,29 @@ function library(array $rows): void
         }
 
         file_put_contents($path, str_repeat('x', $row['bytes'] ?? 1024));
+
+        foreach ($row['sizes'] ?? [] as $size) {
+            file_put_contents(dirname($path) . '/' . $size, str_repeat('x', 256));
+        }
     }
+}
+
+/**
+ * A file on disk that no attachment row names: the leftover of a size the
+ * metadata used to list and does not any more.
+ *
+ * It is written directly rather than through library(), because having no row
+ * is the whole of what makes it stale — and library() would give it one.
+ */
+function orphanFile(string $file, int $bytes = 256): void
+{
+    $path = UPLOADS . '/' . $file;
+
+    if (!is_dir(dirname($path))) {
+        mkdir(dirname($path), 0777, true);
+    }
+
+    file_put_contents($path, str_repeat('x', $bytes));
 }
 
 function onDisk(string $file): bool
@@ -781,6 +852,74 @@ $result = $deleter()->deleteVerified([500, 501, 502]);
 
 check('three representatives of one file are one deletion', $result['deleted'], 1);
 check('and are sized once', ReclaimedLedger::read()['bytes'], 4096);
+
+// ------------------------------------------- the stale intermediate size
+//
+// A registered size changes, so WordPress regenerates the metadata and leaves
+// the file it generated last time on disk. That leftover has no attachment row
+// and no `_wp_attached_file` value, and every enumeration in this plugin is
+// `post_type = 'attachment'` grouped on that key — so it is outside the unit of
+// work altogether: not a group, not a count, not a listing row, not a badge and
+// not a byte of the saving figure.
+//
+// That is a boundary rather than a defect, and it is pinned here under an
+// honest label so the next reader meeting it cold does not file it as one
+// (freshet-125). What it is NOT is "reported as unused": the scanner never sees
+// the file to have an opinion about it.
+
+library([
+    800 => [
+        'file' => '2026/03/banner.jpg',
+        'bytes' => 8192,
+        'used' => true,
+        'sizes' => ['medium' => 'banner-300x200.jpg'],
+    ],
+]);
+
+orphanFile('2026/03/banner-640x480.jpg');
+
+check('the key is the original upload, never a generated size', FileGroups::keyFor(800), '2026/03/banner.jpg');
+check('a stale size joins no group', FileGroups::siblings(800), [800]);
+check('and is not a row the file verdict is counted from', FileGroups::fileStatus(800)['siblings'], [800]);
+check('a stale size is not sized into the saving', FileSize::bytes(800), 8192);
+
+$context = AttachmentContext::forAttachment(800);
+
+check('a size the metadata still names is matchable', in_array('banner-300x200.jpg', $context->basenames, true), true);
+check('a size it no longer names is not', in_array('banner-640x480.jpg', $context->basenames, true), false);
+
+// Case one: the original is used, so nothing here is deletable at all.
+$result = $deleter()->deleteVerified([800]);
+
+check('a used original is not deleted', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0]);
+check('its live size stays with it', onDisk('2026/03/banner-300x200.jpg'), true);
+check('and so does the stale one', onDisk('2026/03/banner-640x480.jpg'), true);
+check('a skipped file reclaims nothing', ReclaimedLedger::read()['files'], 0);
+
+// Case two: the original is itself orphaned, so the group is deletable as a
+// whole. Core takes the original and the size its metadata names; the stale one
+// it has no record of survives — unreported before the delete and unreclaimed
+// after it. The saving figure understates by exactly that file, which is the
+// direction to be wrong in.
+library([
+    801 => [
+        'file' => '2026/04/flyer.jpg',
+        'bytes' => 8192,
+        'used' => false,
+        'sizes' => ['medium' => 'flyer-300x200.jpg'],
+    ],
+]);
+
+orphanFile('2026/04/flyer-640x480.jpg');
+
+$result = $deleter()->deleteVerified([801]);
+
+check('an orphaned original deletes as one whole file', $result, ['deleted' => 1, 'skipped' => 0, 'failed' => 0]);
+check('the original is gone', onDisk('2026/04/flyer.jpg'), false);
+check('the size its metadata named goes with it', onDisk('2026/04/flyer-300x200.jpg'), false);
+check('the stale size is left behind, unreported and unreclaimed', onDisk('2026/04/flyer-640x480.jpg'), true);
+check('the saving figure never claimed the stale size', ReclaimedLedger::read()['bytes'], 8192);
+check('and counts the deletion as one file', ReclaimedLedger::read()['files'], 1);
 
 // --------------------------------------------------------- trashed rows
 //

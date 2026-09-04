@@ -27,7 +27,8 @@ final class LikePatterns
     /**
      * OR'd SQL conditions matching an attachment ID inside a text column:
      * exact value, comma lists, serialized int/string, JSON "id", compact
-     * JSON array members, and JSON values under any other key.
+     * JSON array members, JSON values under any other key, and a link to the
+     * attachment's own page.
      *
      * @return array{0: string[], 1: array<int, string>} [conditions, params]
      */
@@ -104,7 +105,49 @@ final class LikePatterns
             '%' . $wpdb->esc_like("\t" . $id) . '%',
         ];
 
-        return [$conditions, $params];
+        // A link to the attachment's own page, stored in a column that holds
+        // markup rather than an id: a wysiwyg field, a text widget's HTML, a
+        // term description. Every condition above wants the id written as a
+        // value — quoted, bracketed, comma-listed, serialized — and in a link
+        // it is written as a query arg or inside a class name, so none of them
+        // fetched the row and no verifier was ever handed it. post_content has
+        // read these two forms since the document case was fixed; these are the
+        // six columns behind this helper, and the same two needles.
+        [$linkConditions, $linkParams] = self::attachmentLinkConditions($column, $id);
+
+        return [array_merge($conditions, $linkConditions), array_merge($params, $linkParams)];
+    }
+
+    /**
+     * OR'd LIKE conditions for a link to the attachment's own page:
+     * ?attachment_id=123 in an href, and the rel/class marker wp-att-123 the
+     * editor writes on the same anchor. Separate from idConditions() because
+     * comment_content binds these two and none of the id conditions — a comment
+     * body is prose, so the id shapes would be noise there, while the link is
+     * exactly how a comment references a document.
+     *
+     * Both needles are left-delimited only ('=' and '-'), so attachment_id=1234
+     * is admitted for 123 and hasAttachmentIdQuery()/hasAttachmentLinkId() are
+     * what reject it — the same trade the whitespace needles above make. The
+     * prefix is what keeps that cheap: a row can only be over-fetched if it
+     * already carries an attachment-page link.
+     *
+     * @return array{0: string[], 1: array<int, string>} [conditions, params]
+     */
+    public static function attachmentLinkConditions(string $column, int $id): array
+    {
+        global $wpdb;
+
+        return [
+            [
+                "{$column} LIKE %s",   // ?attachment_id=123 in a URL
+                "{$column} LIKE %s",   // rel="attachment wp-att-123" / class="wp-att-123"
+            ],
+            [
+                '%' . $wpdb->esc_like('attachment_id=' . $id) . '%',
+                '%' . $wpdb->esc_like('wp-att-' . $id) . '%',
+            ],
+        ];
     }
 
     /**
@@ -206,6 +249,16 @@ final class LikePatterns
     public static function hasAttachmentLinkId(string $text, int $id): bool
     {
         return (bool) preg_match('/wp-att-' . $id . '(?!\d)/', $text);
+    }
+
+    /**
+     * Either form of a link to the attachment's own page. Only the disjunction
+     * of the two verifiers above — they hold the boundaries — so that the eight
+     * chains answering the two link conditions spell the pair once.
+     */
+    public static function hasAttachmentPageLink(string $text, int $id): bool
+    {
+        return self::hasAttachmentIdQuery($text, $id) || self::hasAttachmentLinkId($text, $id);
     }
 
     /**

@@ -106,8 +106,14 @@ final class TermDescriptionDetector implements DetectorInterface
 
         // A description that is itself a stored structure — JSON, or serialized
         // data a plugin parked there — keeps its IDs under arbitrary keys.
-        return LikePatterns::structureContains(LikePatterns::decodeStored($description), $id, $ctx->basenames)
-            ? 'serialized'
-            : null;
+        if (LikePatterns::structureContains(LikePatterns::decodeStored($description), $id, $ctx->basenames)) {
+            return 'serialized';
+        }
+
+        // A link to the file's own attachment page in the description's markup:
+        // a category that links its spec sheet rather than showing an image.
+        // The id is written as a query arg or inside a class name, so no branch
+        // above admits it — these are the two link conditions the query binds.
+        return LikePatterns::hasAttachmentPageLink($description, $id) ? 'attachment-page' : null;
     }
 }

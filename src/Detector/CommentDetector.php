@@ -10,10 +10,10 @@ use FreshetUnusedMedia\Scan\Reference;
 defined('ABSPATH') || exit;
 
 /**
- * Finds references in comments: a file URL in a comment body, and IDs or
- * URLs in commentmeta (review photos, attachments on replies, ACF comment
- * fields). Spam is ignored; trashed comments are restorable, so they block
- * deletion but only as possible.
+ * Finds references in comments: a file URL or a link to the file's attachment
+ * page in a comment body, and IDs or URLs in commentmeta (review photos,
+ * attachments on replies, ACF comment fields). Spam is ignored; trashed
+ * comments are restorable, so they block deletion but only as possible.
  */
 final class CommentDetector implements DetectorInterface
 {
@@ -27,16 +27,27 @@ final class CommentDetector implements DetectorInterface
         return array_merge($this->inContent($ctx), $this->inMeta($ctx));
     }
 
-    /** comment_content: only a URL can reference a file here. */
+    /**
+     * comment_content: a file URL, or a link to the file's own attachment page.
+     *
+     * The id shapes are deliberately not bound here — a comment body is prose,
+     * so a bare number in it is noise — but a link is not a shape, it is the
+     * ordinary way a reply references a document: a support answer or a
+     * documentation comment points at the PDF rather than embedding it. Only a
+     * URL used to be looked for, so that comment kept the file alive and the
+     * link did not.
+     */
     private function inContent(AttachmentContext $ctx): array
     {
         global $wpdb;
 
-        [$conditions, $params] = LikePatterns::basenameConditions('c.comment_content', $ctx->basenames);
+        [$nameConditions, $nameParams] = LikePatterns::basenameConditions('c.comment_content', $ctx->basenames);
+        [$linkConditions, $linkParams] = LikePatterns::attachmentLinkConditions('c.comment_content', $ctx->id);
 
-        if ($conditions === []) {
-            return [];
-        }
+        // The link conditions are always present, so — unlike before — there is
+        // no attachment for which this query binds nothing.
+        $conditions = array_merge($nameConditions, $linkConditions);
+        $params = array_merge($nameParams, $linkParams);
 
         $sql = "SELECT c.comment_ID, c.comment_approved, c.comment_content
                 FROM {$wpdb->comments} c
@@ -49,7 +60,18 @@ final class CommentDetector implements DetectorInterface
         $refs = [];
 
         foreach ((array) $rows as $row) {
-            if (!LikePatterns::containsBasename((string) $row->comment_content, $ctx->basenames)) {
+            $content = (string) $row->comment_content;
+
+            $match = match (true) {
+                LikePatterns::containsBasename($content, $ctx->basenames) => 'url',
+                // Confirmed like the URL, and for the same reason: the link
+                // names this attachment and nothing else, which is how
+                // post_content reads the identical markup.
+                LikePatterns::hasAttachmentPageLink($content, $ctx->id) => 'attachment-page',
+                default => null,
+            };
+
+            if ($match === null) {
                 continue;
             }
 
@@ -58,7 +80,7 @@ final class CommentDetector implements DetectorInterface
                 objectType: 'comment',
                 objectId: (int) $row->comment_ID,
                 detail: 'comment_content',
-                match: 'url',
+                match: $match,
                 confidence: $row->comment_approved === 'trash' ? Reference::POSSIBLE : Reference::CONFIRMED,
             );
         }
@@ -116,6 +138,14 @@ final class CommentDetector implements DetectorInterface
 
             if ($idMatch === null && LikePatterns::structureContains(LikePatterns::decodeStored($value), $ctx->id, $ctx->basenames)) {
                 $idMatch = 'serialized'; // JSON blob or nested JSON in serialized data.
+            }
+
+            // A link to the attachment's own page inside stored markup. Neither
+            // branch above can see it: the walk gets an opaque string leaf, and
+            // nothing quotes the id. It answers the two link conditions the
+            // query binds.
+            if ($idMatch === null && LikePatterns::hasAttachmentPageLink($value, $ctx->id)) {
+                $idMatch = 'attachment-page';
             }
 
             // Last, so a value that decodes keeps its more specific verdict: the

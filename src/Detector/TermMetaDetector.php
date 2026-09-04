@@ -69,6 +69,14 @@ final class TermMetaDetector implements DetectorInterface
                 $idMatch = 'serialized'; // JSON blob or nested JSON in serialized data.
             }
 
+            // A link to the attachment's own page inside stored markup. Neither
+            // branch above can see it: the walk gets an opaque string leaf, and
+            // nothing quotes the id. It answers the two link conditions the
+            // query binds.
+            if ($idMatch === null && LikePatterns::hasAttachmentPageLink($value, $ctx->id)) {
+                $idMatch = 'attachment-page';
+            }
+
             // Last, so a value that decodes keeps its more specific verdict: the
             // ID as a quoted attribute in a value that is neither serialized nor
             // JSON — [gallery ids="123"], data-id="123" — which the broad pass

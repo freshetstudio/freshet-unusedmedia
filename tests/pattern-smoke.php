@@ -548,7 +548,7 @@ check('decodeStored broken serialized falls back to string', LikePatterns::decod
 
 [$conditions, $params] = LikePatterns::idConditions('pm.meta_value', $id);
 check('id conditions and params align', count($conditions) === count($params), true);
-check('id conditions cover every verifier', count($conditions), 17);
+check('id conditions cover every verifier', count($conditions), 19);
 check('exact condition is bare', $params[0], '123');
 check('comma-start pattern', $params[1], '123,%');
 check('serialized int pattern is wildcarded', $params[4], '%i:123;%');
@@ -556,6 +556,8 @@ check('json string value pattern', $params[8], '%"123"%');
 check('json number value patterns', [$params[9], $params[10]], ['%:123,%', '%:123}%']);
 check('compact array member patterns', [$params[11], $params[12], $params[13]], ['%[123,%', '%[123]%', '%,123]%']);
 check('whitespace-anchored number patterns', [$params[14], $params[15], $params[16]], ['% 123%', "%\n123%", "%\t123%"]);
+check('attachment-page link patterns', [$params[17], $params[18]], ['%attachment\_id=123%', '%wp-att-123%']);
+check('the link conditions are the same two the helper builds alone', LikePatterns::attachmentLinkConditions('c.comment_content', $id)[1], [$params[17], $params[18]]);
 
 [$nameConditions, $nameParams] = LikePatterns::basenameConditions('p.post_content', $names);
 check('one condition per basename', count($nameConditions), count($names));
@@ -951,17 +953,58 @@ check('the commentmeta reference points at its comment', $commentMetaRefs[0]->ob
 check('a commentmeta value that decodes keeps its serialized verdict', $commentMetaRefs[1]->match, 'serialized');
 check('the commentmeta query admits a quoted id', $admits($commentMetaBound, $quotedShortcode), true);
 
-// The other half of the detector is out of scope on purpose: comment_content is
-// queried on basenames only, so it binds no id condition and therefore has no
-// unverified one. Asserted rather than assumed — if that ever changes, this
-// fails and the chain has to answer for it.
+// --- comment_content, which now binds two id conditions of its own
+//
+// It used to bind basenames alone, on the reasoning that only a URL can
+// reference a file in a comment. A link to the file's own attachment page is
+// the counter-example, and the ordinary one for a document: a support reply
+// points at the PDF instead of embedding it, and that comment kept nothing
+// alive. The id shapes stay out — a bare number in prose is noise, not a
+// reference — so the quoted-id condition is still deliberately absent here, and
+// that remains asserted rather than assumed.
 $inContent = new ReflectionMethod(CommentDetector::class, 'inContent');
 $inContent->setAccessible(true);
-$inContent->invoke($commentDetector, $ctx);
-$contentBound = $GLOBALS['wpdb']->lastParams;
 
-check('comment_content binds basenames and nothing else', count($contentBound), count($names));
-check('comment_content never fetches a quoted id', $admits($contentBound, $quotedShortcode), false);
+$commentLinkQuery = '<p>See <a href="https://example.test/?attachment_id=123">the brochure</a>.</p>';
+$commentLinkRel = '<p><a href="/brochure/" rel="attachment wp-att-123">Brochure</a></p>';
+$commentLinkLonger = '<p><a href="/?attachment_id=1234">Another file</a></p>';
+$commentLinkPrefixed = '<p><a rel="attachment wp-att-9123">Another file</a></p>';
+
+$GLOBALS['wpdb']->rows = [
+    (object) ['comment_ID' => '21', 'comment_approved' => '1', 'comment_content' => $commentLinkQuery],
+    (object) ['comment_ID' => '22', 'comment_approved' => '1', 'comment_content' => $commentLinkRel],
+    (object) ['comment_ID' => '23', 'comment_approved' => '1', 'comment_content' => $commentLinkLonger],
+    (object) ['comment_ID' => '24', 'comment_approved' => '1', 'comment_content' => $commentLinkPrefixed],
+    (object) ['comment_ID' => '25', 'comment_approved' => 'trash', 'comment_content' => $commentLinkQuery],
+    (object) ['comment_ID' => '26', 'comment_approved' => '1', 'comment_content' => '<img src="/wp-content/uploads/2026/07/hero.jpg">'],
+];
+
+$commentContentRefs = $inContent->invoke($commentDetector, $ctx);
+$contentBound = $GLOBALS['wpdb']->lastParams;
+$GLOBALS['wpdb']->rows = [];
+$commentContentIds = array_map(static fn($r) => $r->objectId, $commentContentRefs);
+
+check('both link forms in a comment resolve, neither near-miss does', $commentContentIds, [21, 22, 25, 26]);
+check('a linked attachment page in a comment is labelled as one', $commentContentRefs[0]->match, 'attachment-page');
+check('the rel marker resolves to the same label', $commentContentRefs[1]->match, 'attachment-page');
+check('a linked attachment page in a comment is confirmed', $commentContentRefs[0]->confidence, Reference::CONFIRMED);
+check('a link in a comment counts as used', $commentContentRefs[0]->countsAsUsed(), true);
+check('the comment reference names the body column', $commentContentRefs[0]->detail, 'comment_content');
+check('the comment reference points at its comment', $commentContentRefs[0]->objectId, 21);
+check('a link in a trashed comment stays possible', $commentContentRefs[2]->confidence, Reference::POSSIBLE);
+check('a file URL in a comment is still a URL match', $commentContentRefs[3]->match, 'url');
+check('comment_content binds basenames and the two link conditions', count($contentBound), count($names) + 2);
+check('comment_content admits both link forms', [$admits($contentBound, $commentLinkQuery), $admits($contentBound, $commentLinkRel)], [true, true]);
+check('comment_content still never fetches a quoted id', $admits($contentBound, $quotedShortcode), false);
+
+// The boundaries, as the pair each needle earns: 'attachment_id=' has no
+// right-hand delimiter, so the longer id IS fetched and the verifier is what
+// throws it away; a prefixed id shares no left anchor, so it is never fetched
+// at all. Both halves asserted, so a later widening cannot drop one of them.
+check('comment_content admits a longer id, having no right boundary', $admits($contentBound, $commentLinkLonger), true);
+check('the verifier rejects the longer id the query admitted', in_array(23, $commentContentIds, true), false);
+check('comment_content does not fetch a prefixed id at all', $admits($contentBound, $commentLinkPrefixed), false);
+check('the verifier returns nothing for the prefixed id either', in_array(24, $commentContentIds, true), false);
 
 // --- postmeta
 
@@ -1048,12 +1091,12 @@ $prettyProse = 'Delivered 123 boxes on Tuesday.';
 
 // The control for every row that follows, and the reason a zero here would be
 // a real zero: every condition that predates this task fetches none of these
-// shapes, and the three whitespace-anchored ones — which stay last in the list,
-// so this slice keeps meaning what it says — are the whole of the difference.
-// Half of this pair failing means the widening has been dropped; the other half
-// failing means it never did anything.
+// shapes, and the three whitespace-anchored ones — indices 14-16, named rather
+// than counted from the end, because the list has grown since — are the whole
+// of the difference. Half of this pair failing means the widening has been
+// dropped; the other half failing means it never did anything.
 [, $prettyIdParams] = LikePatterns::idConditions('pm.meta_value', $id);
-$prettyBefore = array_slice($prettyIdParams, 0, count($prettyIdParams) - 3);
+$prettyBefore = array_slice($prettyIdParams, 0, 14);
 $prettyShapes = [$prettyOne, $prettySpaces, $prettyIndented, $prettyArray, $prettyTabbed];
 
 check('the conditions that predate this fetch none of the pretty-printed shapes', array_map(static fn(string $v): bool => $admits($prettyBefore, $v), $prettyShapes), [false, false, false, false, false]);
@@ -1209,10 +1252,11 @@ $ctx456 = AttachmentContext::forAttachment(456);
 $ctx1234 = AttachmentContext::forAttachment(1234);
 
 // The control, in the same shape as the pretty-printed one above: the fourteen
-// conditions that predate this task fetch none of the compact shapes, and the
-// three appended for them are the whole of the difference.
+// conditions that predate this task — the eleven, plus the whitespace trio at
+// 14-16 — fetch none of the compact shapes, and the three appended for them are
+// the whole of the difference.
 [, $compactIdParams] = LikePatterns::idConditions('pm.meta_value', $id);
-$compactBefore = array_merge(array_slice($compactIdParams, 0, 11), array_slice($compactIdParams, 14));
+$compactBefore = array_merge(array_slice($compactIdParams, 0, 11), array_slice($compactIdParams, 14, 3));
 $compactShapes = [$compactSole, $compactKeyed, $compactPair, $compactSpaced];
 
 check('the conditions that predate this fetch no compact array member', array_map(static fn(string $v): bool => $admits($compactBefore, $v), $compactShapes), [false, false, false, false]);
@@ -1222,7 +1266,7 @@ check('the three appended conditions fetch every compact shape', array_map(stati
 // whitespace needle freshet-130 added. Asserted so a later change to either
 // widening cannot silently drop it.
 [, $compact456Params] = LikePatterns::idConditions('pm.meta_value', 456);
-$compact456Before = array_merge(array_slice($compact456Params, 0, 11), array_slice($compact456Params, 14));
+$compact456Before = array_merge(array_slice($compact456Params, 0, 11), array_slice($compact456Params, 14, 3));
 check('the spaced pair second member was already fetched', $admits($compact456Before, $compactSpaced), true);
 check('the compact pair second member is fetched only now', [$admits($compact456Before, $compactPair), $admits($compact456Params, $compactPair)], [false, true]);
 
@@ -1356,7 +1400,7 @@ check('the spaced pair still resolves for its second member', array_map(static f
 check('the id-in-key shapes were admitted before this task', [$admits($compactBefore, $compactKey), $admits($compactBefore, $compactSerializedKey)], [true, true]);
 check('a json key that is the id is verified as a quoted id', $compactPostRefs[4]->match, 'id-attribute');
 check('a serialized key that is the id is verified as a serialized string', $compactPostRefs[5]->match, 'serialized');
-check('no condition was added for the key position', count(LikePatterns::idConditions('pm.meta_value', $id)[0]), 17);
+check('no condition was added for the key position', count(LikePatterns::idConditions('pm.meta_value', $id)[0]), 19);
 
 // Acceptance 4: the boundaries. Both ends of these three needles are
 // delimiters, so unlike the whitespace trio the near-misses are never fetched
@@ -1373,6 +1417,174 @@ $GLOBALS['wpdb']->rows = [];
 
 check('the verifier returns nothing for a split pair either', $compactSplitRefs, []);
 check('the longer-id array is not fetched on any of the six columns', array_map(static fn(array $b): bool => $admits($b, $compactLonger), [$compactTermBound, $compactUserBound, $compactCommentBound, $compactPostBound, $compactOptionBound, $compactDescBound]), [false, false, false, false, false, false]);
+
+// ------------------------------ attachment-page links in stored values
+//                                (termmeta, usermeta, commentmeta, postmeta,
+//                                options, term descriptions)
+//
+// The document case again, on the six columns behind the shared helper rather
+// than on post_content: a wysiwyg field, a text widget, a footer theme mod or a
+// category description holding <a href="?attachment_id=123">the brochure</a>.
+// Every condition on this helper wants the id written as a value — quoted,
+// bracketed, comma-listed, serialized — and a link writes it as a query arg or
+// inside a class name, so the row was never fetched and no verifier was ever
+// handed it. The verifiers themselves are the pair post_content has used since
+// the document case was fixed; nothing new was written for either form.
+
+$linkQuery = '<p>See <a href="https://example.test/?attachment_id=123">the brochure</a>.</p>';
+$linkRel = '<p><a href="/brochure/" rel="attachment wp-att-123">Brochure</a></p>';
+$linkClass = '<p><a class="doc wp-att-123" href="/brochure/">Brochure</a></p>';
+$linkLonger = '<p><a href="/?attachment_id=1234">Another file</a></p>';
+$linkPrefixed = '<p><a rel="attachment wp-att-9123">Another file</a></p>';
+
+// The control, in the shape the two widenings before this one used: every
+// condition that predates this task fetches neither link form, and the two
+// appended for them are the whole of the difference. Half of this pair failing
+// means the widening was dropped; the other half means it never did anything.
+[, $linkIdParams] = LikePatterns::idConditions('pm.meta_value', $id);
+$linkBefore = array_slice($linkIdParams, 0, 17);
+$linkShapes = [$linkQuery, $linkRel, $linkClass];
+
+check('the conditions that predate this fetch neither link form', array_map(static fn(string $v): bool => $admits($linkBefore, $v), $linkShapes), [false, false, false]);
+check('the two appended conditions fetch every link form', array_map(static fn(string $v): bool => $admits($linkIdParams, $v), $linkShapes), [true, true, true]);
+
+/** The three link forms, then the two near-misses. */
+$linkRows = [
+    61 => $linkQuery,
+    62 => $linkRel,
+    63 => $linkClass,
+    68 => $linkLonger,
+    69 => $linkPrefixed,
+];
+
+/** Drives one detector over $linkRows and returns [objectIds, boundParams, refs]. */
+$runLink = static function (callable $rows, callable $run) use ($linkRows): array {
+    $GLOBALS['wpdb']->rows = [];
+    foreach ($linkRows as $objectId => $value) {
+        $GLOBALS['wpdb']->rows[] = $rows($objectId, $value);
+    }
+
+    $refs = $run();
+    $bound = $GLOBALS['wpdb']->lastParams;
+    $GLOBALS['wpdb']->rows = [];
+
+    return [array_map(static fn($r) => $r->objectId, $refs), $bound, $refs];
+};
+
+// --- termmeta
+
+[$linkTermIds, $linkTermBound, $linkTermRefs] = $runLink(
+    static fn(int $oid, string $v): object => (object) ['term_id' => (string) $oid, 'meta_key' => 'blurb', 'meta_value' => $v],
+    static fn(): array => (new TermMetaDetector())->find($ctx)
+);
+
+check('every link form in termmeta resolves, neither near-miss does', $linkTermIds, [61, 62, 63]);
+check('a linked attachment page in termmeta is labelled as one', $linkTermRefs[0]->match, 'attachment-page');
+check('a linked attachment page in termmeta is possible, not confirmed', $linkTermRefs[0]->confidence, Reference::POSSIBLE);
+check('a linked attachment page in termmeta still counts as used', $linkTermRefs[0]->countsAsUsed(), true);
+check('the termmeta query admits the query-arg form', $admits($linkTermBound, $linkQuery), true);
+check('the termmeta query admits the rel marker', $admits($linkTermBound, $linkRel), true);
+check('the termmeta query admits the class marker', $admits($linkTermBound, $linkClass), true);
+
+// --- usermeta
+
+[$linkUserIds, $linkUserBound, $linkUserRefs] = $runLink(
+    static fn(int $oid, string $v): object => (object) ['user_id' => (string) $oid, 'meta_key' => 'profile_html', 'meta_value' => $v],
+    static fn(): array => (new UserMetaDetector())->find($ctx)
+);
+
+check('every link form in usermeta resolves, neither near-miss does', $linkUserIds, [61, 62, 63]);
+check('a linked attachment page in usermeta is labelled as one', $linkUserRefs[0]->match, 'attachment-page');
+check('the usermeta query admits the query-arg form', $admits($linkUserBound, $linkQuery), true);
+check('the usermeta query admits the rel marker', $admits($linkUserBound, $linkRel), true);
+
+// --- commentmeta
+
+[$linkCommentIds, $linkCommentBound, $linkCommentRefs] = $runLink(
+    static fn(int $oid, string $v): object => (object) ['comment_id' => (string) $oid, 'meta_key' => 'review_media', 'meta_value' => $v, 'comment_approved' => '1'],
+    static fn(): array => $inMeta->invoke($commentDetector, $ctx)
+);
+
+check('every link form in commentmeta resolves, neither near-miss does', $linkCommentIds, [61, 62, 63]);
+check('a linked attachment page in commentmeta is labelled as one', $linkCommentRefs[0]->match, 'attachment-page');
+check('the commentmeta query admits the query-arg form', $admits($linkCommentBound, $linkQuery), true);
+check('the commentmeta query admits the rel marker', $admits($linkCommentBound, $linkRel), true);
+
+// --- postmeta
+
+[$linkPostIds, $linkPostBound, $linkPostRefs] = $runLink(
+    static fn(int $oid, string $v): object => (object) ['post_id' => (string) $oid, 'meta_key' => 'intro_html', 'meta_value' => $v, 'post_status' => 'publish'],
+    static fn(): array => (new PostmetaDetector())->find($ctx)
+);
+
+check('every link form in postmeta resolves, neither near-miss does', $linkPostIds, [61, 62, 63]);
+check('a linked attachment page in postmeta is labelled as one', $linkPostRefs[0]->match, 'attachment-page');
+check('the postmeta query admits the query-arg form', $admits($linkPostBound, $linkQuery), true);
+check('the postmeta query admits the rel marker', $admits($linkPostBound, $linkRel), true);
+check('the postmeta query admits the class marker', $admits($linkPostBound, $linkClass), true);
+
+// --- options: all three branches, because all three are behind one query
+
+$linkWidget = serialize([2 => ['title' => '', 'text' => $linkQuery]]);
+$linkThemeMod = serialize(['footer_html' => $linkRel]);
+
+$GLOBALS['wpdb']->rows = [
+    (object) ['option_name' => 'my_plugin_intro', 'option_value' => $linkQuery],
+    (object) ['option_name' => 'widget_text', 'option_value' => $linkWidget],
+    (object) ['option_name' => 'theme_mods_freshet', 'option_value' => $linkThemeMod],
+    (object) ['option_name' => 'my_plugin_intro', 'option_value' => $linkLonger],
+    (object) ['option_name' => 'my_plugin_intro', 'option_value' => $linkPrefixed],
+];
+
+$linkOptionRefs = (new OptionsDetector())->find($ctx);
+$linkOptionBound = $GLOBALS['wpdb']->lastParams;
+$GLOBALS['wpdb']->rows = [];
+
+check('every options branch answers a link, and neither near-miss does', count($linkOptionRefs), 3);
+check('a link in a plain option is labelled as one', $linkOptionRefs[0]->match, 'attachment-page');
+check('a link in a text widget resolves', $linkOptionRefs[1]->match, 'attachment-page');
+check('a widget hit is still reported as an option', $linkOptionRefs[1]->objectType, 'option');
+check('a link in a theme mod resolves', $linkOptionRefs[2]->match, 'attachment-page');
+check('a theme-mod hit keeps its object type', $linkOptionRefs[2]->objectType, 'theme_mod');
+check('the options query admits the query-arg form', $admits($linkOptionBound, $linkQuery), true);
+check('the options query admits a widget carrying a link', $admits($linkOptionBound, $linkWidget), true);
+check('the options query admits a theme mod carrying a link', $admits($linkOptionBound, $linkThemeMod), true);
+
+// --- term descriptions, the sixth column behind the same helper
+
+[$linkDescIds, $linkDescBound, $linkDescRefs] = $runLink(
+    static fn(int $oid, string $v): object => (object) ['term_id' => (string) $oid, 'description' => $v],
+    static fn(): array => $termDetector->find($ctx)
+);
+
+check('every link form in a description resolves, neither near-miss does', $linkDescIds, [61, 62, 63]);
+check('a linked attachment page in a description is labelled as one', $linkDescRefs[0]->match, 'attachment-page');
+check('a linked attachment page in a description is possible, not confirmed', $linkDescRefs[0]->confidence, Reference::POSSIBLE);
+check('the term description query admits the query-arg form', $admits($linkDescBound, $linkQuery), true);
+check('the term description query admits the rel marker', $admits($linkDescBound, $linkRel), true);
+
+// The boundaries, as the pair each needle earns. 'attachment_id=' and 'wp-att-'
+// are left-delimiters with no right-hand one, so the longer id IS fetched on
+// every column and the verifier is what throws it away; a prefixed id shares no
+// left anchor, so it is never fetched at all. Both halves are asserted, on all
+// six columns, so a later widening cannot drop one of them.
+
+$linkBounds = [$linkTermBound, $linkUserBound, $linkCommentBound, $linkPostBound, $linkOptionBound, $linkDescBound];
+
+check('every column admits the longer id, having no right boundary', array_map(static fn(array $b): bool => $admits($b, $linkLonger), $linkBounds), [true, true, true, true, true, true]);
+check('no column fetches the prefixed id at all', array_map(static fn(array $b): bool => $admits($b, $linkPrefixed), $linkBounds), [false, false, false, false, false, false]);
+check('the verifiers reject the longer id every query admitted', array_map(static fn(array $ids): bool => in_array(68, $ids, true), [$linkTermIds, $linkUserIds, $linkCommentIds, $linkPostIds, $linkDescIds]), [false, false, false, false, false]);
+check('the options verifier rejects both near-misses it saw', count($linkOptionRefs), 3);
+
+// A value that decodes keeps its more specific verdict: the link branch sits
+// after the structure walk, never in front of it, exactly as the quoted-id one
+// does. A JSON blob whose href happens to carry the id is still stored data.
+
+$GLOBALS['wpdb']->rows = [(object) ['post_id' => '64', 'meta_key' => 'settings', 'meta_value' => '{"hero":{"image":123},"link":"/?attachment_id=123"}', 'post_status' => 'publish']];
+$linkDecodes = (new PostmetaDetector())->find($ctx);
+$GLOBALS['wpdb']->rows = [];
+
+check('a value that decodes keeps its serialized verdict over the link', $linkDecodes[0]->match, 'serialized');
 
 // --------------------------------------------------------- license states
 //

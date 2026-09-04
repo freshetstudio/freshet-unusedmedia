@@ -98,9 +98,14 @@ final class OptionsDetector implements DetectorInterface
             }
 
             // A mod holding markup rather than an ID — a footer blob, a custom
-            // HTML mod — carries the attachment as a quoted attribute the walk
-            // above cannot see. Possible, not confirmed: the structure did not
-            // resolve it, only the raw value did.
+            // HTML mod — carries the attachment as a link to its own page or as
+            // a quoted attribute, neither of which the walk above can see.
+            // Possible, not confirmed: the structure did not resolve it, only
+            // the raw value did.
+            if (LikePatterns::hasAttachmentPageLink($value, $ctx->id)) {
+                return $make('theme_mod', 'attachment-page', Reference::POSSIBLE);
+            }
+
             if (LikePatterns::hasQuotedId($value, $ctx->id)) {
                 return $make('theme_mod', 'id-attribute', Reference::POSSIBLE);
             }
@@ -120,9 +125,14 @@ final class OptionsDetector implements DetectorInterface
                 return $make('option', 'widget', Reference::POSSIBLE);
             }
 
-            // A text or custom-HTML widget stores markup, so the shortcode or
-            // data- attribute naming the attachment survives unserialization as
-            // an opaque string leaf. The raw value is where it is still legible.
+            // A text or custom-HTML widget stores markup, so the link, the
+            // shortcode or the data- attribute naming the attachment survives
+            // unserialization as an opaque string leaf. The raw value is where
+            // it is still legible.
+            if (LikePatterns::hasAttachmentPageLink($value, $ctx->id)) {
+                return $make('option', 'attachment-page', Reference::POSSIBLE);
+            }
+
             if (LikePatterns::hasQuotedId($value, $ctx->id)) {
                 return $make('option', 'id-attribute', Reference::POSSIBLE);
             }
@@ -147,10 +157,18 @@ final class OptionsDetector implements DetectorInterface
             return $make('option', 'exact', Reference::POSSIBLE);
         }
 
-        // Last, after every decode-based branch above: the ID as a quoted
-        // attribute the structure walk cannot see — markup stored whole, or a
-        // string leaf inside a blob that unserializes but does not resolve. It
-        // is the '%"123"%' condition the query binds and nothing answered.
+        // After every decode-based branch above: a link to the attachment's own
+        // page, which is markup and so is invisible to the walk — an option
+        // holding a rendered block of HTML, a stored notice, a page-builder
+        // fragment. It is the two link conditions the query binds.
+        if (LikePatterns::hasAttachmentPageLink($value, $ctx->id)) {
+            return $make('option', 'attachment-page', Reference::POSSIBLE);
+        }
+
+        // Last: the ID as a quoted attribute the structure walk cannot see —
+        // markup stored whole, or a string leaf inside a blob that unserializes
+        // but does not resolve. It is the '%"123"%' condition the query binds
+        // and nothing answered.
         if (LikePatterns::hasQuotedId($value, $ctx->id)) {
             return $make('option', 'id-attribute', Reference::POSSIBLE);
         }

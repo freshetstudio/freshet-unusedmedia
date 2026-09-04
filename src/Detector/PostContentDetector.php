@@ -166,8 +166,7 @@ final class PostContentDetector implements DetectorInterface
         // embedded — so before this a linked PDF read as orphaned. Two forms,
         // both written by the editor's "Link to: attachment page": the query
         // arg in the href, and the rel/class marker on the anchor.
-        if (LikePatterns::hasAttachmentIdQuery($content, $id)
-            || LikePatterns::hasAttachmentLinkId($content, $id)) {
+        if (LikePatterns::hasAttachmentPageLink($content, $id)) {
             return 'attachment-page';
         }
 

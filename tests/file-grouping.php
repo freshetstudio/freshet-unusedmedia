@@ -116,6 +116,14 @@ function wp_basename(string $path): string
     return basename(str_replace('\\', '/', $path));
 }
 
+/** Enough of core's maybe_unserialize() for a metadata blob. */
+function maybe_unserialize(string $value): mixed
+{
+    $data = @unserialize($value, ['allowed_classes' => false]);
+
+    return $data === false && $value !== serialize(false) ? $value : $data;
+}
+
 function get_post_meta(int $id, string $key, bool $single = false): mixed
 {
     if ($key === '_wp_attached_file') {
@@ -374,6 +382,35 @@ $GLOBALS['wpdb'] = new class {
         // read OrphanSizes makes per directory, and the half of its two absence
         // tests that the disk cannot answer. Answered from the fixture library,
         // so a row whose file has been removed still counts as a row.
+        // The sizes this directory's attachment metadata names — the other half
+        // of the same test. Serialized, the way core stores it, and joined to
+        // the attached file so one read covers the whole directory.
+        if (str_contains($query['sql'], 'INNER JOIN')) {
+            $prefix = rtrim(str_replace('\\', '', (string) ($query['params'][2] ?? '')), '%');
+            $root = str_contains($query['sql'], 'NOT LIKE');
+            $blobs = [];
+
+            foreach ($GLOBALS['rows'] as $row) {
+                if ($row['file'] === '' || ($row['sizes'] ?? []) === []) {
+                    continue;
+                }
+
+                if ($root ? str_contains($row['file'], '/') : !str_starts_with($row['file'], $prefix)) {
+                    continue;
+                }
+
+                $sizes = [];
+
+                foreach ($row['sizes'] as $name => $file) {
+                    $sizes[$name] = ['file' => $file];
+                }
+
+                $blobs[] = serialize(['sizes' => $sizes]);
+            }
+
+            return $blobs;
+        }
+
         if (str_contains($query['sql'], 'meta_key = %s')) {
             $prefix = str_replace('\\', '', (string) ($query['params'][1] ?? ''));
             $prefix = rtrim($prefix, '%');
@@ -1091,6 +1128,77 @@ orphanFile('2026/06/other.jpg');
 OrphanSizes::observeAttachment(911);
 
 check('the same preview with no document behind it is listed', OrphanSizes::read()['files'], ['2026/06/report-pdf-300x169.jpg']);
+
+// An attachment's sizes are named in its metadata, and its *attached file* can
+// carry a different stem from them. Editing an image in wp-admin is the common
+// way there: the row's file becomes `hero-e1673970542774.png` while its
+// metadata still names sizes cut from `hero`. Reading only `_wp_attached_file`
+// found no row for that stem and listed the sizes as orphans — while
+// AttachmentContext was already protecting the same files as basenames of the
+// same live row. This is the regression boundary: both reads, or the two halves
+// of the plugin disagree about one file again.
+
+/** How many times the metadata read has gone to the database this run. */
+function namedStemLookups(): int
+{
+    $n = 0;
+
+    foreach ($GLOBALS['wpdb']->queries as $query) {
+        if (str_contains($query['sql'], 'INNER JOIN')) {
+            ++$n;
+        }
+    }
+
+    return $n;
+}
+
+library([
+    920 => [
+        'file' => '2026/08/hero-e1673970542774.png',
+        'bytes' => 8192,
+        'used' => true,
+        'sizes' => ['wide' => 'hero-1280x640.png'],
+    ],
+    921 => [
+        'file' => '2026/08/banner.jpg',
+        'bytes' => 8192,
+        'used' => true,
+        'sizes' => ['medium' => 'banner-300x200.jpg'],
+    ],
+]);
+
+orphanFile('2026/08/hero-320x160.png'); // the same edit's leftover, unnamed now
+orphanFile('2026/08/lost-320x160.png'); // nothing on disk or in the library
+
+OrphanSizes::reset();
+$before = namedStemLookups();
+OrphanSizes::observeAttachment(920);
+
+$edited = OrphanSizes::read();
+
+check('a size the metadata names is not orphaned by its row being edited', in_array('2026/08/hero-1280x640.png', $edited['files'], true), false);
+check('nor is a leftover of that edit, on the same stem', in_array('2026/08/hero-320x160.png', $edited['files'], true), false);
+check('and a genuine orphan in that directory is still listed', $edited['files'], ['2026/08/lost-320x160.png']);
+check('the metadata read is one query for the whole directory', namedStemLookups() - $before, 1);
+
+// And it is not asked for at all where the cheap half of the test has already
+// settled every candidate: a directory whose sizes all have their originals
+// beside them costs exactly what it did before.
+library([
+    930 => [
+        'file' => '2026/09/whole.jpg',
+        'bytes' => 8192,
+        'used' => true,
+        'sizes' => ['medium' => 'whole-300x200.jpg'],
+    ],
+]);
+
+OrphanSizes::reset();
+$before = namedStemLookups();
+OrphanSizes::observeAttachment(930);
+
+check('a directory with nothing to answer for is not read twice', namedStemLookups() - $before, 0);
+check('and nothing is listed for it', OrphanSizes::read()['count'], 0);
 
 // Nothing on this list is in the unused figures, and the way that is held is
 // structural: the classes that produce the count, the listings, the badge, the

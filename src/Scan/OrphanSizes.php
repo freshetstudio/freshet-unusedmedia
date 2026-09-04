@@ -27,7 +27,14 @@ defined('ABSPATH') || exit;
  *   or `hero-rotated.*` in the same directory means the original is there.
  * - **No attachment row carrying that stem.** A row whose file is missing from
  *   disk is still a row: the library knows about the original, so the size is
- *   its derivative and not an orphan.
+ *   its derivative and not an orphan. A row carries a stem two ways, and both
+ *   count: through its `_wp_attached_file`, and through the sizes its
+ *   `_wp_attachment_metadata` names. The two are not the same set — an image
+ *   edited in wp-admin has its attached file rewritten to a new stem
+ *   (`hero-e1673970542774.png`) while its metadata still names sizes cut from
+ *   the old one (`hero-1280x640.png`) — and reading only the first listed a
+ *   file the same plugin's AttachmentContext was already protecting as one of
+ *   that live row's basenames.
  *
  * The enumeration rides along with the scan rather than walking the tree: the
  * scan already visits every attachment, and each attachment's directory is read
@@ -39,6 +46,9 @@ defined('ABSPATH') || exit;
 final class OrphanSizes
 {
     public const OPTION = 'freshet_unusedmedia_orphan_sizes';
+
+    /** Where core records the sizes it generated. FileGroups owns the other key. */
+    private const META_DATA = '_wp_attachment_metadata';
 
     /** Paths recorded for one directory. Enough to act on; the count is exact regardless. */
     private const MAX_FILES_PER_DIR = 100;
@@ -123,6 +133,23 @@ final class OrphanSizes
 
         foreach ($candidates as $entry => $stem) {
             if (self::anyPresent($stem, $rowStems)) {
+                unset($candidates[$entry]);
+            }
+        }
+
+        if ($candidates === []) {
+            return;
+        }
+
+        // The other half of that same test, kept as a second read rather than
+        // folded into the first: it carries every metadata blob in the
+        // directory, and asking for those is only worth it once something has
+        // survived the cheap half. A directory whose sizes all have their
+        // originals never reaches this line.
+        $namedStems = self::namedStemsIn($dir);
+
+        foreach ($candidates as $entry => $stem) {
+            if (self::anyPresent($stem, $namedStems)) {
                 unset($candidates[$entry]);
             }
         }
@@ -242,6 +269,72 @@ final class OrphanSizes
 
             if ($stem !== '') {
                 $stems[$stem] = true;
+            }
+        }
+
+        return $stems;
+    }
+
+    /**
+     * The stems named by the sizes in this directory's attachment metadata.
+     *
+     * `_wp_attached_file` is what the row points at; the sizes it generated are
+     * recorded separately, and the two can name different stems. That is not an
+     * edge case — every image edited in wp-admin is one — and reading only the
+     * attached file made this list disagree with `AttachmentContext`, which has
+     * always admitted every `sizes[…]['file']` as a basename of the live row.
+     *
+     * A stem here is read the way `SizeSiblings::naming()` reads it: off the
+     * *named size*, not off the attached file, so a document's previews
+     * (`doc-pdf-300x169.jpg` → `doc-pdf`) need no special case, and so a
+     * leftover size beside a named one is covered by the same stem.
+     *
+     * One query per directory, joined rather than looped: `get_post_meta()` per
+     * attachment is the shape that ran a scan out of memory once already.
+     *
+     * @return array<string, true>
+     */
+    private static function namedStemsIn(string $dir): array
+    {
+        global $wpdb;
+
+        $where = $dir === ''
+            ? ['f.meta_value NOT LIKE %s', '%/%']
+            : ['f.meta_value LIKE %s', $wpdb->esc_like($dir . '/') . '%'];
+
+        $sql = $wpdb->prepare(
+            "SELECT m.meta_value FROM {$wpdb->postmeta} m"
+            . " INNER JOIN {$wpdb->postmeta} f ON f.post_id = m.post_id AND f.meta_key = %s"
+            . " WHERE m.meta_key = %s AND {$where[0]}",
+            FileGroups::META_FILE,
+            self::META_DATA,
+            $where[1]
+        );
+
+        // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery -- prepared above; one read per directory that still holds a candidate.
+        $blobs = (array) $wpdb->get_col($sql);
+
+        $stems = [];
+
+        foreach ($blobs as $blob) {
+            $meta = maybe_unserialize((string) $blob);
+
+            foreach ((array) (is_array($meta) ? ($meta['sizes'] ?? []) : []) as $size) {
+                if (!is_array($size)) {
+                    continue;
+                }
+
+                foreach (array_merge([$size], array_values((array) ($size['sources'] ?? []))) as $named) {
+                    if (!is_array($named) || empty($named['file'])) {
+                        continue;
+                    }
+
+                    $stem = SizeSiblings::sizeStem(wp_basename((string) $named['file']));
+
+                    if ($stem !== '') {
+                        $stems[$stem] = true;
+                    }
+                }
             }
         }
 

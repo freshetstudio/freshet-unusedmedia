@@ -27,6 +27,9 @@ if (PHP_SAPI !== 'cli') {
 
 define('ABSPATH', dirname(__DIR__) . '/');
 
+/** Where the fixture's files live when a case needs them on disk. */
+define('UPLOADS', sys_get_temp_dir() . '/freshet-unusedmedia-pattern-tests');
+
 // --------------------------------------------------------------- WP stubs
 
 /**
@@ -36,6 +39,7 @@ define('ABSPATH', dirname(__DIR__) . '/');
 const FIXTURE_ID = 123;
 const FIXTURE_UNICODE_ID = 124;
 const FIXTURE_UNICODE_NAME = '写真.jpg';
+const FIXTURE_UNICODE_STEM = '写真';
 
 function wp_basename(string $path): string
 {
@@ -53,6 +57,20 @@ function get_post_meta(int $id, string $key, bool $single = false): string
         FIXTURE_UNICODE_ID => '2026/07/' . FIXTURE_UNICODE_NAME,
         default => '',
     };
+}
+
+/**
+ * Where the fixture's file would be. AttachmentContext reads the directory this
+ * names, looking for size files the metadata has stopped listing, so the tests
+ * that care about those (the stale-size section below) create it and the rest
+ * run against a directory that is not there — which is also the offloaded-media
+ * case, and must be silent rather than fatal.
+ */
+function get_attached_file(int $id, bool $unfiltered = false): string|false
+{
+    $file = get_post_meta($id, '_wp_attached_file', true);
+
+    return $file === '' ? false : UPLOADS . '/' . $file;
 }
 
 /**
@@ -267,6 +285,7 @@ $GLOBALS['wpdb'] = new class {
     }
 };
 
+require_once ABSPATH . 'src/Scan/SizeSiblings.php';
 require_once ABSPATH . 'src/Scan/AttachmentContext.php';
 require_once ABSPATH . 'src/Scan/Reference.php';
 require_once ABSPATH . 'src/Detector/DetectorInterface.php';
@@ -296,6 +315,7 @@ use FreshetUnusedMedia\License\LicenseClient;
 use FreshetUnusedMedia\License\NoLicense;
 use FreshetUnusedMedia\License\RemoteLicense;
 use FreshetUnusedMedia\Scan\AttachmentContext;
+use FreshetUnusedMedia\Scan\SizeSiblings;
 use FreshetUnusedMedia\Scan\Reference;
 use FreshetUnusedMedia\Scan\UploadGrace;
 
@@ -1708,6 +1728,71 @@ $grace(-1);
 check('a negative grace holds nothing back', UploadGrace::isActive(), false);
 
 $grace();
+
+// --------------------------------------------- the generated-size shape
+//
+// The names AttachmentContext now reads off the disk, and the one rule that
+// keeps that safe: the part before `-WIDTHxHEIGHT` is compared to the stem
+// WHOLE, never as a prefix. `hero.jpg` and `hero-1.jpg` are two uploads, and
+// the second one's sizes are named after it — so a prefix match would hand
+// hero.jpg a name for a file it does not own, and a page referencing that file
+// would then keep the wrong original alive. Every negative below is a file that
+// really does sit in the same directory as the positives.
+
+check('a generated size names the stem it was cut from', SizeSiblings::sizeStem('hero-300x200.jpg'), 'hero');
+check('an alternate-mime copy of one is still that stem', SizeSiblings::sizeStem('hero-300x200.jpg.webp'), 'hero');
+check('a second upload\'s size names the second upload', SizeSiblings::sizeStem('hero-1-300x200.jpg'), 'hero-1');
+check('so hero does not own it', SizeSiblings::sizeStem('hero-1-300x200.jpg') === 'hero', false);
+check('the original itself is not a size', SizeSiblings::sizeStem('hero.jpg'), '');
+check('nor is the -scaled copy of it', SizeSiblings::sizeStem('hero-scaled.jpg'), '');
+check('nor a name that merely ends in digits', SizeSiblings::sizeStem('hero-300.jpg'), '');
+check('nor one with the dimensions in the middle', SizeSiblings::sizeStem('hero-300x200-print.jpg'), '');
+check('nor a name with no extension at all', SizeSiblings::sizeStem('hero-300x200'), '');
+check('a non-ASCII name keeps its own stem', SizeSiblings::sizeStem(FIXTURE_UNICODE_STEM . '-300x200.jpg'), FIXTURE_UNICODE_STEM);
+
+// The stem an original is known by, which is what a size's stem is compared
+// against. The -scaled and -rotated copies and the original are one stem.
+check('the original is its own stem', SizeSiblings::stem('hero.jpg'), 'hero');
+check('the -scaled copy is the same stem', SizeSiblings::stem('hero-scaled.jpg'), 'hero');
+check('the -rotated copy too', SizeSiblings::stem('hero-rotated.jpg'), 'hero');
+check('a second upload is a stem of its own', SizeSiblings::stem('hero-1.jpg'), 'hero-1');
+
+// The dimensions are NOT stripped, because core does not strip them either: an
+// upload that arrives called `photo-1024x768.jpg` has its sizes named from the
+// whole of that. Reading it as `photo` would hand it every `photo-*x*.jpg` in
+// the directory, which is another upload's family.
+check('an upload whose own name ends in dimensions keeps them', SizeSiblings::stem('photo-1024x768.jpg'), 'photo-1024x768');
+check('and its own sizes are cut from the whole name', SizeSiblings::sizeStem('photo-1024x768-300x200.jpg'), 'photo-1024x768');
+check('so the shorter name does not claim them', SizeSiblings::sizeStem('photo-1024x768-300x200.jpg') === 'photo', false);
+
+// The format is part of the boundary too. A library holding `doc.pdf` and
+// `doc.jpg` as two uploads is ordinary, and `doc-300x200.jpg` belongs to the
+// second one — so a size is this attachment's only when it is in this
+// attachment's format, with the alternate-mime chain allowed on the end.
+check('a size in this attachment\'s own format is its own', SizeSiblings::isSibling('hero-300x200.jpg', 'hero', 'jpg'), true);
+check('an alternate-mime copy of that size still is', SizeSiblings::isSibling('hero-300x200.jpg.webp', 'hero', 'jpg'), true);
+check('a same-named upload in another format is not', SizeSiblings::isSibling('doc-300x200.jpg', 'doc', 'pdf'), false);
+check('and neither is another stem in the right format', SizeSiblings::isSibling('logo-300x200.jpg', 'hero', 'jpg'), false);
+
+// How the sizes are named is read off what core recorded for this very
+// attachment, rather than guessed from the attached file. A document is why:
+// core renders it to `doc-pdf.jpg` first and cuts the previews from that, so
+// neither the stem nor the format can be read off `doc.pdf`.
+check(
+    'the naming is read off the metadata core wrote',
+    SizeSiblings::naming('/uploads/2026/07/doc.pdf', ['sizes' => ['medium' => ['file' => 'doc-pdf-300x169.jpg']]]),
+    ['doc-pdf', 'jpg']
+);
+check(
+    'and falls back to the attached file where there is none',
+    SizeSiblings::naming('/uploads/2026/07/hero-scaled.jpg', false),
+    ['hero', 'jpg']
+);
+
+// A directory that is not there is silence, not a failure: media is routinely
+// offloaded, and a scan that stopped on a missing month would be worse than one
+// that finds no siblings in it.
+check('an unreadable directory yields no siblings', SizeSiblings::forFile('/nonexistent-freshet/2026/07/hero-scaled.jpg'), []);
 
 // ------------------------------------------------------------------ report
 

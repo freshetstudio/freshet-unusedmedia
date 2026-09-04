@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace FreshetUnusedMedia\Admin;
 
+use FreshetUnusedMedia\Scan\OrphanSizes;
 use FreshetUnusedMedia\Scan\ResultFilters;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\Scanner;
 use FreshetUnusedMedia\Scan\ScanState;
+use FreshetUnusedMedia\Scan\SizeSiblings;
 
 defined('ABSPATH') || exit;
 
@@ -98,6 +100,10 @@ final class Ajax
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- simple count to size the scan.
             $total = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'attachment'");
             $state = $this->state->start($total);
+
+            // A fresh scan describes the library as it is now, so last time's
+            // orphaned sizes go with the old results rather than outliving them.
+            OrphanSizes::reset();
         }
 
         $batchSize = max(1, (int) apply_filters('freshet_unusedmedia_batch_size', 10));
@@ -132,6 +138,7 @@ final class Ajax
 
         foreach ($ids as $id) {
             $this->scanner->scan($id);
+            OrphanSizes::observeAttachment($id);
             ++$processed;
             $last = $id;
 
@@ -139,6 +146,13 @@ final class Ajax
                 break;
             }
         }
+
+        // Nothing that was read from disk survives the batch: the directory
+        // listing is the one structure here that grows with the library rather
+        // than with the batch, and a request that keeps it has kept the wrong
+        // thing (freshet-124).
+        SizeSiblings::flush();
+        OrphanSizes::flush();
 
         $state = $this->state->advance($last, $processed);
 

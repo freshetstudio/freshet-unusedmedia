@@ -18,10 +18,14 @@ declare(strict_types=1);
  * are counted once. And the mirror of it: grouping is on the whole path, never
  * on a basename, or two unrelated files merge and a live one goes.
  *
- * It also pins the other edge of that unit of work: a file on disk with no
- * attachment row — a stale intermediate size left by a size change — is outside
- * it entirely, neither reported nor reclaimed. That limit is deliberate, so it
- * is asserted here rather than left to be rediscovered as a defect.
+ * It also pins the other edge of that unit of work, which has two halves. A
+ * stale intermediate size — the file a size change left behind — is still one
+ * of its original's names, read off the disk rather than off metadata that no
+ * longer lists it, so a page pointing at it keeps the original alive. But it is
+ * not an object of its own: no row, no group, no verdict, no bytes in the
+ * saving. The one case where it does become one is where its original has gone
+ * entirely, and that listing is asserted here too — including the two
+ * near-misses that must stay out of it.
  *
  * The last section reads the same invariant from the render side, because the
  * Media Library is the one screen that lists rows rather than files: whatever a
@@ -252,6 +256,13 @@ function update_option(string $name, mixed $value, bool $autoload = true): bool
     return true;
 }
 
+function delete_option(string $name): bool
+{
+    unset($GLOBALS['options'][$name]);
+
+    return true;
+}
+
 function wp_json_encode(mixed $value): string|false
 {
     return json_encode($value);
@@ -359,6 +370,29 @@ $GLOBALS['wpdb'] = new class {
     {
         $query = $this->resolve($sql);
 
+        // The paths the attachment rows in one directory point at — the single
+        // read OrphanSizes makes per directory, and the half of its two absence
+        // tests that the disk cannot answer. Answered from the fixture library,
+        // so a row whose file has been removed still counts as a row.
+        if (str_contains($query['sql'], 'meta_key = %s')) {
+            $prefix = str_replace('\\', '', (string) ($query['params'][1] ?? ''));
+            $prefix = rtrim($prefix, '%');
+            $root = str_contains($query['sql'], 'NOT LIKE');
+            $files = [];
+
+            foreach ($GLOBALS['rows'] as $row) {
+                if ($row['file'] === '') {
+                    continue;
+                }
+
+                if ($root ? !str_contains($row['file'], '/') : str_starts_with($row['file'], $prefix)) {
+                    $files[] = $row['file'];
+                }
+            }
+
+            return $files;
+        }
+
         return [];
     }
 
@@ -410,6 +444,8 @@ foreach ([
     'src/Scan/UploadGrace.php',
     'src/Scan/ResultStore.php',
     'src/Scan/ReclaimedLedger.php',
+    'src/Scan/SizeSiblings.php',
+    'src/Scan/OrphanSizes.php',
     'src/Scan/Scanner.php',
     'src/Detector/DetectorInterface.php',
     'src/Detector/LikePatterns.php',
@@ -432,15 +468,18 @@ foreach ([
 use FreshetUnusedMedia\Admin\DeleteController;
 use FreshetUnusedMedia\Admin\MediaColumn;
 use FreshetUnusedMedia\Admin\StatusBadge;
+use FreshetUnusedMedia\Detector\LikePatterns;
 use FreshetUnusedMedia\Detector\RecentUploadDetector;
 use FreshetUnusedMedia\Scan\AttachmentContext;
 use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\FileSize;
+use FreshetUnusedMedia\Scan\OrphanSizes;
 use FreshetUnusedMedia\Scan\ReclaimedLedger;
 use FreshetUnusedMedia\Scan\Reference;
 use FreshetUnusedMedia\Scan\ResultFilters;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\Scanner;
+use FreshetUnusedMedia\Scan\SizeSiblings;
 use FreshetUnusedMedia\Scan\UploadGrace;
 
 // ------------------------------------------------------------- assertions
@@ -484,8 +523,11 @@ function library(array $rows): void
     $GLOBALS['options'] = [];
 
     // A new library is a new request: the sibling groups memoised for the last
-    // fixture describe rows that no longer exist.
+    // fixture describe rows that no longer exist, and so does the directory
+    // listing read for the last fixture's basenames.
     FileGroups::flush();
+    SizeSiblings::flush();
+    OrphanSizes::flush();
 
     foreach ($rows as $id => $row) {
         $GLOBALS['rows'][$id] = [
@@ -530,6 +572,9 @@ function orphanFile(string $file, int $bytes = 256): void
     }
 
     file_put_contents($path, str_repeat('x', $bytes));
+
+    // The directory has changed under whatever was remembered of it.
+    SizeSiblings::flush();
 }
 
 function onDisk(string $file): bool
@@ -883,10 +928,42 @@ check('a stale size joins no group', FileGroups::siblings(800), [800]);
 check('and is not a row the file verdict is counted from', FileGroups::fileStatus(800)['siblings'], [800]);
 check('a stale size is not sized into the saving', FileSize::bytes(800), 8192);
 
+// Three decoys beside the leftover, because the fix for it reads the directory
+// and a directory holds other people's files. Two of these are size-shaped and
+// belong to other stems, and one shares the stem but is not a generated size at
+// all — admitting any of them would hand this attachment a name for a file it
+// does not own, and a reference to that file would then keep the wrong original
+// alive.
+orphanFile('2026/03/banner-1-300x200.jpg');
+orphanFile('2026/03/logo-300x200.jpg');
+orphanFile('2026/03/banner-notasize.jpg');
+
 $context = AttachmentContext::forAttachment(800);
 
+// The registered/stale pair, and it is one file in both rows of it: the same
+// `banner-640x480.jpg`, on disk either way, named by the metadata or not. A
+// page carrying that URL is the same page either way too — so the answer must
+// not depend on what the last metadata rewrite happened to list, which is what
+// it did before (freshet-125 measured `match=false` here, and the original then
+// scanned unused while a live page displayed it).
+$markup = '<img src="https://example.test/wp-content/uploads/2026/03/banner-640x480.jpg" alt="">';
+
+[$conditions, $params] = LikePatterns::basenameConditions('post_content', $context->basenames);
+
 check('a size the metadata still names is matchable', in_array('banner-300x200.jpg', $context->basenames, true), true);
-check('a size it no longer names is not', in_array('banner-640x480.jpg', $context->basenames, true), false);
+check('a size it no longer names is matchable too, because the file is there', in_array('banner-640x480.jpg', $context->basenames, true), true);
+
+// Both engines, so a later change cannot half-drop it: the query has to fetch
+// the row and the verifier has to accept it, and either one alone is a file
+// that reads unused.
+check('the query fetches a row carrying the stale size', in_array('%banner-640x480.jpg%', $params, true), true);
+check('and the verifier resolves that markup to this attachment', LikePatterns::containsBasename($markup, $context->basenames), true);
+
+// The boundary. Same directory, same first six letters, three different files.
+check('another upload\'s own size is not this attachment\'s name', in_array('banner-1-300x200.jpg', $context->basenames, true), false);
+check('nor is a size cut from a different stem', in_array('logo-300x200.jpg', $context->basenames, true), false);
+check('nor is a sibling that is not size-shaped at all', in_array('banner-notasize.jpg', $context->basenames, true), false);
+check('and neither reaches the query', in_array('%banner-1-300x200.jpg%', $params, true), false);
 
 // Case one: the original is used, so nothing here is deletable at all.
 $result = $deleter()->deleteVerified([800]);
@@ -920,6 +997,130 @@ check('the size its metadata named goes with it', onDisk('2026/04/flyer-300x200.
 check('the stale size is left behind, unreported and unreclaimed', onDisk('2026/04/flyer-640x480.jpg'), true);
 check('the saving figure never claimed the stale size', ReclaimedLedger::read()['bytes'], 8192);
 check('and counts the deletion as one file', ReclaimedLedger::read()['files'], 1);
+
+// --------------------------------------- the size whose original is gone
+//
+// The other side of the boundary above. A generated size belongs to its
+// original and is judged with it — but when the original is not there at all,
+// the size belongs to nothing: no row names it, nothing sits at the stem's own
+// path, and no page can be displaying a file the library has no record of.
+//
+// That case is reported on its own and is never folded into the unused figures.
+// It has no attachment row, so it has no group, no verdict, no badge and no
+// bytes in the saving — and it has nothing to corroborate the finding against
+// either, which is why it is a listing and not a delete button.
+//
+// Both absences are required, and the two near-misses below are what says so:
+// an original that is a row whose file has gone, and an original that is a file
+// with no row. Either one present means the size is a derivative of something
+// the site still knows about, and derivatives are not listable.
+
+library([
+    900 => [
+        'file' => '2026/05/poster.jpg',
+        'bytes' => 8192,
+        'used' => false,
+        'sizes' => ['medium' => 'poster-300x200.jpg'],
+    ],
+    901 => [
+        'file' => '2026/05/gone.jpg',
+        'bytes' => 8192,
+        'used' => false,
+    ],
+]);
+
+// The row for gone.jpg stays; its file does not. A library entry that points at
+// a missing file still knows about the original.
+unlink(UPLOADS . '/2026/05/gone.jpg');
+
+orphanFile('2026/05/gone-640x480.jpg');   // near-miss: the row is still there
+orphanFile('2026/05/flyer.jpg');          // near-miss: the file is still there
+orphanFile('2026/05/flyer-640x480.jpg');
+orphanFile('2026/05/lost-640x480.jpg');   // neither a row nor a file behind it
+
+OrphanSizes::reset();
+OrphanSizes::observeAttachment(900);
+
+$orphans = OrphanSizes::read();
+
+check('a size with no row and no original file is listed', in_array('2026/05/lost-640x480.jpg', $orphans['files'], true), true);
+check('and it is the only one', $orphans['count'], 1);
+check('a size whose original is a row with no file is not listed', in_array('2026/05/gone-640x480.jpg', $orphans['files'], true), false);
+check('a size whose original is a file with no row is not listed', in_array('2026/05/flyer-640x480.jpg', $orphans['files'], true), false);
+check('a size its own attachment still names is not listed', in_array('2026/05/poster-300x200.jpg', $orphans['files'], true), false);
+
+// The directory is examined once per request however many attachments in it are
+// scanned, and a second pass over the same state records the same answer rather
+// than a second copy of it.
+OrphanSizes::observeAttachment(901);
+
+check('one directory is read once per request', OrphanSizes::read()['count'], 1);
+
+OrphanSizes::flush();
+OrphanSizes::observeAttachment(901);
+
+check('and re-examining it replaces the finding rather than doubling it', OrphanSizes::read()['count'], 1);
+
+// A document's previews are cut from a rendered image rather than from the
+// document — `doc.pdf` becomes `doc-pdf.jpg` and the sizes come off that — so a
+// preview whose `doc-pdf.jpg` has gone still has an original: the PDF itself,
+// sitting right there. Listing it would be telling somebody a live document's
+// thumbnail is orphaned.
+library([
+    910 => [
+        'file' => '2026/06/report.pdf',
+        'bytes' => 8192,
+        'used' => true,
+        'sizes' => ['medium' => 'report-pdf-300x169.jpg'],
+    ],
+]);
+
+OrphanSizes::reset();
+OrphanSizes::observeAttachment(910);
+
+check('a live document\'s preview size is not orphaned', OrphanSizes::read()['count'], 0);
+
+// And the same directory with the document itself gone: nothing names the
+// preview any more, on disk or in the library, so now it is listed.
+library([]);
+orphanFile('2026/06/report-pdf-300x169.jpg');
+
+OrphanSizes::reset();
+$GLOBALS['rows'][911] = ['file' => '2026/06/other.jpg', 'status' => 'inherit', 'used' => false, 'uploaded' => time(), 'sizes' => []];
+orphanFile('2026/06/other.jpg');
+OrphanSizes::observeAttachment(911);
+
+check('the same preview with no document behind it is listed', OrphanSizes::read()['files'], ['2026/06/report-pdf-300x169.jpg']);
+
+// Nothing on this list is in the unused figures, and the way that is held is
+// structural: the classes that produce the count, the listings, the badge, the
+// saving figure and the deletions cannot see it at all.
+foreach ([
+    'src/Scan/ResultStore.php',
+    'src/Scan/FileGroups.php',
+    'src/Scan/FileSize.php',
+    'src/Scan/ReclaimedLedger.php',
+    'src/Admin/StatusBadge.php',
+    'src/Admin/MediaColumn.php',
+    'src/Admin/DeleteController.php',
+] as $file) {
+    check(
+        $file . ' cannot reach the listing',
+        str_contains((string) file_get_contents(ABSPATH . $file), 'OrphanSizes'),
+        false
+    );
+}
+
+$orphanSource = (string) file_get_contents(ABSPATH . 'src/Scan/OrphanSizes.php');
+
+check('the listing is free on every build', str_contains($orphanSource, 'isPro'), false);
+check('and deletes nothing', str_contains($orphanSource, 'unlink') || str_contains($orphanSource, 'wp_delete_attachment'), false);
+
+// It is rendered as its own section of the scan tab, beside the scan that
+// produced it, and not inside either listing.
+$toolsSource = (string) file_get_contents(ABSPATH . 'src/Admin/ToolsPage.php');
+
+check('the screen renders it as its own section', str_contains($toolsSource, '$this->renderOrphanSizes();'), true);
 
 // --------------------------------------------------------- trashed rows
 //

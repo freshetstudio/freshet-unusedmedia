@@ -15,7 +15,9 @@ final class AttachmentContext
     /**
      * @param string[] $basenames Every basename the attachment may appear as
      *                            (original, -scaled, size variants, alternate
-     *                            mime sources, encoded spellings).
+     *                            mime sources, size files still on disk that
+     *                            the metadata no longer names, encoded
+     *                            spellings).
      */
     private function __construct(
         public readonly int $id,
@@ -74,6 +76,26 @@ final class AttachmentContext
 
             if (is_string($stripped) && $stripped !== $base) {
                 $names[] = $stripped;
+            }
+        }
+
+        // Every size file on disk that the metadata above does not name. A size
+        // that stops being registered is dropped from `sizes` on the next
+        // metadata rewrite while its file stays on disk, so the names collected
+        // above are what the library *believes* rather than what it has — and a
+        // page still pointing at the leftover would resolve to no attachment at
+        // all. Reading the directory closes that, and closes it here: the list
+        // is what every detector matches on, in SQL and in verification alike,
+        // so a stale size becomes simply another basename of its original and
+        // nothing downstream changes. Bounded to this attachment's own stem —
+        // see SizeSiblings, where the boundary is the whole point.
+        if ($attached !== '') {
+            $file = get_attached_file($id);
+
+            if (is_string($file) && $file !== '') {
+                foreach (SizeSiblings::forFile($file, $meta) as $sibling) {
+                    $names[] = $sibling;
+                }
             }
         }
 

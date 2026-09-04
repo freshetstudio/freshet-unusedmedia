@@ -7,9 +7,11 @@ namespace FreshetUnusedMedia\Cli;
 use FreshetUnusedMedia\License\LicenseInterface;
 use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\FileSize;
+use FreshetUnusedMedia\Scan\OrphanSizes;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\Scanner;
 use FreshetUnusedMedia\Scan\ScanState;
+use FreshetUnusedMedia\Scan\SizeSiblings;
 use WP_CLI;
 use WP_CLI\Utils;
 
@@ -95,6 +97,10 @@ final class ScanCommand
 
         if (!isset($assocArgs['resume'])) {
             $this->state->reset();
+
+            // Starting over, so last scan's orphaned sizes go with the cursor:
+            // they describe a library that has since been scanned again.
+            OrphanSizes::reset();
         }
 
         $state = $this->state->current();
@@ -129,6 +135,7 @@ final class ScanCommand
 
             foreach ($ids as $id) {
                 $this->scanner->scan($id);
+                OrphanSizes::observeAttachment($id);
                 ++$processed;
                 $last = $id;
                 $progress?->tick();
@@ -318,6 +325,13 @@ final class ScanCommand
         // outliving its rows is how a wrong verdict happens. It is also the one
         // structure here that would otherwise grow for the whole run.
         FileGroups::flush();
+
+        // The directory listing read for the basenames, and the record of which
+        // directories this run has already examined. Both grow with the library
+        // rather than with the batch, and this command is the one caller that
+        // runs long enough for that to matter.
+        SizeSiblings::flush();
+        OrphanSizes::flush();
 
         // SAVEQUERIES keeps every query of the run, which on a six-figure scan is
         // the larger half of the problem.

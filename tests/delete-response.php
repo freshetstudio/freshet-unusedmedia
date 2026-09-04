@@ -367,6 +367,7 @@ foreach ([
     'src/Scan/ResultStore.php',
     'src/Scan/ReclaimedLedger.php',
     'src/Scan/ScanState.php',
+    'src/Scan/SizeSiblings.php',
     'src/Scan/Scanner.php',
     'src/Detector/DetectorInterface.php',
     'src/Detector/LikePatterns.php',

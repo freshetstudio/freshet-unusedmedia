@@ -17,6 +17,7 @@ delete_option('freshet_unusedmedia_scan');
 delete_option('freshet_unusedmedia_last_scan');
 delete_option('freshet_unusedmedia_content_changed_at');
 delete_option('freshet_unusedmedia_reclaimed');
+delete_option('freshet_unusedmedia_orphan_sizes');
 
 // License data always goes, in every build. These options only ever exist on a
 // licensed site; deleting what was never written is free.

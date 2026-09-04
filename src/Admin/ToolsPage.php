@@ -6,6 +6,7 @@ namespace FreshetUnusedMedia\Admin;
 
 use FreshetUnusedMedia\License\LicenseInterface;
 use FreshetUnusedMedia\Scan\FileSize;
+use FreshetUnusedMedia\Scan\OrphanSizes;
 use FreshetUnusedMedia\Scan\ResultFilters;
 use FreshetUnusedMedia\Scan\ResultSort;
 use FreshetUnusedMedia\Scan\ResultStore;
@@ -157,6 +158,11 @@ final class ToolsPage
                 // with the scan because it exports what the last scan found,
                 // used and unused alike, not just the delete list.
                 $this->report?->render();
+
+                // A by-product of the same scan, and free on every build: the
+                // size files it walked past whose original is gone. Its own
+                // section, never folded into the unused figures above it.
+                $this->renderOrphanSizes();
         }
 
         echo '</div>';
@@ -524,6 +530,64 @@ final class ToolsPage
         );
 
         $this->renderProgress();
+
+        echo '</div>';
+    }
+
+    /**
+     * Generated size files the last scan found with no original behind them —
+     * no file at the original's own path, and no library entry naming it.
+     *
+     * Deliberately its own section rather than a row in the unused list. Those
+     * files belong to no attachment, so they have no row, no group, no verdict
+     * and no bytes in the space figure; presenting them as unused *files* would
+     * put a number on screen that the delete path cannot act on and the totals
+     * do not include. Nothing here is deletable — the listing has no attachment
+     * row to corroborate it against, and being wrong about a file is worse than
+     * making somebody remove it themselves.
+     *
+     * Free on every build. It reads no license: the paid tier is the four
+     * components the pricing names, and this is not one of them.
+     */
+    private function renderOrphanSizes(): void
+    {
+        $orphans = OrphanSizes::read();
+
+        if ($orphans['count'] === 0) {
+            return;
+        }
+
+        echo '<div class="freshet-unusedmedia-section">';
+        printf(
+            '<h2>%s</h2>',
+            esc_html(sprintf(
+                /* translators: %s: number of files. */
+                __('Sizes with no original (%s)', 'freshet-unused-media'),
+                number_format_i18n($orphans['count'])
+            ))
+        );
+        echo '<p class="description">' . esc_html__('Thumbnail files whose original upload is gone: nothing sits at the original\'s own path and no library entry names it, so no attachment is holding them and no page can be showing them. They are listed on their own — not counted as unused, not in the list above, not in any space figure — and this plugin does not delete them.', 'freshet-unused-media') . '</p>';
+
+        echo '<ul class="freshet-unusedmedia-orphans">';
+
+        foreach ($orphans['files'] as $file) {
+            echo '<li><code>' . esc_html($file) . '</code></li>';
+        }
+
+        echo '</ul>';
+
+        if ($orphans['truncated']) {
+            printf(
+                '<p class="description">%s</p>',
+                esc_html(sprintf(
+                    // The same sentence the listings use for "showing N of M",
+                    // and deliberately the same msgid: one phrase, one string.
+                    __('%1$s of %2$s', 'freshet-unused-media'),
+                    number_format_i18n(count($orphans['files'])),
+                    number_format_i18n($orphans['count'])
+                ))
+            );
+        }
 
         echo '</div>';
     }

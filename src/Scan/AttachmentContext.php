@@ -15,9 +15,9 @@ final class AttachmentContext
     /**
      * @param string[] $basenames Every basename the attachment may appear as
      *                            (original, -scaled, size variants, alternate
-     *                            mime sources, size files still on disk that
-     *                            the metadata no longer names, encoded
-     *                            spellings).
+     *                            mime sources, the generation an in-admin edit
+     *                            superseded, size files still on disk that the
+     *                            metadata no longer names, encoded spellings).
      */
     private function __construct(
         public readonly int $id,
@@ -64,6 +64,26 @@ final class AttachmentContext
                     if (is_array($source) && !empty($source['file'])) {
                         $names[] = wp_basename((string) $source['file']);
                     }
+                }
+            }
+        }
+
+        // The generation an in-admin image edit superseded. Editing rewrites the
+        // stem — hero.jpg becomes hero-e1673970542774.jpg — so the pre-edit
+        // original and its sizes are named by none of the sources above: not by
+        // the attached file, which is the edited one; not by the metadata, which
+        // describes the edited generation; and not by the disk read below, whose
+        // stem is the attached file's own and is matched whole. Those files stay
+        // on disk and stay on any page that already pointed at them, and this is
+        // the only record core keeps of them. Read from the same per-attachment
+        // meta cache as `_wp_attached_file` above, so it costs no extra query.
+        // Absent, or an empty value where a rewrite left one behind, is silence.
+        $backup = get_post_meta($id, '_wp_attachment_backup_sizes', true);
+
+        if (is_array($backup)) {
+            foreach ($backup as $superseded) {
+                if (is_array($superseded) && !empty($superseded['file'])) {
+                    $names[] = wp_basename((string) $superseded['file']);
                 }
             }
         }

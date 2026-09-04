@@ -34,20 +34,52 @@ define('UPLOADS', sys_get_temp_dir() . '/freshet-unusedmedia-pattern-tests');
 
 /**
  * Fixture attachments: id 123, hero.jpg with a -scaled original, two sizes and
- * a WebP source; id 124, a non-ASCII filename with no sizes.
+ * a WebP source; id 124, a non-ASCII filename with no sizes; id 125, an image
+ * edited in wp-admin, whose superseded generation core records under
+ * `_wp_attachment_backup_sizes`; id 126, the shape a production library carries
+ * on one row — that key present with an empty value rather than an array.
  */
 const FIXTURE_ID = 123;
 const FIXTURE_UNICODE_ID = 124;
 const FIXTURE_UNICODE_NAME = '写真.jpg';
 const FIXTURE_UNICODE_STEM = '写真';
+const FIXTURE_EDITED_ID = 125;
+const FIXTURE_EDITED_FILE = 'sunset-e1673970542774.jpg';
+const FIXTURE_EDITED_SIZE = 'sunset-e1673970542774-300x200.jpg';
+const FIXTURE_PRE_EDIT_FILE = 'sunset.jpg';
+const FIXTURE_PRE_EDIT_SIZE = 'sunset-300x200.jpg';
+const FIXTURE_EMPTY_BACKUP_ID = 126;
 
 function wp_basename(string $path): string
 {
     return basename(str_replace('\\', '/', $path));
 }
 
-function get_post_meta(int $id, string $key, bool $single = false): string
+function get_post_meta(int $id, string $key, bool $single = false): mixed
 {
+    // What wp-admin's image editor leaves behind: an entry per superseded file,
+    // keyed `<size>-orig` (or `<size>-<timestamp>` after a second edit). The
+    // third entry here is deliberately not an array — a value core never wrote
+    // is still a value the scan can be handed, and it must contribute nothing
+    // rather than warn.
+    //
+    // The empty row and the absent key are one branch on purpose: a stored
+    // empty string and a key that was never written both read as '' through
+    // `get_post_meta($id, $key, true)`, so the fixture cannot make them differ
+    // and neither can the code under test. Both are asserted below all the same,
+    // because they are two different things on the library that produced them.
+    if ($key === '_wp_attachment_backup_sizes') {
+        return match ($id) {
+            FIXTURE_EDITED_ID => [
+                'full-orig' => ['width' => 1600, 'height' => 1200, 'file' => FIXTURE_PRE_EDIT_FILE],
+                'medium-orig' => ['width' => 300, 'height' => 200, 'file' => FIXTURE_PRE_EDIT_SIZE],
+                'thumbnail-orig' => '',
+            ],
+            FIXTURE_EMPTY_BACKUP_ID => '',
+            default => '',
+        };
+    }
+
     if ($key !== '_wp_attached_file') {
         return '';
     }
@@ -55,6 +87,8 @@ function get_post_meta(int $id, string $key, bool $single = false): string
     return match ($id) {
         FIXTURE_ID => '2026/07/hero-scaled.jpg',
         FIXTURE_UNICODE_ID => '2026/07/' . FIXTURE_UNICODE_NAME,
+        FIXTURE_EDITED_ID => '2026/07/' . FIXTURE_EDITED_FILE,
+        FIXTURE_EMPTY_BACKUP_ID => '2026/07/beach.jpg',
         default => '',
     };
 }
@@ -107,15 +141,20 @@ function maybe_unserialize(string $value): mixed
 
 function wp_get_attachment_metadata(int $id): array|false
 {
-    return $id === FIXTURE_ID
-        ? [
+    return match ($id) {
+        FIXTURE_ID => [
             'original_image' => 'hero.jpg',
             'sizes' => [
                 'medium' => ['file' => 'hero-300x200.jpg', 'sources' => ['image/webp' => ['file' => 'hero-300x200.webp']]],
                 'thumbnail' => ['file' => 'hero-150x150.jpg'],
             ],
-        ]
-        : false;
+        ],
+        // An edit rewrites the metadata wholesale, so it describes the edited
+        // generation and nothing else — which is the whole reason the superseded
+        // one has to be read from somewhere.
+        FIXTURE_EDITED_ID => ['sizes' => ['medium' => ['file' => FIXTURE_EDITED_SIZE]]],
+        default => false,
+    };
 }
 
 function get_post(int $id): ?object
@@ -1793,6 +1832,70 @@ check(
 // offloaded, and a scan that stopped on a missing month would be worse than one
 // that finds no siblings in it.
 check('an unreadable directory yields no siblings', SizeSiblings::forFile('/nonexistent-freshet/2026/07/hero-scaled.jpg'), []);
+
+// --------------------------------------------- the superseded generation
+//
+// An image edited in wp-admin keeps its old files. Core rewrites the stem —
+// `sunset.jpg` becomes `sunset-e1673970542774.jpg` — rewrites the metadata to
+// describe the new generation only, and records the old one under
+// `_wp_attachment_backup_sizes` and nowhere else. So the pre-edit original is
+// in none of this class's other sources: not the attached file, which is the
+// edited one; not the metadata; and not the disk read above, whose stem is the
+// attached file's own and is compared whole (`sunset` is not
+// `sunset-e1673970542774`). A page still showing the pre-edit file therefore
+// resolved to no attachment at all, and the attachment could scan unused while
+// that file was on screen — the same failure the section above closes, reached
+// by a different route.
+
+$edited = AttachmentContext::forAttachment(FIXTURE_EDITED_ID)->basenames;
+
+check('the edited file is a name', in_array(FIXTURE_EDITED_FILE, $edited, true), true);
+check('and so is the edited generation\'s size', in_array(FIXTURE_EDITED_SIZE, $edited, true), true);
+check('the superseded original is a name too', in_array(FIXTURE_PRE_EDIT_FILE, $edited, true), true);
+check('and so is the superseded size', in_array(FIXTURE_PRE_EDIT_SIZE, $edited, true), true);
+check('a backup entry that is not an array adds nothing', count($edited), 4);
+
+// Both engines, so a later change cannot half-drop it: the query has to fetch
+// the row and the verifier has to accept it, and either one alone is a file
+// that still reads unused.
+$preEdit = '<img src="https://example.test/wp-content/uploads/2026/07/' . FIXTURE_PRE_EDIT_FILE . '" alt="">';
+
+[$editedConditions, $editedParams] = LikePatterns::basenameConditions('post_content', $edited);
+
+check('the query fetches a row carrying the pre-edit original', in_array('%' . FIXTURE_PRE_EDIT_FILE . '%', $editedParams, true), true);
+check('and the verifier resolves that markup to this attachment', LikePatterns::containsBasename($preEdit, $edited), true);
+check('one condition per name, no more', count($editedConditions), count($edited));
+
+// The other direction: nothing referencing the superseded generation leaves the
+// attachment judged on its live names exactly as before. The backup names are
+// full filenames like every other one — never a stem another upload's files
+// could be claimed through, which is what would attach a reference to the wrong
+// file.
+check('a second upload sharing the stem is not one of these names', in_array('sunset-2.jpg', $edited, true), false);
+check('nor is a size cut from that second upload', in_array('sunset-2-300x200.jpg', $edited, true), false);
+check('so markup for it resolves elsewhere', LikePatterns::containsBasename('<img src="/wp-content/uploads/2026/07/sunset-2.jpg">', $edited), false);
+check('while the live edited file still resolves here', LikePatterns::containsBasename('<img src="/wp-content/uploads/2026/07/' . FIXTURE_EDITED_FILE . '">', $edited), true);
+
+// An attachment that was never edited has no such key, and gains nothing.
+check('an unedited attachment gains no names', count($names), 5);
+
+// And the one shape a production library actually carries beside the arrays:
+// the key present with an empty value. It must contribute no name and say
+// nothing while doing it — a warning per attachment is a scan that fills a log.
+$diagnostics = [];
+
+set_error_handler(static function (int $errno, string $message) use (&$diagnostics): bool {
+    $diagnostics[] = $message;
+
+    return true;
+});
+
+$emptyBackup = AttachmentContext::forAttachment(FIXTURE_EMPTY_BACKUP_ID)->basenames;
+
+restore_error_handler();
+
+check('an empty backup value contributes no name', $emptyBackup, ['beach.jpg']);
+check('and raises no diagnostic', $diagnostics, []);
 
 // ------------------------------------------------------------------ report
 

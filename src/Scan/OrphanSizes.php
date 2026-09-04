@@ -25,16 +25,26 @@ defined('ABSPATH') || exit;
  *
  * - **No file at the stem's own path.** Anything named `hero.*`, `hero-scaled.*`
  *   or `hero-rotated.*` in the same directory means the original is there.
- * - **No attachment row carrying that stem.** A row whose file is missing from
- *   disk is still a row: the library knows about the original, so the size is
- *   its derivative and not an orphan. A row carries a stem two ways, and both
- *   count: through its `_wp_attached_file`, and through the sizes its
- *   `_wp_attachment_metadata` names. The two are not the same set — an image
- *   edited in wp-admin has its attached file rewritten to a new stem
- *   (`hero-e1673970542774.png`) while its metadata still names sizes cut from
- *   the old one (`hero-1280x640.png`) — and reading only the first listed a
- *   file the same plugin's AttachmentContext was already protecting as one of
- *   that live row's basenames.
+ * - **No attachment row carrying that stem, and no attachment row standing on
+ *   the file itself.** A row whose file is missing from disk is still a row:
+ *   the library knows about the original, so the size is its derivative and not
+ *   an orphan. A row carries a stem two ways, and both count: through its
+ *   `_wp_attached_file`, and through the sizes its `_wp_attachment_metadata`
+ *   names. The two are not the same set — an image edited in wp-admin has its
+ *   attached file rewritten to a new stem (`hero-e1673970542774.png`) while its
+ *   metadata still names sizes cut from the old one (`hero-1280x640.png`) — and
+ *   reading only the first listed a file the same plugin's AttachmentContext
+ *   was already protecting as one of that live row's basenames.
+ *
+ *   The stem is not the whole of that read, either. `Logo-Bikepal-300x200.png`
+ *   can be an upload's *own* name — nobody generated it, someone exported it at
+ *   that size and dropped it in — and then the row's stem is
+ *   `Logo-Bikepal-300x200`, never `Logo-Bikepal`. A size-shaped name never
+ *   enters the on-disk originals either, so both tests missed the one record
+ *   that settles it: the path is that row's `_wp_attached_file`. The paths the
+ *   same query already returns are therefore kept beside the stems it derives,
+ *   and a candidate standing on one of them is the library's own file rather
+ *   than an orphan.
  *
  * The enumeration rides along with the scan rather than walking the tree: the
  * scan already visits every attachment, and each attachment's directory is read
@@ -129,10 +139,18 @@ final class OrphanSizes
         // paths this directory's attachment rows point at. Not a needle and not
         // a match — an enumeration of a directory, asked once for the whole of
         // it rather than once per candidate stem.
-        $rowStems = self::attachedStemsIn($dir);
+        //
+        // Two readings of the same rows, from the one read: the stem a row's
+        // sizes would be cut from, and the path the row itself stands on. The
+        // second costs nothing — the paths are already in hand — and is the
+        // only thing that answers a size-shaped upload, whose stem is its own
+        // full name and so matches nothing.
+        $attached = self::attachedIn($dir);
 
         foreach ($candidates as $entry => $stem) {
-            if (self::anyPresent($stem, $rowStems)) {
+            $path = $dir === '' ? $entry : $dir . '/' . $entry;
+
+            if (isset($attached['paths'][$path]) || self::anyPresent($stem, $attached['stems'])) {
                 unset($candidates[$entry]);
             }
         }
@@ -238,11 +256,23 @@ final class OrphanSizes
     }
 
     /**
-     * The stems of every attachment row whose file is in this directory.
+     * What this directory's attachment rows say, in the two readings that count.
      *
-     * @return array<string, true>
+     * `stems` is the name each row's sizes would be cut from — the original
+     * behind a `hero-300x200.jpg`. `paths` is the rows' own stored paths, kept
+     * because a stem cannot answer for an upload whose *own* filename is
+     * size-shaped: `Logo-Bikepal-300x200.png` yields the stem
+     * `Logo-Bikepal-300x200`, so the row it belongs to is invisible to the stem
+     * test while the row plainly stands on the file.
+     *
+     * Both come off the same `get_col()`, so this is the same one query per
+     * directory it has always been; the paths are compared whole rather than by
+     * basename, which keeps a same-named file in a subdirectory the `LIKE`
+     * also matches from answering for one here.
+     *
+     * @return array{stems: array<string, true>, paths: array<string, true>}
      */
-    private static function attachedStemsIn(string $dir): array
+    private static function attachedIn(string $dir): array
     {
         global $wpdb;
 
@@ -263,16 +293,25 @@ final class OrphanSizes
         $files = (array) $wpdb->get_col($sql);
 
         $stems = [];
+        $paths = [];
 
         foreach ($files as $file) {
-            $stem = SizeSiblings::stem(wp_basename((string) $file));
+            $path = trim(str_replace('\\', '/', (string) $file), '/');
+
+            if ($path === '') {
+                continue;
+            }
+
+            $paths[$path] = true;
+
+            $stem = SizeSiblings::stem(wp_basename($path));
 
             if ($stem !== '') {
                 $stems[$stem] = true;
             }
         }
 
-        return $stems;
+        return ['stems' => $stems, 'paths' => $paths];
     }
 
     /**

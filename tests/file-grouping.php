@@ -1200,6 +1200,34 @@ OrphanSizes::observeAttachment(930);
 check('a directory with nothing to answer for is not read twice', namedStemLookups() - $before, 0);
 check('and nothing is listed for it', OrphanSizes::read()['count'], 0);
 
+// A size-shaped filename is not proof of a generated size. Somebody exports
+// `Logo-Bikepal-300x200.png` at that size and uploads it under that name, and
+// then the file *is* an attachment's own `_wp_attached_file` — while its stem
+// reads as `Logo-Bikepal-300x200`, which no row and no file on disk answers
+// for. Both absence tests therefore passed on a file the library owns, and the
+// list said it belonged to nothing. The row's own path is the record that
+// settles it, and it comes from the query that was already being made.
+library([
+    940 => [
+        'file' => '2026/10/Logo-Bikepal-300x200.png',
+        'bytes' => 8192,
+        'used' => true,
+        'sizes' => ['thumbnail' => 'Logo-Bikepal-300x200-150x150.png'],
+    ],
+]);
+
+orphanFile('2026/10/lost-640x480.jpg'); // no row, no original: the honest case
+
+OrphanSizes::reset();
+$before = count($GLOBALS['wpdb']->queries);
+OrphanSizes::observeAttachment(940);
+
+$selfNamed = OrphanSizes::read();
+
+check('a size-shaped upload that is its own row\'s file is not orphaned', in_array('2026/10/Logo-Bikepal-300x200.png', $selfNamed['files'], true), false);
+check('and the genuine orphan beside it is still the whole list', $selfNamed['files'], ['2026/10/lost-640x480.jpg']);
+check('reading the rows\' own paths costs no extra query', count($GLOBALS['wpdb']->queries) - $before, 2);
+
 // Nothing on this list is in the unused figures, and the way that is held is
 // structural: the classes that produce the count, the listings, the badge, the
 // saving figure and the deletions cannot see it at all.

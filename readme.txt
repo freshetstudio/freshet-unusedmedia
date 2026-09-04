@@ -4,7 +4,7 @@ Tags: media, unused media, media library, clean up, attachments
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.0.1
+Stable tag: 1.0.2
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -102,12 +102,27 @@ Never. Scanning only reads and caches results. Deletion happens exclusively when
 
 == Changelog ==
 
+= 1.0.2 =
+* **Deletion now works on the file, not the attachment row.** Where two library entries point at the same file on disk, deleting one no longer removes a file the other still uses. The unused count, the unused list and the delete pass all group by file.
+* A Media Library row is judged by its file for the same reason, so the Usage column and the unused list can no longer disagree about one file.
+* A file uploaded in the last 24 hours now says it is held back on the library badge and in the evidence panel, instead of reading as used or showing nothing at all.
+* The evidence panel says why a file is being held back, instead of leaving the reason blank.
+* Both listings sort from their own column headers.
+* The unused figure is sent back with every delete batch, so the count on screen stays right through a long deletion.
+* Detects an ID inside JSON however it is spaced — pretty-printed with spaces around the colon, or written as a member of a compact array like `[12,34]` — in post content, meta and options alike.
+* Detects an ID stored as a quoted string where only a bare number was recognised before.
+* Searches a namespaced block's whole attribute object rather than only its `data` key: a file referenced as `{"imageId":123}` by a custom block used to scan as unused.
+* Scans term descriptions — an image pasted into a category, tag or product-category description used to read as unused.
+* Reads a link to a file's own attachment page as a reference.
+* A value that refers back to itself can no longer hang a scan — some multilingual plugins store one, and the scan used to run until it exhausted memory.
+* The WP-CLI scan releases each batch's caches, so memory stays flat across a large library.
+* A page of the unused list resolves its files in one query instead of one per row.
+
 = 1.0.1 =
 * Detects field values stored inside ACF block markup, which carry no URL and were previously invisible.
 * Detects IDs in shortcode attributes beyond `[gallery]` — `[playlist]` and page-builder shortcodes included.
 * Detects IDs inside JSON stored in meta and options under any key, including JSON nested in serialized settings.
 * Scans comments and comment meta, and post excerpts.
-* Scans term descriptions — an image pasted into a category, tag or product-category description used to read as unused.
 * Counts autosaves (unsaved edits) as usage; old revisions still do not count.
 * Matches percent-encoded and JSON-escaped spellings of non-ASCII filenames, and alternate-format (WebP/AVIF) sources recorded in attachment metadata.
 * Files uploaded in the last 24 hours count as in use (`freshet_unusedmedia_upload_grace` to tune).

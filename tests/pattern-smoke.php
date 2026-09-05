@@ -1897,6 +1897,57 @@ restore_error_handler();
 check('an empty backup value contributes no name', $emptyBackup, ['beach.jpg']);
 check('and raises no diagnostic', $diagnostics, []);
 
+// ------------------------------ core's own record is not somebody's reference
+//
+// The other side of the section above. Now that every superseded filename is a
+// needle, the row core keeps them in is a matchable row — and two uploads cut
+// from the same image carry byte-identical `_wp_attachment_backup_sizes`
+// values, so each would answer for the other. The scanned attachment's own rows
+// were never the risk (the query carries `pm.post_id <> %d`); a sibling's are.
+// The exclusion is in the WHERE, so the check is on the statement the detector
+// builds, and then on the rows that WHERE actually leaves it.
+
+$editedCtx = AttachmentContext::forAttachment(FIXTURE_EDITED_ID);
+$excludedKeys = (array) (new ReflectionClass(PostmetaDetector::class))->getConstant('EXCLUDED_KEYS');
+
+// A sibling upload's backup record, and an ordinary field holding the same
+// filename. Only one of the two is a human pointing at the file.
+$siblingBackupRow = (object) [
+    'post_id' => '77',
+    'meta_key' => '_wp_attachment_backup_sizes',
+    'meta_value' => serialize(['full-orig' => ['width' => 1600, 'height' => 1200, 'file' => FIXTURE_PRE_EDIT_FILE]]),
+    'post_status' => 'inherit',
+];
+$ordinaryRow = (object) [
+    'post_id' => '78',
+    'meta_key' => 'hero_html',
+    'meta_value' => '<img src="/wp-content/uploads/2026/07/' . FIXTURE_PRE_EDIT_FILE . '" alt="">',
+    'post_status' => 'publish',
+];
+
+$GLOBALS['wpdb']->rows = [$siblingBackupRow, $ordinaryRow];
+(new PostmetaDetector())->find($editedCtx);
+$backupBound = $GLOBALS['wpdb']->lastParams;
+
+check('the backup-sizes key is excluded like the metadata key', in_array('_wp_attachment_backup_sizes', $excludedKeys, true), true);
+check('and it is bound into the statement, not merely listed', in_array('_wp_attachment_backup_sizes', $backupBound, true), true);
+
+// The rows the WHERE leaves behind — filtered by the detector's own excluded
+// keys rather than a list repeated here, so this cannot pass a fix it did not get.
+$GLOBALS['wpdb']->rows = array_values(array_filter(
+    [$siblingBackupRow, $ordinaryRow],
+    static fn(object $row): bool => !in_array($row->meta_key, $excludedKeys, true)
+));
+
+$siblingRefs = (new PostmetaDetector())->find($editedCtx);
+$GLOBALS['wpdb']->rows = [];
+
+$siblingKeys = array_map(static fn($ref): string => $ref->detail, $siblingRefs);
+
+check('a sibling attachment\'s backup record is not a reference', in_array('_wp_attachment_backup_sizes', $siblingKeys, true), false);
+check('an ordinary meta key carrying the same filename still is', in_array('hero_html', $siblingKeys, true), true);
+check('so the pair yields exactly one reference', count($siblingRefs), 1);
+
 // ------------------------------------------------------------------ report
 
 foreach ($failures as $failure) {

@@ -16,9 +16,21 @@ defined('ABSPATH') || exit;
  */
 final class PostmetaDetector implements DetectorInterface
 {
+    /**
+     * Keys that record an attachment's own files rather than display them.
+     *
+     * `_wp_attachment_metadata` and `_wp_attachment_backup_sizes` are the two
+     * that matter here: both are core's record of the filenames belonging to an
+     * attachment — the current generation and the one an in-admin edit
+     * superseded — so a row of either names a file without referencing it. The
+     * query already skips the scanned attachment's own rows (`pm.post_id <>
+     * %d`), but two uploads cut from the same image carry byte-identical values
+     * on these keys, and each would otherwise read as a reference for the other.
+     */
     private const EXCLUDED_KEYS = [
         '_wp_attached_file',
         '_wp_attachment_metadata',
+        '_wp_attachment_backup_sizes',
         '_wp_attachment_image_alt',
         '_wp_old_slug',
         '_wp_old_date',

@@ -429,6 +429,18 @@ check('unicode basename, browser-encoded URL', LikePatterns::containsBasename('<
 check('unicode basename, json_encode default', LikePatterns::containsBasename(json_encode(['url' => 'https://example.test/uploads/' . FIXTURE_UNICODE_NAME]), $unicode), true);
 check('unicode basename, unrelated file', LikePatterns::containsBasename('/uploads/%E5%86%99%E7%9C%9F-2.jpg', $unicode), false);
 
+// Case. MySQL's LIKE folds, so basenameConditions() fetches a row spelling the
+// file in any case; a case-sensitive verifier here then dropped it and the
+// attachment could scan unused. Both directions matter: the fold must admit the
+// same file written differently, and must not start admitting a different file.
+check('uppercase URL resolves to the file', LikePatterns::containsBasename('<img src="/wp-content/uploads/2026/07/HERO-300X200.JPG">', $names), true);
+check('mixed-case URL resolves to the file', LikePatterns::containsBasename('<a href="/uploads/2026/07/Hero-300x200.JPG">x</a>', $names), true);
+check('uppercase extension alone resolves to the file', LikePatterns::containsBasename('/uploads/2026/07/hero-300x200.JPG', $names), true);
+check('uppercase unrelated filename still does not match', LikePatterns::containsBasename('<img src="/wp-content/uploads/2026/07/OTHER.JPG">', $names), false);
+check('folding does not blur a digit boundary', LikePatterns::containsBasename('/uploads/2026/07/HERO-300X201.JPG', $names), false);
+check('folding does not make a longer stem match', LikePatterns::containsBasename('/uploads/2026/07/HERO-2-300X200.JPG', $names), false);
+check('uppercase unicode variant, unrelated file', LikePatterns::containsBasename('/uploads/%E5%86%99%E7%9C%9F-2.JPG', $unicode), false);
+
 // -------------------------------------------------- isExactId
 
 check('exact id', LikePatterns::isExactId('123', $id), true);
@@ -454,6 +466,10 @@ check('serialized int', LikePatterns::hasSerializedInt('a:1:{i:0;i:123;}', $id),
 check('serialized longer int', LikePatterns::hasSerializedInt('a:1:{i:0;i:1234;}', $id), false);
 check('serialized int without terminator', LikePatterns::hasSerializedInt('i:123', $id), false);
 check('serialized prefixed int', LikePatterns::hasSerializedInt('i:9123;', $id), false);
+// Deliberately NOT folded: the fetching LIKE admits I:123; but serialize()
+// never writes it and unserialize() never reads it, so rejecting it drops no
+// reference. Asserted so a later pass folds it on purpose or not at all.
+check('uppercase serialized token is not a reference', LikePatterns::hasSerializedInt('a:1:{i:0;I:123;}', $id), false);
 
 // -------------------------------------------------- hasSerializedString
 
@@ -461,6 +477,7 @@ check('serialized string', LikePatterns::hasSerializedString('a:1:{s:5:"image";s
 check('serialized longer string', LikePatterns::hasSerializedString('s:4:"1234"', $id), false);
 check('serialized prefixed string', LikePatterns::hasSerializedString('s:4:"9123"', $id), false);
 check('length prefix must agree', LikePatterns::hasSerializedString('s:6:"123456"', $id), false);
+check('uppercase serialized string token is not a reference', LikePatterns::hasSerializedString('S:3:"123"', $id), false);
 
 // -------------------------------------------------- hasJsonId
 
@@ -471,6 +488,10 @@ check('json longer id', LikePatterns::hasJsonId('{"id":1234}', $id), false);
 check('json longer id as string', LikePatterns::hasJsonId('{"id":"1234"}', $id), false);
 check('json suffixed key is not id', LikePatterns::hasJsonId('{"media_id":123}', $id), false);
 check('json ids array is not a bare id', LikePatterns::hasJsonId('{"ids":[123]}', $id), false);
+check('uppercase json key', LikePatterns::hasJsonId('{"ID":123}', $id), true);
+check('mixed-case json key', LikePatterns::hasJsonId('{"Id": "123"}', $id), true);
+check('uppercase suffixed key is still not id', LikePatterns::hasJsonId('{"MEDIA_ID":123}', $id), false);
+check('uppercase key, longer id', LikePatterns::hasJsonId('{"ID":1234}', $id), false);
 
 // -------------------------------------------------- hasQuotedId
 
@@ -496,12 +517,16 @@ check('attachment_id followed by another arg', LikePatterns::hasAttachmentIdQuer
 check('attachment_id, longer id', LikePatterns::hasAttachmentIdQuery('/?attachment_id=1234', $id), false);
 check('attachment_id, prefixed id', LikePatterns::hasAttachmentIdQuery('/?attachment_id=9123', $id), false);
 check('a plain post id is not an attachment_id', LikePatterns::hasAttachmentIdQuery('/?p=123', $id), false);
+check('uppercase attachment_id query arg', LikePatterns::hasAttachmentIdQuery('<a href="/?ATTACHMENT_ID=123">PDF</a>', $id), true);
+check('uppercase attachment_id, longer id', LikePatterns::hasAttachmentIdQuery('/?ATTACHMENT_ID=1234', $id), false);
 
 check('wp-att in a rel attribute', LikePatterns::hasAttachmentLinkId('<a href="/hero" rel="attachment wp-att-123">hero</a>', $id), true);
 check('wp-att in a class attribute', LikePatterns::hasAttachmentLinkId('<a class="link wp-att-123" href="/hero">hero</a>', $id), true);
 check('wp-att, longer id', LikePatterns::hasAttachmentLinkId('<a rel="attachment wp-att-1234">x</a>', $id), false);
 check('wp-att, prefixed id', LikePatterns::hasAttachmentLinkId('<a rel="attachment wp-att-9123">x</a>', $id), false);
 check('wp-image is not wp-att', LikePatterns::hasAttachmentLinkId('<img class="wp-image-123">', $id), false);
+check('uppercase wp-att marker', LikePatterns::hasAttachmentLinkId('<a rel="attachment WP-ATT-123">hero</a>', $id), true);
+check('uppercase wp-att, longer id', LikePatterns::hasAttachmentLinkId('<a rel="attachment WP-ATT-1234">x</a>', $id), false);
 
 check('data-id attribute', LikePatterns::hasDataId('<figure data-id="123"></figure>', $id), true);
 check('data-id, single quoted', LikePatterns::hasDataId("<figure data-id='123'></figure>", $id), true);
@@ -511,6 +536,11 @@ check('data-id, prefixed id', LikePatterns::hasDataId('<figure data-id="9123"></
 check('data-id, unquoted longer id', LikePatterns::hasDataId('<figure data-id=1234></figure>', $id), false);
 check('data-id, id inside a list', LikePatterns::hasDataId('<figure data-id="4,123,9"></figure>', $id), false);
 check('another data attribute is not data-id', LikePatterns::hasDataId('<figure data-slide-id="123"></figure>', $id), false);
+// An HTML attribute name is case-insensitive to the browser, so DATA-ID renders
+// the file exactly as data-id does.
+check('uppercase data-id attribute', LikePatterns::hasDataId('<figure DATA-ID="123"></figure>', $id), true);
+check('uppercase data-id, longer id', LikePatterns::hasDataId('<figure DATA-ID="1234"></figure>', $id), false);
+check('uppercase other data attribute is still not data-id', LikePatterns::hasDataId('<figure DATA-SLIDE-ID="123"></figure>', $id), false);
 
 // -------------------------------------------------- structureContains
 
@@ -654,6 +684,8 @@ $match = static fn(string $content): ?string => $verify->invoke($detector, $cont
 check('wp-image class', $match('<img class="wp-image-123" src="/x.jpg">'), 'wp-image-class');
 check('wp-image class, longer id', $match('<img class="wp-image-1234" src="/x.jpg">'), null);
 check('wp-image class, prefixed id', $match('<img class="wp-image-9123" src="/x.jpg">'), null);
+check('uppercase wp-image class', $match('<img class="WP-IMAGE-123" src="/x.jpg">'), 'wp-image-class');
+check('uppercase wp-image class, longer id', $match('<img class="WP-IMAGE-1234" src="/x.jpg">'), null);
 check('block attribute', $match('<!-- wp:image {"id":123,"sizeSlug":"large"} -->'), 'block-id');
 check('block attribute, longer id', $match('<!-- wp:image {"id":1234,"sizeSlug":"large"} -->'), null);
 check('gallery block', $match('<!-- wp:gallery {"ids":[4,123,9],"linkTo":"none"} -->'), 'gallery');
@@ -663,6 +695,8 @@ check('gallery shortcode', $match('[gallery ids="4,123,9"]'), 'gallery');
 check('gallery shortcode, single quotes', $match("[gallery columns=\"2\" ids='123']"), 'gallery');
 check('gallery shortcode, longer id', $match('[gallery ids="4,1234,9"]'), null);
 check('resized URL in content', $match('<a href="https://example.test/wp-content/uploads/2026/07/hero-300x200.jpg">file</a>'), 'url');
+check('uppercase resized URL in content', $match('<a href="https://example.test/wp-content/uploads/2026/07/HERO-300X200.JPG">file</a>'), 'url');
+check('uppercase unrelated URL in content', $match('<a href="https://example.test/wp-content/uploads/2026/07/OTHER.JPG">file</a>'), null);
 check('original URL in content', $match('<a href="https://example.test/wp-content/uploads/2026/07/hero.jpg">file</a>'), 'url');
 check('unrelated content', $match('<p>Nothing to see here — 1234, other.jpg.</p>'), null);
 check('empty content', $match(''), null);

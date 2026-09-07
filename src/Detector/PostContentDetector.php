@@ -136,7 +136,12 @@ final class PostContentDetector implements DetectorInterface
             return 'url';
         }
 
-        if (preg_match('/wp-image-' . $id . '(?!\d)/', $content)) {
+        // Case-folded like the LikePatterns markup predicates: 'wp-image-123'
+        // is one of this detector's own LIKE needles, and that fetch folds, so
+        // a case-sensitive verifier here drops a row the query admitted. The
+        // class is written by the editor in lower case, but an <img> carrying
+        // it in any case is still the file on a page.
+        if (preg_match('/wp-image-' . $id . '(?!\d)/i', $content)) {
             return 'wp-image-class';
         }
 

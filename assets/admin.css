@@ -132,6 +132,23 @@
     margin-top: 0;
 }
 
+/* The Scan tab's headline (freshet-D119 (1)). The three figures are the reason
+   the screen exists, and at body size between two paragraphs of helper text they
+   read as a footnote - "it gets lost in a lot of text". They now open the
+   section and carry a heading's weight.
+
+   Typography and order only: no background, no border, no padding and no width
+   cap, so freshet-D81's unboxing stands and this is not the restyle freshet-D89
+   (3) refused to open. */
+
+.freshet-unusedmedia-counts {
+    margin: 0 0 4px;
+    font-size: 18px;
+    line-height: 1.5;
+    font-weight: 600;
+    color: #1d2327;
+}
+
 /* "Unused files (400) [Delete all]" - the destructive control on the heading row. */
 .freshet-unusedmedia-section__heading {
     display: flex;
@@ -226,15 +243,20 @@
     margin-bottom: 6px;
 }
 
-/* What a license adds — the four-item list under the license status */
+/* What a license adds — the four-item list under the license status — and the
+   helper-text lists on the Scan and Unused tabs, which are the same object: the
+   points under a lead sentence, where a paragraph used to carry all of them
+   (freshet-D119). One shape, so the screens do not grow a second kind of list. */
 
-.freshet-unusedmedia-adds {
+.freshet-unusedmedia-adds,
+.freshet-unusedmedia-notes {
     margin: 4px 0 12px;
     padding-left: 16px;
     list-style: disc;
 }
 
-.freshet-unusedmedia-adds li {
+.freshet-unusedmedia-adds li,
+.freshet-unusedmedia-notes li {
     margin-bottom: 4px;
 }
 
@@ -320,8 +342,18 @@
    <span class="description"> inside a <td>, and that is table content, not
    prose. 70ch is a measure rather than a pixel width so it tracks the admin
    font. Scoped under the wrap, so the attachment meta box - already a narrow
-   column - is untouched. */
+   column - is untouched.
 
-.freshet-unusedmedia-wrap p.description {
+   The note lists join p.description on the same rule rather than getting one of
+   their own: a lead sentence's bullets are the same running prose that paragraph
+   was, and leaving them uncapped would put the 1238px line back on the screen in
+   list form. It is freshet-D82's one measure applied to both shapes of the same
+   prose - not a third cap, and still nothing on the wrap, the section or a
+   table. Named rather than written as ul.description, which would also re-measure
+   the License tab's tier list: nothing asked for that, and freshet-D89 (3) is
+   explicit that a pass does not restyle a screen on its own judgement. */
+
+.freshet-unusedmedia-wrap p.description,
+.freshet-unusedmedia-wrap ul.freshet-unusedmedia-notes {
     max-width: 70ch;
 }

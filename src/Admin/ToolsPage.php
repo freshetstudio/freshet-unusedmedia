@@ -402,6 +402,28 @@ final class ToolsPage
             : '';
     }
 
+    /**
+     * A lead sentence and the points under it, as a list rather than as one
+     * long sentence (freshet-D119: "can be shortened - bulleted - clearer").
+     *
+     * The list carries .description alongside the paragraphs it sits between,
+     * so it is helper text by the admin's own reckoning and takes the same
+     * reading measure they do — the same cap, not a second one.
+     *
+     * @param list<string> $points
+     */
+    private function renderNoteList(string $lead, array $points): void
+    {
+        echo '<p class="description">' . esc_html($lead) . '</p>';
+        echo '<ul class="freshet-unusedmedia-notes description">';
+
+        foreach ($points as $point) {
+            echo '<li>' . esc_html($point) . '</li>';
+        }
+
+        echo '</ul>';
+    }
+
     /** Said once, wherever a size filter changes which files can appear. */
     private function sizeFilterNote(): string
     {
@@ -464,17 +486,14 @@ final class ToolsPage
         echo '<div class="freshet-unusedmedia-section">';
         echo '<h2>' . esc_html__('Scan', 'freshet-unused-media') . '</h2>';
 
-        echo '<p class="description">' . esc_html__('Every file is checked against post content and blocks, custom fields, options and theme mods, term and user meta, comments and excerpts — not just what it was uploaded to. Anything ambiguous counts as used, so a file reaches the unused list only when nothing anywhere refers to it.', 'freshet-unused-media') . '</p>';
-
-        // freshet-D92 (4): a fresh upload is held out of the deletable pool on
-        // purpose, and until now nothing said so anywhere a person looking for
-        // it would be. This is the tab they land on.
-        $grace = $this->graceNotice();
-
-        if ($grace !== '') {
-            echo '<p class="description">' . esc_html($grace) . '</p>';
-        }
-
+        // freshet-D119 (1): the three figures are the reason this screen
+        // exists, and they used to sit at body size between two paragraphs of
+        // helper text, where they read as a footnote. They now open the
+        // section, with the scan's own timestamp under them and everything
+        // that qualifies them — an unreadable database, an upload folder that
+        // is not on this server — immediately after. Order and weight only:
+        // nothing is boxed and nothing is capped, so freshet-D81's unboxing
+        // and freshet-D89 (3) are untouched.
         echo '<p class="freshet-unusedmedia-counts">';
         printf(
             '%s &nbsp;•&nbsp; %s &nbsp;•&nbsp; %s',
@@ -571,11 +590,46 @@ final class ToolsPage
             );
         }
 
+        // What the scan looks at, and why a file reaching the unused list can
+        // be trusted. One place per line rather than one 48-word sentence
+        // (freshet-D119 (2)); the closing sentence is the claim the list is
+        // evidence for, so it stays a sentence.
+        $this->renderNoteList(
+            __('Every file is checked everywhere it could be referenced, not just where it was uploaded:', 'freshet-unused-media'),
+            [
+                __('Post content and blocks', 'freshet-unused-media'),
+                __('Custom fields', 'freshet-unused-media'),
+                __('Options and theme mods', 'freshet-unused-media'),
+                __('Term and user meta', 'freshet-unused-media'),
+                __('Comments and excerpts', 'freshet-unused-media'),
+            ]
+        );
+
+        echo '<p class="description">' . esc_html__('Anything ambiguous counts as used, so a file reaches the unused list only when nothing anywhere refers to it.', 'freshet-unused-media') . '</p>';
+
+        // freshet-D92 (4): a fresh upload is held out of the deletable pool on
+        // purpose, and until now nothing said so anywhere a person looking for
+        // it would be. This is the tab they land on.
+        $grace = $this->graceNotice();
+
+        if ($grace !== '') {
+            echo '<p class="description">' . esc_html($grace) . '</p>';
+        }
+
         // freshet-D92 (3): a delete orphaned the webp an optimiser had made of
         // the deleted original, and the next scan flagged it — the product
         // working, read as a stale result because nothing had said a cleanup
-        // can do that. Said here, once, in the same voice as the rest.
-        echo '<p class="description">' . esc_html__('Worth running again after a cleanup. Deleting a file can leave others behind it unreferenced — an optimiser or a resize tool registers its derivatives as library entries of their own, and once the original is gone nothing points at those any more — so a later scan can honestly find files an earlier one did not. That is what the scan being re-runnable is for.', 'freshet-unused-media') . '</p>';
+        // can do that. Said here, once, in the same voice as the rest, and as
+        // three causes under a lead rather than one sentence with two
+        // em-dashed asides inside it (freshet-D119 (3)).
+        $this->renderNoteList(
+            __('Worth running again after a cleanup — a later scan can honestly find files an earlier one did not, and that is what re-running is for:', 'freshet-unused-media'),
+            [
+                __('Deleting a file can leave others behind it unreferenced.', 'freshet-unused-media'),
+                __('An optimiser or a resize tool registers its derivatives as library entries of their own.', 'freshet-unused-media'),
+                __('Once the original is gone, nothing points at those any more.', 'freshet-unused-media'),
+            ]
+        );
 
         // Reset only exists while a scan is unfinished: it is the escape hatch out
         // of a half-done run, next to Resume and Stop. It carries button-link so it
@@ -721,7 +775,19 @@ final class ToolsPage
             return;
         }
 
-        echo '<p class="description">' . esc_html(__('Every file here was found referenced somewhere on the site, so none of them is offered for deletion. Open one to see where it is used.', 'freshet-unused-media') . $this->sizeFilterNote()) . '</p>';
+        // The same pass as the Unused tab's notes (freshet-D119). These two
+        // sentences are already short and already direct, and two of them are
+        // not a list, so what changes is the one thing that was wrong with the
+        // block: the size filter was run on to the end of them, where it reads
+        // as part of the promise rather than as the separate qualification of
+        // which files are here that it is.
+        echo '<p class="description">' . esc_html__('Every file here was found referenced somewhere on the site, so none of them is offered for deletion. Open one to see where it is used.', 'freshet-unused-media') . '</p>';
+
+        $sizeNote = trim($this->sizeFilterNote());
+
+        if ($sizeNote !== '') {
+            echo '<p class="description">' . esc_html($sizeNote) . '</p>';
+        }
 
         echo '<table class="widefat striped freshet-unusedmedia-table"><thead><tr>';
 
@@ -816,15 +882,25 @@ final class ToolsPage
 
         // The list a person reads when the file they went looking for is not in
         // it, so it says why one gets held back instead of leaving the absence
-        // to be guessed at (freshet-D92 (4)). Three reasons, and the grace
-        // window is the filtered one rather than a hardcoded day.
-        $notes = array_filter([
-            __('A file you expected here and cannot find is being held back rather than overlooked: something on the site still refers to it — a reference from a trashed post or comment counts as usage — or another library entry points at the same file and is itself in use or in the trash.', 'freshet-unused-media'),
-            $this->graceNotice(),
-            __('Every file below is re-checked in the instant before it is deleted — anything that has become used in the meantime is skipped.', 'freshet-unused-media'),
-        ]);
+        // to be guessed at (freshet-D92 (4)). One reason per line rather than
+        // one sentence carrying all of them (freshet-D119 (4)) — and the grace
+        // window and the size filter are two more reasons a file is absent, so
+        // they join the list instead of being run on to the end of it. The
+        // grace window is still the filtered one rather than a hardcoded day.
+        $this->renderNoteList(
+            __('A file you expected here and cannot find is being held back, not overlooked:', 'freshet-unused-media'),
+            array_values(array_filter([
+                __('Something on the site still refers to it — a reference from a trashed post or comment counts as usage.', 'freshet-unused-media'),
+                __('Another library entry points at the same file and is itself in use or in the trash.', 'freshet-unused-media'),
+                $this->graceNotice(),
+                trim($this->sizeFilterNote()),
+            ]))
+        );
 
-        echo '<p class="description">' . esc_html(implode(' ', $notes) . $this->sizeFilterNote()) . '</p>';
+        // The promise the delete path keeps, which is not a reason a file is
+        // absent from the list — so it stands on its own rather than as a
+        // fourth bullet under a lead about absence.
+        echo '<p class="description">' . esc_html__('Every file below is re-checked in the instant before it is deleted — anything that has become used in the meantime is skipped.', 'freshet-unused-media') . '</p>';
 
         echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" id="freshet-unusedmedia-delete-form">';
         wp_nonce_field('freshet_unusedmedia_delete_selected');

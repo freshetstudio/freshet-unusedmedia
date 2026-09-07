@@ -9,7 +9,7 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2026-09-07T17:35:46+00:00\n"
+"POT-Creation-Date: 2026-09-07T19:38:07+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.12.0\n"
 "X-Domain: freshet-unused-media\n"
@@ -17,7 +17,7 @@ msgstr ""
 #. Plugin Name of the plugin
 #: freshet-unusedmedia.php
 #: src/Admin/ToolsPage.php:149
-#: src/Admin/ToolsPage.php:431
+#: src/Admin/ToolsPage.php:453
 msgid "Freshet Unused Media"
 msgstr ""
 
@@ -570,7 +570,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: src/Admin/ToolsPage.php:218
-#: src/Admin/ToolsPage.php:465
+#: src/Admin/ToolsPage.php:487
 msgid "Scan"
 msgstr ""
 
@@ -604,7 +604,7 @@ msgstr ""
 
 #. translators: 1: number of matching files, 2: number of files in total
 #: src/Admin/ToolsPage.php:362
-#: src/Admin/ToolsPage.php:658
+#: src/Admin/ToolsPage.php:712
 #, php-format
 msgid "%1$s of %2$s"
 msgstr ""
@@ -615,245 +615,289 @@ msgstr ""
 msgid "A file uploaded in the last %s is held back whatever the scan finds, so an editor still placing it has time to finish — it is not missing, it is being kept out of the list on purpose."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:409
+#: src/Admin/ToolsPage.php:431
 msgid "While a size filter is applied, files whose size cannot be read are left out of the list."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:436
+#: src/Admin/ToolsPage.php:458
 msgid "Pro"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:438
+#: src/Admin/ToolsPage.php:460
 msgid "Free"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:440
+#: src/Admin/ToolsPage.php:462
 msgid "Docs"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:441
+#: src/Admin/ToolsPage.php:463
 msgid "Support"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:467
-msgid "Every file is checked against post content and blocks, custom fields, options and theme mods, term and user meta, comments and excerpts — not just what it was uploaded to. Anything ambiguous counts as used, so a file reaches the unused list only when nothing anywhere refers to it."
-msgstr ""
-
 #. translators: %s: number of used attachments
-#: src/Admin/ToolsPage.php:483
+#: src/Admin/ToolsPage.php:502
 #, php-format
 msgid "Used: %s"
 msgstr ""
 
 #. translators: %s: number of unused attachments
-#: src/Admin/ToolsPage.php:491
+#: src/Admin/ToolsPage.php:510
 #, php-format
 msgid "Unused: %s"
 msgstr ""
 
 #. translators: %s: number of unscanned attachments
-#: src/Admin/ToolsPage.php:496
+#: src/Admin/ToolsPage.php:515
 #, php-format
 msgid "Not scanned: %s"
 msgstr ""
 
 #. translators: 1: human time diff, 2: number of attachments scanned
-#: src/Admin/ToolsPage.php:508
+#: src/Admin/ToolsPage.php:527
 #, php-format
 msgid "Last full scan finished %1$s ago (%2$s attachments)."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:516
+#: src/Admin/ToolsPage.php:535
 msgid "Content has changed since — results may be stale."
 msgstr ""
 
 #. translators: %s: number of attachments
-#: src/Admin/ToolsPage.php:536
+#: src/Admin/ToolsPage.php:555
 #, php-format
 msgid "The database returned an error while scanning %s file, so it has no result and appears in neither list. Run the scan again — if it keeps happening, the queries are being cut short (an execution-time limit or a dropped connection)."
 msgid_plural "The database returned an error while scanning %s files, so they have no result and appear in neither list. Run the scan again — if it keeps happening, the queries are being cut short (an execution-time limit or a dropped connection)."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/Admin/ToolsPage.php:568
+#: src/Admin/ToolsPage.php:587
 msgid "None of the upload folders this scan looked in could be read from this server — the files are stored somewhere else, on an offload or CDN service, or the folders are no longer there."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:569
+#: src/Admin/ToolsPage.php:588
 msgid "Some of the upload folders this scan looked in could not be read from this server — those files are stored somewhere else, on an offload or CDN service, or the folders are no longer there."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:570
+#: src/Admin/ToolsPage.php:589
 msgid "Those files are judged on what your library records about them and nothing else. If an old thumbnail is still sitting beside an image while your library has stopped listing it, a page still showing that thumbnail does not count as using the image — so the image can be reported as unused while a visitor can still see it. Check anything you delete from those folders against the pages you expect it on. Where the folders can be read, this is checked for you."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:578
-msgid "Worth running again after a cleanup. Deleting a file can leave others behind it unreferenced — an optimiser or a resize tool registers its derivatives as library entries of their own, and once the original is gone nothing points at those any more — so a later scan can honestly find files an earlier one did not. That is what the scan being re-runnable is for."
+#: src/Admin/ToolsPage.php:598
+msgid "Every file is checked everywhere it could be referenced, not just where it was uploaded:"
+msgstr ""
+
+#: src/Admin/ToolsPage.php:600
+msgid "Post content and blocks"
+msgstr ""
+
+#: src/Admin/ToolsPage.php:601
+msgid "Custom fields"
+msgstr ""
+
+#: src/Admin/ToolsPage.php:602
+msgid "Options and theme mods"
+msgstr ""
+
+#: src/Admin/ToolsPage.php:603
+msgid "Term and user meta"
+msgstr ""
+
+#: src/Admin/ToolsPage.php:604
+msgid "Comments and excerpts"
+msgstr ""
+
+#: src/Admin/ToolsPage.php:608
+msgid "Anything ambiguous counts as used, so a file reaches the unused list only when nothing anywhere refers to it."
+msgstr ""
+
+#: src/Admin/ToolsPage.php:626
+msgid "Worth running again after a cleanup — a later scan can honestly find files an earlier one did not, and that is what re-running is for:"
+msgstr ""
+
+#: src/Admin/ToolsPage.php:628
+msgid "Deleting a file can leave others behind it unreferenced."
+msgstr ""
+
+#: src/Admin/ToolsPage.php:629
+msgid "An optimiser or a resize tool registers its derivatives as library entries of their own."
+msgstr ""
+
+#: src/Admin/ToolsPage.php:630
+msgid "Once the original is gone, nothing points at those any more."
 msgstr ""
 
 #. translators: 1: scanned count, 2: total count
-#: src/Admin/ToolsPage.php:594
+#: src/Admin/ToolsPage.php:648
 #, php-format
 msgid "Resume scan (%1$s / %2$s)"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:598
+#: src/Admin/ToolsPage.php:652
 msgid "Start full scan"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:599
+#: src/Admin/ToolsPage.php:653
 msgid "Stop"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:601
+#: src/Admin/ToolsPage.php:655
 msgid "Reset scan"
 msgstr ""
 
 #. translators: %s: number of files.
-#: src/Admin/ToolsPage.php:638
+#: src/Admin/ToolsPage.php:692
 #, php-format
 msgid "Sizes with no original (%s)"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:642
+#: src/Admin/ToolsPage.php:696
 msgid "Thumbnail files whose original upload is gone: nothing sits at the original's own path and no library entry names it, so no attachment is holding them and no page can be showing them. They are listed on their own — not counted as unused, not in the list above, not in any space figure — and this plugin does not delete them."
 msgstr ""
 
 #. translators: %s: number of used attachments
-#: src/Admin/ToolsPage.php:709
+#: src/Admin/ToolsPage.php:763
 #, php-format
 msgid "Used files (%s)"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:718
+#: src/Admin/ToolsPage.php:772
 msgid "No used files match this filter. Clear it to see the rest."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:719
+#: src/Admin/ToolsPage.php:773
 msgid "No attachments are currently marked used. Run a scan first."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:724
+#: src/Admin/ToolsPage.php:784
 msgid "Every file here was found referenced somewhere on the site, so none of them is offered for deletion. Open one to see where it is used."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:729
-#: src/Admin/ToolsPage.php:839
+#: src/Admin/ToolsPage.php:795
+#: src/Admin/ToolsPage.php:915
 msgid "File"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:730
-#: src/Admin/ToolsPage.php:840
+#: src/Admin/ToolsPage.php:796
+#: src/Admin/ToolsPage.php:916
 msgid "Type"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:731
-#: src/Admin/ToolsPage.php:841
+#: src/Admin/ToolsPage.php:797
+#: src/Admin/ToolsPage.php:917
 msgid "Uploaded"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:732
-#: src/Admin/ToolsPage.php:842
+#: src/Admin/ToolsPage.php:798
+#: src/Admin/ToolsPage.php:918
 msgid "Size"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:733
+#: src/Admin/ToolsPage.php:799
 msgid "References"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:734
-#: src/Admin/ToolsPage.php:843
+#: src/Admin/ToolsPage.php:800
+#: src/Admin/ToolsPage.php:919
 msgid "Scanned"
 msgstr ""
 
 #. translators: %s: number of unused attachments
-#: src/Admin/ToolsPage.php:771
+#: src/Admin/ToolsPage.php:837
 #, php-format
 msgid "Unused files (%s)"
 msgstr ""
 
 #. translators: 1: MEDIA_TRASH constant name, 2: the PHP line to add to wp-config.php
-#: src/Admin/ToolsPage.php:793
+#: src/Admin/ToolsPage.php:859
 #, php-format
 msgid "%1$s is not enabled — deletions are permanent. Add %2$s to wp-config.php to get a trash safety net."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:807
+#: src/Admin/ToolsPage.php:873
 msgid "No unused files match this filter. Clear it to see the rest."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:808
+#: src/Admin/ToolsPage.php:874
 msgid "No attachments are currently marked unused. Run a scan first, or enjoy the tidy library."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:822
-msgid "A file you expected here and cannot find is being held back rather than overlooked: something on the site still refers to it — a reference from a trashed post or comment counts as usage — or another library entry points at the same file and is itself in use or in the trash."
+#: src/Admin/ToolsPage.php:891
+msgid "A file you expected here and cannot find is being held back, not overlooked:"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:824
+#: src/Admin/ToolsPage.php:893
+msgid "Something on the site still refers to it — a reference from a trashed post or comment counts as usage."
+msgstr ""
+
+#: src/Admin/ToolsPage.php:894
+msgid "Another library entry points at the same file and is itself in use or in the trash."
+msgstr ""
+
+#: src/Admin/ToolsPage.php:903
 msgid "Every file below is re-checked in the instant before it is deleted — anything that has become used in the meantime is skipped."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:871
+#: src/Admin/ToolsPage.php:947
 msgid "Deleted files go to the media trash and can be restored from there."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:872
+#: src/Admin/ToolsPage.php:948
 msgid "Deletion is permanent and cannot be undone."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:878
+#: src/Admin/ToolsPage.php:954
 msgid "Each one is re-checked first; anything still in use is skipped."
 msgstr ""
 
 #. translators: %s: number of unused attachments matching the filter
-#: src/Admin/ToolsPage.php:904
+#: src/Admin/ToolsPage.php:980
 #, php-format
 msgid "Delete all matching (%s)"
 msgstr ""
 
 #. translators: 1: number of matching attachments, 2: the filter in words
-#: src/Admin/ToolsPage.php:910
+#: src/Admin/ToolsPage.php:986
 #, php-format
 msgid "Delete all %1$s unused attachments matching the current filter (%2$s)?"
 msgstr ""
 
 #. translators: %s: number of unused attachments
-#: src/Admin/ToolsPage.php:917
+#: src/Admin/ToolsPage.php:993
 #, php-format
 msgid "Delete all unused (%s)"
 msgstr ""
 
 #. translators: %s: number of unused attachments
-#: src/Admin/ToolsPage.php:923
+#: src/Admin/ToolsPage.php:999
 #, php-format
 msgid "Delete all %s unused attachments?"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:945
+#: src/Admin/ToolsPage.php:1021
 msgid "Delete the selected attachments?"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:947
+#: src/Admin/ToolsPage.php:1023
 msgid "Only files matching the current filter are listed, so the selection comes from that list."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:955
+#: src/Admin/ToolsPage.php:1031
 msgid "Delete selected"
 msgstr ""
 
 #. translators: Hidden accessibility text.
-#: src/Admin/ToolsPage.php:1022
+#: src/Admin/ToolsPage.php:1098
 msgid "Sort ascending."
 msgstr ""
 
 #. translators: Hidden accessibility text.
-#: src/Admin/ToolsPage.php:1024
+#: src/Admin/ToolsPage.php:1100
 msgid "Sort descending."
 msgstr ""
 
 #. translators: %s: human time diff
-#: src/Admin/ToolsPage.php:1111
+#: src/Admin/ToolsPage.php:1187
 #, php-format
 msgid "%s ago"
 msgstr ""

@@ -41,6 +41,12 @@ final class SizeSiblings
     /** @var string[] Entry names in that directory. */
     private static array $listing = [];
 
+    /** Directories this request has read. */
+    private static int $read = 0;
+
+    /** Directories this request could not read. See takeDirectoryReads(). */
+    private static int $unread = 0;
+
     /**
      * The names in $dir, or an empty list when it cannot be read.
      *
@@ -64,15 +70,38 @@ final class SizeSiblings
         self::$dir = $dir;
         self::$listing = [];
 
-        if ($dir === '' || !is_dir($dir)) {
+        if ($dir === '') {
+            return [];
+        }
+
+        // Suppressed for the same reason scandir() is on the line below, and it
+        // has to be: `is_dir()` on a path whose scheme no stream wrapper claims
+        // — `s3://…`, which is how an offload plugin filters get_attached_file()
+        // — emits `Unable to find the wrapper` before returning false. That is
+        // one warning per directory, and with display_errors on it prints into
+        // the body of an AJAX response, ahead of the JSON the scan screen is
+        // waiting for. A scheme test instead of the @ was the alternative and is
+        // the wrong instrument twice over: it would not cover the other paths
+        // that warn here (an open_basedir restriction, a permissions failure, a
+        // mount that has gone away), and a registered wrapper is not a failure
+        // at all — an offload plugin that keeps its wrapper active reads its own
+        // remote directory through this call and the disk read simply works.
+        // What matters is the answer, not the shape of the path.
+        if (!@is_dir($dir)) {
+            ++self::$unread;
+
             return [];
         }
 
         $entries = @scandir($dir);
 
         if ($entries === false) {
+            ++self::$unread;
+
             return [];
         }
+
+        ++self::$read;
 
         foreach ($entries as $entry) {
             if ($entry !== '.' && $entry !== '..') {
@@ -81,6 +110,46 @@ final class SizeSiblings
         }
 
         return self::$listing;
+    }
+
+    /**
+     * How many directories this run has read, and how many it could not.
+     *
+     * The tally exists because an unreadable directory is silent by design
+     * (see listing()) and that silence is indistinguishable from a directory
+     * with nothing in it — so a library whose files are not on this server gets
+     * none of the protection this class is here to give, and every screen goes
+     * on looking exactly as it does for a library that has it. The counts are
+     * what lets the scan say so once, in its own summary, instead of not at all
+     * (freshet-144).
+     *
+     * Directories rather than attachments on purpose: the listing is read once
+     * per directory and a month's worth of uploads shares one, so per-attachment
+     * figures would say the same thing multiplied by an arbitrary number.
+     *
+     * These are counts of *reads*, not of distinct directories, and the
+     * difference is why nothing quotes them as a number. Only one listing is
+     * remembered at a time, so a run whose attachments alternate between
+     * directories reads one of them more than once, and a directory that
+     * straddles a batch boundary is read again in the next request. What is
+     * exact either way is whether each count is zero — which is all the two
+     * things that read this ask: did any directory fail, and did any succeed.
+     *
+     * Read-and-reset, so the caller adds a delta to the run's own total. Not
+     * folded into flush(): the two callers flush on either side of where they
+     * record the batch, and a tally that depended on that order would quietly
+     * halve or double.
+     *
+     * @return array{read: int, unread: int}
+     */
+    public static function takeDirectoryReads(): array
+    {
+        $tally = ['read' => self::$read, 'unread' => self::$unread];
+
+        self::$read = 0;
+        self::$unread = 0;
+
+        return $tally;
     }
 
     /** Drop the remembered listing. Called at every batch boundary. */

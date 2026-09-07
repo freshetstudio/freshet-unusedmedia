@@ -180,7 +180,7 @@ final class Ajax
         SizeSiblings::flush();
         OrphanSizes::flush();
 
-        $state = $this->state->advance($last, $processed, $errors);
+        $state = $this->state->advance($last, $processed, $errors, SizeSiblings::takeDirectoryReads());
 
         wp_send_json_success([
             'finished' => false,

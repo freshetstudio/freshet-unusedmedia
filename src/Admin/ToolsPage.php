@@ -523,6 +523,33 @@ final class ToolsPage
             );
         }
 
+        // freshet-144: the disk read is half of how an attachment's names are
+        // found, and on a library whose files are not on this server it does
+        // nothing at all — silently, because a folder that cannot be opened
+        // yields the same empty listing as a folder with nothing in it. Every
+        // screen then looks exactly as it does for a library that has the
+        // protection. Said here, once for the whole run, in the same place the
+        // scan says everything else about itself. The running figures win over
+        // the finished ones, for the same reason the error count does.
+        $dirsUnread = (int) ($running['dirs_unread'] ?? ($last['dirs_unread'] ?? 0));
+        $dirsRead = (int) ($running['dirs_read'] ?? ($last['dirs_read'] ?? 0));
+
+        if ($dirsUnread > 0) {
+            // No figure, deliberately: the two counts are of directory reads
+            // rather than of directories, so the only thing either can be
+            // quoted on is whether it is zero (see SizeSiblings). "None" and
+            // "Some" is also the whole of what the reader has to act on — the
+            // first says the library is elsewhere, the second says part of it
+            // is.
+            printf(
+                '<div class="notice notice-warning inline"><p>%s %s</p></div>',
+                esc_html($dirsRead === 0
+                    ? __('None of the upload folders this scan looked in could be read from this server — the files are stored somewhere else, on an offload or CDN service, or the folders are no longer there.', 'freshet-unused-media')
+                    : __('Some of the upload folders this scan looked in could not be read from this server — those files are stored somewhere else, on an offload or CDN service, or the folders are no longer there.', 'freshet-unused-media')),
+                esc_html__('Those files are judged on what your library records about them and nothing else. If an old thumbnail is still sitting beside an image while your library has stopped listing it, a page still showing that thumbnail does not count as using the image — so the image can be reported as unused while a visitor can still see it. Check anything you delete from those folders against the pages you expect it on. Where the folders can be read, this is checked for you.', 'freshet-unused-media')
+            );
+        }
+
         // freshet-D92 (3): a delete orphaned the webp an optimiser had made of
         // the deleted original, and the next scan flagged it — the product
         // working, read as a stale result because nothing had said a cleanup

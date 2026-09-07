@@ -148,7 +148,7 @@ final class ScanCommand
                 $progress?->tick();
             }
 
-            $state = $this->state->advance($last, $processed, $errors);
+            $state = $this->state->advance($last, $processed, $errors, SizeSiblings::takeDirectoryReads());
 
             $this->releaseBatchMemory();
         }
@@ -176,6 +176,21 @@ final class ScanCommand
             WP_CLI::warning(sprintf(
                 '%d attachment(s) could not be checked — the database returned an error, so they have no result and are in neither list. Re-run the scan.',
                 $summary['errors']
+            ));
+        }
+
+        if ($state['dirs_unread'] > 0) {
+            // The same shape as the line above and for the same reason: half of
+            // how this plugin decides is off for those files, and nothing else
+            // in the run would say so. The disk read finds nothing in a folder
+            // it cannot open, which is exactly what it reports for a folder
+            // that is genuinely empty (freshet-144). Kept out of the summary
+            // columns and quoted without a figure: the counts are of directory
+            // reads rather than of directories, so zero / non-zero is the only
+            // thing they can carry (see SizeSiblings::takeDirectoryReads()).
+            WP_CLI::warning(sprintf(
+                '%s of the upload folders could not be read from this server, so files in them were judged on what the library records about them and nothing else. A leftover thumbnail the library has stopped listing cannot be spotted there, so a page still showing one does not count as a use of the image it came from — check those before deleting.',
+                $state['dirs_read'] === 0 ? 'None' : 'Some'
             ));
         }
 

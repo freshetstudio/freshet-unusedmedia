@@ -1854,6 +1854,68 @@ check(
 // that finds no siblings in it.
 check('an unreadable directory yields no siblings', SizeSiblings::forFile('/nonexistent-freshet/2026/07/hero-scaled.jpg'), []);
 
+// --------------------------------------------- a library that is not on this server
+//
+// The disk read is half of how an attachment's names are found, and on a
+// library whose files live on an offload or CDN service it does nothing —
+// `get_attached_file()` is filtered to a stream URI, and a folder that cannot
+// be opened yields the same empty listing as a folder with nothing in it. Two
+// things follow, and both are asserted here rather than reasoned about.
+//
+// The first is that asking must be silent. `is_dir()` on a scheme no wrapper
+// claims warns before it answers, and a scan asks once per directory — with
+// display_errors on, that text goes into the body of the AJAX response ahead of
+// the JSON the scan screen is waiting for, so the screen breaks rather than
+// merely getting noisy. The check below is the failure itself: whatever the
+// call prints on its way out has to be nothing.
+//
+// The second is that the silence must be counted. Nothing else in a run records
+// it — no error is raised and no attachment is left short — so without a tally
+// there is no way for the screen to say that the protection this class exists
+// to give is switched off for this library.
+
+define('DISK_READ_DIR', sys_get_temp_dir() . '/freshet-unusedmedia-disk-read/2026/07');
+
+if (!is_dir(DISK_READ_DIR)) {
+    mkdir(DISK_READ_DIR, 0777, true);
+}
+
+// The original, one of its sizes, and a second upload's size — the boundary
+// case, in the same directory, exactly as it is on a real month's folder.
+foreach (['hero-scaled.jpg', 'hero-300x200.jpg', 'hero-1-300x200.jpg'] as $diskFixture) {
+    file_put_contents(DISK_READ_DIR . '/' . $diskFixture, 'x');
+}
+
+SizeSiblings::flush();
+SizeSiblings::takeDirectoryReads();
+
+check('a readable directory still yields this attachment\'s own sizes', SizeSiblings::forFile(DISK_READ_DIR . '/hero-scaled.jpg'), ['hero-300x200.jpg']);
+check('and the run counts it as a directory it read', SizeSiblings::takeDirectoryReads(), ['read' => 1, 'unread' => 0]);
+
+// The premise of the next two: this box has no s3 wrapper, which is what makes
+// the path warn. A box that had one would read the remote directory through the
+// same call and the disk read would simply work — the answer is what matters
+// here, never the shape of the path.
+check('no wrapper claims the offloaded scheme on this box', in_array('s3', stream_get_wrappers(), true), false);
+
+$displayErrors = ini_get('display_errors');
+ini_set('display_errors', '1');
+$reporting = error_reporting(E_ALL);
+
+ob_start();
+$offloaded = SizeSiblings::forFile('s3://example-bucket/2026/07/hero-scaled.jpg');
+$emitted = (string) ob_get_clean();
+
+error_reporting($reporting);
+ini_set('display_errors', (string) $displayErrors);
+
+check('an offloaded path yields no siblings', $offloaded, []);
+check('and prints nothing where a response body would be', $emitted, '');
+check('and the run counts it as a directory it could not read', SizeSiblings::takeDirectoryReads(), ['read' => 0, 'unread' => 1]);
+check('the tally is handed over once and starts again', SizeSiblings::takeDirectoryReads(), ['read' => 0, 'unread' => 0]);
+
+SizeSiblings::flush();
+
 // --------------------------------------------- the superseded generation
 //
 // An image edited in wp-admin keeps its old files. Core rewrites the stem —

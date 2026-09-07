@@ -243,6 +243,13 @@ function apply_filters(string $hook, mixed $value, mixed ...$rest): mixed
         return $GLOBALS['rows'][$rest[1]->id]['used'] ?? false;
     }
 
+    // The delete request's own time budget, which is how a batch that ran out
+    // of it is reached from here — the real clock would need a library big
+    // enough to spend twenty seconds on five files.
+    if ($hook === 'freshet_unusedmedia_delete_seconds' && isset($GLOBALS['delete_seconds'])) {
+        return $GLOBALS['delete_seconds'];
+    }
+
     return $value;
 }
 
@@ -430,6 +437,7 @@ foreach ([
     'src/Scan/UploadGrace.php',
     'src/Scan/ResultStore.php',
     'src/Scan/ReclaimedLedger.php',
+    'src/Scan/DeleteBudget.php',
     'src/Scan/ScanState.php',
     'src/Scan/SizeSiblings.php',
     'src/Scan/Scanner.php',
@@ -587,8 +595,14 @@ function library(array $rows): void
     }
 }
 
-/** One delete batch, and the reply it would have sent to the browser. */
-function deleteBatch(): array
+/**
+ * One delete batch, and the reply it would have sent to the browser.
+ *
+ * @param array<string, string> $post What the screen posted with it — the
+ *                                    filter it was showing, and the cursor the
+ *                                    last reply handed back.
+ */
+function deleteBatch(array $post = []): array
 {
     $store = new ResultStore();
     $ajax = new Ajax(
@@ -599,7 +613,7 @@ function deleteBatch(): array
         new AttachmentMetaBox($store),
     );
 
-    $_POST = [];
+    $_POST = $post;
 
     try {
         $ajax->deleteBatch();
@@ -800,6 +814,113 @@ $GLOBALS['detectors'] = [];
 check('a failed re-verification deletes nothing', $verifyFailed['deleted'], 0);
 check('and refuses rather than confirming', $verifyFailed['failed'], 1);
 check('and the file is still on disk', onDisk('2024/03/verified.png'), true);
+
+// --------------------------------------------- the batch that ran out of time
+//
+// freshet-150. Five files is a ceiling, not a promise: re-verifying one file is
+// one scan per attachment row standing on it, so on a library where a file
+// averages ten rows a five-file batch is minutes of queries inside one web
+// request — past the point PHP gives up, with no reply, no progress bar and no
+// account of what was removed. The budget stops the run between files instead.
+//
+// What has to hold across a short batch is three things at once: it is never
+// `finished`, the figure it sends is still the live one, and the files it did
+// not reach are offered again rather than stepped over.
+
+$fixture = [];
+
+foreach (range(1, 8) as $n) {
+    $fixture[100 + $n] = ['file' => '2024/04/short-' . $n . '.png'];
+}
+
+library($fixture);
+
+$GLOBALS['delete_seconds'] = 0.0;
+
+$short = deleteBatch();
+
+check('a spent budget still deletes one file', $short['deleted'], 1);
+check('and does not call the pass finished', $short['finished'], false);
+check('and says how many it did not reach', $short['remaining'], 4);
+check('and the figure it sends is the live one', $short['unused'], 7);
+check('the file it reached is gone', onDisk('2024/04/short-1.png'), false);
+check('the next one is untouched', onDisk('2024/04/short-2.png'), true);
+check('and still carries the verdict the screen listed it on', (new ResultStore())->status(102), ResultStore::STATUS_UNUSED);
+
+// Resuming is the loop calling again, which is what the browser already does.
+// Eight files, one per request, and it has to terminate — a loop that stops
+// early and a loop that never stops are the same defect from two sides.
+$deleted = $short['deleted'];
+$requests = 1;
+
+while ($requests < 40) {
+    ++$requests;
+    $reply = deleteBatch();
+    $deleted += $reply['deleted'];
+
+    if ($reply['finished']) {
+        break;
+    }
+}
+
+check('the loop finishes on a spent budget', $reply['finished'], true);
+check('having deleted every file', $deleted, 8);
+check('one file per request, plus the empty one that ends it', $requests, 9);
+check('and the last file is off the disk', onDisk('2024/04/short-8.png'), false);
+
+// The cursor. Without a size filter there is none — the files stay in the
+// unused pool and the next batch's own query finds them — and inventing one
+// would bind the next batch to a position nothing asked for.
+library($fixture);
+
+check('a short batch with no cursor in play reports none', deleteBatch()['cursor'], 0);
+
+// With one, the cursor is the sharp edge: it is what the next batch starts
+// after, so a batch that decided one of its five files and handed the cursor
+// on where the *query* left it would step over the four it never looked at.
+library($fixture);
+
+$sized = ['filter_min_mb' => '0.0001'];
+
+$short = deleteBatch($sized);
+
+check('a size filter puts a cursor in play', $short['cursor'] > 0, true);
+check('and it stops just before the first file left undecided', $short['cursor'], 101);
+check('one file decided', $short['deleted'], 1);
+
+// Walked to the end through the cursor the replies hand back, which is the
+// browser's loop exactly. Every file has to be reached: this is the assertion
+// that would fail if the cursor stepped over the undecided four.
+$deleted = $short['deleted'];
+$requests = 1;
+
+while ($requests < 40) {
+    ++$requests;
+    $reply = deleteBatch($sized + ['after' => (string) $short['cursor']]);
+    $deleted += $reply['deleted'];
+    $short = $reply;
+
+    if ($reply['finished']) {
+        break;
+    }
+}
+
+check('a size-filtered loop finishes too', $reply['finished'], true);
+check('and reaches every file the filter named', $deleted, 8);
+check('nothing was stepped over', (new ResultStore())->counts()['unused'], 0);
+
+// And with room in the budget the batch is the batch: five files, nothing left
+// over, which is the reply every existing assertion above was written against.
+library($fixture);
+
+$GLOBALS['delete_seconds'] = 600.0;
+
+$full = deleteBatch();
+
+check('a budget with room in it deletes the whole batch', $full['deleted'], 5);
+check('and leaves nothing unreached', $full['remaining'], 0);
+
+unset($GLOBALS['delete_seconds']);
 
 // ------------------------------------------------------------------ result
 

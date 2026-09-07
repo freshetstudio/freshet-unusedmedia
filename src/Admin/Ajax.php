@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace FreshetUnusedMedia\Admin;
 
 use FreshetUnusedMedia\Scan\Db;
+use FreshetUnusedMedia\Scan\DeleteBudget;
 use FreshetUnusedMedia\Scan\OrphanSizes;
 use FreshetUnusedMedia\Scan\QueryFailed;
 use FreshetUnusedMedia\Scan\ResultFilters;
@@ -209,6 +210,12 @@ final class Ajax
      * user pressed named a filtered subset and a count to go with it, so a loop
      * that walked the whole unused set would delete files that count never
      * covered. `after` is the cursor the store hands back — see unusedIds().
+     *
+     * The batch is a ceiling and not a promise. What a request actually gets
+     * through is decided by DeleteBudget, because five files is a different
+     * amount of work on a library where a file averages ten attachment rows;
+     * a batch that stops early is a shorter batch, and the loop comes back for
+     * what it left.
      */
     public function deleteBatch(): void
     {
@@ -231,19 +238,35 @@ final class Ajax
 
         if ($batch['ids'] === []) {
             wp_send_json_success(array_merge(
-                ['finished' => true, 'deleted' => 0, 'skipped' => 0, 'failed' => 0, 'cursor' => 0],
+                ['finished' => true, 'deleted' => 0, 'skipped' => 0, 'failed' => 0, 'remaining' => 0, 'cursor' => 0],
                 $this->unusedFigure()
             ));
         }
 
-        $result = $this->deleter->deleteVerified($batch['ids']);
+        $result = $this->deleter->deleteVerified($batch['ids'], DeleteBudget::forRequest());
+
+        $cursor = $batch['cursor'];
+
+        // A batch that ran out of time hands its untouched files to the next
+        // request, and the cursor must not step over them. Only when one is in
+        // play: without a size filter the cursor is 0 and unusedIds() does not
+        // read it, because the files are still in the unused pool and its own
+        // query finds them again. Winding an unused cursor forward there would
+        // invent a position the next batch would then be bound by.
+        if ($cursor > 0 && $result['remaining'] !== []) {
+            $cursor = max(0, $result['remaining'][0] - 1);
+        }
 
         wp_send_json_success(array_merge([
+            // Never `true` on a short batch: `finished` is what stops the loop
+            // and reports a completed pass, and a run cut short has not made
+            // one (freshet-141).
             'finished' => false,
             'deleted' => $result['deleted'],
             'skipped' => $result['skipped'],
             'failed' => $result['failed'],
-            'cursor' => $batch['cursor'],
+            'remaining' => count($result['remaining']),
+            'cursor' => $cursor,
         ], $this->unusedFigure()));
     }
 

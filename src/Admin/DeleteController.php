@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace FreshetUnusedMedia\Admin;
 
+use FreshetUnusedMedia\Scan\DeleteBudget;
 use FreshetUnusedMedia\Scan\FileClaims;
 use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\FileSize;
@@ -51,9 +52,14 @@ final class DeleteController
         $ids = array_map('absint', (array) ($_POST['attachments'] ?? []));
         $ids = array_values(array_filter($ids));
 
+        // This path has no loop behind it — the form posts every ticked box in
+        // one request, and a page holds fifty of them. It gets the same budget
+        // the batch loop gets, and says on the notice what it did not reach:
+        // those files kept their stored verdict, so they are still listed and
+        // ticking them again is the whole of the resume.
         $result = $ids === []
-            ? ['deleted' => 0, 'skipped' => 0, 'failed' => 0]
-            : $this->deleteVerified($ids);
+            ? ['deleted' => 0, 'skipped' => 0, 'failed' => 0, 'remaining' => []]
+            : $this->deleteVerified($ids, DeleteBudget::forRequest());
 
         wp_safe_redirect(add_query_arg([
             'page' => ToolsPage::SLUG,
@@ -62,6 +68,7 @@ final class DeleteController
             'freshet_unusedmedia_deleted' => $result['deleted'],
             'freshet_unusedmedia_skipped' => $result['skipped'],
             'freshet_unusedmedia_failed' => $result['failed'],
+            'freshet_unusedmedia_remaining' => count($result['remaining']),
         ], admin_url('upload.php')));
 
         exit;
@@ -91,10 +98,20 @@ final class DeleteController
      * The counts returned are files. So is the bookkeeping: each file is sized
      * once, before it goes, because afterwards there is nothing left to measure.
      *
+     * **A budget stops this between files, never inside one** (freshet-150).
+     * The decision on a file — expand to its rows, ask who else claims them,
+     * re-scan every one, then delete or not — is indivisible, so the loop's
+     * only stopping place is the gap between two files. What that buys is
+     * stated in the returned `remaining`: the files this request did not reach.
+     * They were not touched, they kept the stored verdict the screen was
+     * rendered from, and they are still in the unused pool for the next
+     * request — which is what makes a run that stops early a shorter run
+     * rather than a partial one. With no budget passed, nothing stops.
+     *
      * @param int[] $ids Representative attachment IDs, one per file.
-     * @return array{deleted: int, skipped: int, failed: int}
+     * @return array{deleted: int, skipped: int, failed: int, remaining: int[]}
      */
-    public function deleteVerified(array $ids): array
+    public function deleteVerified(array $ids, ?DeleteBudget $budget = null): array
     {
         $deleted = 0;
         $skipped = 0;
@@ -108,7 +125,35 @@ final class DeleteController
         /** @var array<int, true> $handled Rows already decided this pass. */
         $handled = [];
 
-        foreach ($ids as $id) {
+        /** @var int[] $remaining Files the budget stopped this request reaching. */
+        $remaining = [];
+
+        // A list, so the slice below names files rather than array keys.
+        $ids = array_values($ids);
+
+        $fileStarted = 0.0;
+
+        foreach ($ids as $index => $id) {
+            if ($budget !== null) {
+                // Timed from the top of the previous iteration rather than at
+                // each of the body's exits: every one of them is a `continue`,
+                // and a file that was skipped cost what it cost.
+                if ($fileStarted > 0.0) {
+                    $budget->record(microtime(true) - $fileStarted);
+                }
+
+                if (!$budget->hasRoom()) {
+                    $remaining = array_values(array_filter(
+                        array_slice($ids, $index),
+                        static fn(mixed $rest): bool => !isset($handled[$rest])
+                    ));
+
+                    break;
+                }
+
+                $fileStarted = microtime(true);
+            }
+
             if (isset($handled[$id])) {
                 // Two representatives of one file, or the same box ticked twice:
                 // the file has had its decision, and a second pass over it would
@@ -271,9 +316,12 @@ final class DeleteController
             }
         }
 
+        // After the break as well as after the last file: a run that stopped
+        // early still freed what it freed, and a ledger written only by a run
+        // that finished would lose every short one.
         ReclaimedLedger::add($freedBytes, $freedFiles, $freedUnsized, $trashed);
 
-        return ['deleted' => $deleted, 'skipped' => $skipped, 'failed' => $failed];
+        return ['deleted' => $deleted, 'skipped' => $skipped, 'failed' => $failed, 'remaining' => $remaining];
     }
 
     /** @param int[] $rows */

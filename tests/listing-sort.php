@@ -427,6 +427,7 @@ foreach ([
     'src/Scan/UploadGrace.php',
     'src/Scan/ResultStore.php',
     'src/Scan/ReclaimedLedger.php',
+    'src/Scan/DeleteBudget.php',
     'src/Scan/ScanState.php',
     'src/Scan/SizeSiblings.php',
     'src/Scan/Scanner.php',

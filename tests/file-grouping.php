@@ -592,6 +592,7 @@ foreach ([
     'src/Scan/UploadGrace.php',
     'src/Scan/ResultStore.php',
     'src/Scan/ReclaimedLedger.php',
+    'src/Scan/DeleteBudget.php',
     'src/Scan/SizeSiblings.php',
     'src/Scan/OrphanSizes.php',
     'src/Scan/Scanner.php',
@@ -619,6 +620,7 @@ use FreshetUnusedMedia\Admin\StatusBadge;
 use FreshetUnusedMedia\Detector\LikePatterns;
 use FreshetUnusedMedia\Detector\RecentUploadDetector;
 use FreshetUnusedMedia\Scan\AttachmentContext;
+use FreshetUnusedMedia\Scan\DeleteBudget;
 use FreshetUnusedMedia\Scan\FileClaims;
 use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\FileSize;
@@ -984,7 +986,7 @@ library([
 
 $result = $deleter()->deleteVerified([200]);
 
-check('a contradicted file is skipped, not deleted', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0]);
+check('a contradicted file is skipped, not deleted', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0, 'remaining' => []]);
 check('the file is still on disk', onDisk('2024/01/logo.png'), true);
 check('the used row survives', isset($GLOBALS['rows'][100]), true);
 check('the unused row survives with it', isset($GLOBALS['rows'][200]), true);
@@ -1015,7 +1017,7 @@ library([
 
 $result = $deleter()->deleteVerified([300]);
 
-check('one path deletes one file', $result, ['deleted' => 1, 'skipped' => 0, 'failed' => 0]);
+check('one path deletes one file', $result, ['deleted' => 1, 'skipped' => 0, 'failed' => 0, 'remaining' => []]);
 check('its own file is gone', onDisk('2024/01/logo.png'), false);
 check('the same basename on another path survives', onDisk('2025/06/logo.png'), true);
 check('and so does its row', isset($GLOBALS['rows'][400]), true);
@@ -1041,7 +1043,7 @@ library([
 
 $result = $deleter()->deleteVerified([500]);
 
-check('three rows are one deletion', $result, ['deleted' => 1, 'skipped' => 0, 'failed' => 0]);
+check('three rows are one deletion', $result, ['deleted' => 1, 'skipped' => 0, 'failed' => 0, 'remaining' => []]);
 check('every row on the file goes', $GLOBALS['rows'], []);
 check('the file goes once', onDisk('2026/01/hero.jpg'), false);
 check('its bytes are counted once', ReclaimedLedger::read()['bytes'], 4096);
@@ -1092,7 +1094,7 @@ check('and that original is another row\'s own file', FileClaims::claimants([100
 
 $result = $deleter()->deleteVerified([100]);
 
-check('so the deletion is refused', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0]);
+check('so the deletion is refused', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0, 'remaining' => []]);
 check('the file the other entry stands on survives', onDisk('2026/11/hero.jpg'), true);
 check('and so does the row that was offered', isset($GLOBALS['rows'][100]), true);
 check('a refused file reclaims nothing', ReclaimedLedger::read()['files'], 0);
@@ -1110,7 +1112,7 @@ check('a neighbour that merely names the file claims it too', FileClaims::claima
 
 $result = $deleter()->deleteVerified([200]);
 
-check('deleting the row that owns the shared file is refused too', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0]);
+check('deleting the row that owns the shared file is refused too', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0, 'remaining' => []]);
 check('the used entry keeps its original', onDisk('2026/11/hero.jpg'), true);
 check('and its own scaled file is untouched', onDisk('2026/11/hero-scaled.jpg'), true);
 
@@ -1132,7 +1134,7 @@ check('and the same holds for the second pair', FileClaims::claimants([1927]), [
 
 $result = $deleter()->deleteVerified([1926, 1927]);
 
-check('both are refused rather than deleted', $result, ['deleted' => 0, 'skipped' => 2, 'failed' => 0]);
+check('both are refused rather than deleted', $result, ['deleted' => 0, 'skipped' => 2, 'failed' => 0, 'remaining' => []]);
 check('the file the first used row stands on survives', onDisk('2019/07/canon-300x225-300x225.jpg'), true);
 check('and so does the second', onDisk('2019/07/donner-225x300-225x300.jpg'), true);
 check('neither used row was touched', isset($GLOBALS['rows'][1905], $GLOBALS['rows'][1906]), true);
@@ -1146,7 +1148,7 @@ library([
 
 $result = $deleter()->deleteVerified([1905]);
 
-check('deleting the row a live size stands on is refused', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0]);
+check('deleting the row a live size stands on is refused', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0, 'remaining' => []]);
 check('the live entry keeps the size it renders', onDisk('2019/07/canon-300x225-300x225.jpg'), true);
 
 // --- and the boundaries, because a guard that stops every deletion protects
@@ -1162,7 +1164,7 @@ check('a neighbour with no file in common claims nothing', FileClaims::claimants
 
 $result = $deleter()->deleteVerified([100]);
 
-check('an unused file with a clear directory still deletes', $result, ['deleted' => 1, 'skipped' => 0, 'failed' => 0]);
+check('an unused file with a clear directory still deletes', $result, ['deleted' => 1, 'skipped' => 0, 'failed' => 0, 'remaining' => []]);
 check('its own file goes', onDisk('2026/12/hero-scaled.jpg'), false);
 check('its original goes with it', onDisk('2026/12/hero.jpg'), false);
 check('its size goes with it', onDisk('2026/12/hero-300x200.jpg'), false);
@@ -1181,7 +1183,7 @@ check('a group does not claim its own file', FileClaims::claimants(FileGroups::s
 
 $result = $deleter()->deleteVerified([100]);
 
-check('so an ordinary duplicate group still deletes', $result, ['deleted' => 1, 'skipped' => 0, 'failed' => 0]);
+check('so an ordinary duplicate group still deletes', $result, ['deleted' => 1, 'skipped' => 0, 'failed' => 0, 'remaining' => []]);
 check('and the file goes', onDisk('2027/02/logo.png'), false);
 
 // A read that did not answer is not an answer of "nobody else needs this file".
@@ -1196,7 +1198,7 @@ library([
 $GLOBALS['dbError'] = true;
 $result = $deleter()->deleteVerified([100]);
 
-check('a claims read that did not answer refuses the deletion', $result, ['deleted' => 0, 'skipped' => 0, 'failed' => 1]);
+check('a claims read that did not answer refuses the deletion', $result, ['deleted' => 0, 'skipped' => 0, 'failed' => 1, 'remaining' => []]);
 check('and nothing on disk was touched', onDisk('2027/03/hero.jpg') && onDisk('2027/03/hero-scaled.jpg'), true);
 check('and the file left the unused pool anyway', isset($GLOBALS['meta'][100][ResultStore::META_STATUS]), false);
 
@@ -1313,7 +1315,7 @@ check('and neither reaches the query', in_array('%banner-1-300x200.jpg%', $param
 // Case one: the original is used, so nothing here is deletable at all.
 $result = $deleter()->deleteVerified([800]);
 
-check('a used original is not deleted', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0]);
+check('a used original is not deleted', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0, 'remaining' => []]);
 check('its live size stays with it', onDisk('2026/03/banner-300x200.jpg'), true);
 check('and so does the stale one', onDisk('2026/03/banner-640x480.jpg'), true);
 check('a skipped file reclaims nothing', ReclaimedLedger::read()['files'], 0);
@@ -1336,7 +1338,7 @@ orphanFile('2026/04/flyer-640x480.jpg');
 
 $result = $deleter()->deleteVerified([801]);
 
-check('an orphaned original deletes as one whole file', $result, ['deleted' => 1, 'skipped' => 0, 'failed' => 0]);
+check('an orphaned original deletes as one whole file', $result, ['deleted' => 1, 'skipped' => 0, 'failed' => 0, 'remaining' => []]);
 check('the original is gone', onDisk('2026/04/flyer.jpg'), false);
 check('the size its metadata named goes with it', onDisk('2026/04/flyer-300x200.jpg'), false);
 check('the stale size is left behind, unreported and unreclaimed', onDisk('2026/04/flyer-640x480.jpg'), true);
@@ -1544,6 +1546,7 @@ foreach ([
     'src/Scan/FileGroups.php',
     'src/Scan/FileSize.php',
     'src/Scan/ReclaimedLedger.php',
+    'src/Scan/DeleteBudget.php',
     'src/Admin/StatusBadge.php',
     'src/Admin/MediaColumn.php',
     'src/Admin/DeleteController.php',
@@ -1578,8 +1581,79 @@ library([
 
 $result = $deleter()->deleteVerified([600]);
 
-check('a trashed sibling holds the file', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0]);
+check('a trashed sibling holds the file', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0, 'remaining' => []]);
 check('the trashed row can still be restored to its file', onDisk('2026/02/poster.jpg'), true);
+
+// ------------------------------------------------- the request that ran out
+//
+// Re-verifying one file is one scan per attachment row standing on it, so on a
+// large library a five-file batch is minutes of queries inside a single web
+// request. The bound is a budget the loop reads between files (freshet-150);
+// what is asserted here is that stopping is a *shorter* run and never a
+// partial one. A zero budget is the sharpest version of it: one file is always
+// started — a request that started none would hand the same work on for ever —
+// and the rest are handed back untouched.
+
+library([
+    100 => ['file' => '2024/03/one.png'],
+    200 => ['file' => '2024/03/two.png'],
+    300 => ['file' => '2024/03/three.png'],
+]);
+
+// Scanned first, because that is what a screen listing them means, and because
+// the verdict below has to be one the run left alone rather than one it never
+// wrote.
+foreach ([100, 200, 300] as $id) {
+    (new Scanner(new ResultStore()))->scan($id);
+}
+
+$result = $deleter()->deleteVerified([100, 200, 300], new DeleteBudget(0.0));
+
+check('a spent budget still decides one file', $result['deleted'], 1);
+check('and hands the rest back', $result['remaining'], [200, 300]);
+check('nothing is counted twice', $result['skipped'] + $result['failed'], 0);
+check('the file it reached is gone', onDisk('2024/03/one.png'), false);
+check('the ones it did not are untouched', onDisk('2024/03/two.png') && onDisk('2024/03/three.png'), true);
+
+// Untouched means their stored verdict too: the screen that listed them was
+// rendered from this meta, and a file dropped out of the unused pool by a run
+// that never looked at it is a file the next batch is not offered.
+check('an unreached file keeps its verdict', $GLOBALS['meta'][200][ResultStore::META_STATUS], ResultStore::STATUS_UNUSED);
+check('and so does the one after it', $GLOBALS['meta'][300][ResultStore::META_STATUS], ResultStore::STATUS_UNUSED);
+
+// The bookkeeping is written by the short run as well as the finished one.
+check('a short run still ledgers what it freed', ReclaimedLedger::read()['files'], 1);
+
+// Resuming is the caller handing back what it was given: no state is kept
+// anywhere, so the second request is the first one with a shorter list.
+$result = $deleter()->deleteVerified($result['remaining'], new DeleteBudget(0.0));
+
+check('the resumed run picks up where it stopped', $result['deleted'], 1);
+check('and hands on what is still left', $result['remaining'], [300]);
+check('the second file is now gone', onDisk('2024/03/two.png'), false);
+check('the third is still waiting', onDisk('2024/03/three.png'), true);
+
+// A budget with room in it changes nothing: the loop is the loop.
+library([
+    100 => ['file' => '2024/03/one.png'],
+    200 => ['file' => '2024/03/two.png'],
+    300 => ['file' => '2024/03/three.png'],
+]);
+
+$result = $deleter()->deleteVerified([100, 200, 300], new DeleteBudget(600.0));
+
+check('a budget with room in it reaches every file', $result, ['deleted' => 3, 'skipped' => 0, 'failed' => 0, 'remaining' => []]);
+
+// And a file the budget stopped at is one *decision* short, never one row
+// short: the group is expanded, claimed, re-scanned and deleted inside one
+// iteration, so there is no point at which some of a file's rows are gone.
+$deleteSource = (string) file_get_contents(ABSPATH . 'src/Admin/DeleteController.php');
+
+check(
+    'the budget is read between files, not inside one',
+    (int) strpos($deleteSource, 'hasRoom()') < (int) strpos($deleteSource, 'FileGroups::siblings('),
+    true
+);
 
 // ------------------------------------------- the badge a library row shows
 //

@@ -94,18 +94,38 @@ final class ToolsPage
         $deleted = absint($_GET['freshet_unusedmedia_deleted'] ?? 0);
         $skipped = absint($_GET['freshet_unusedmedia_skipped'] ?? 0);
         $failed = absint($_GET['freshet_unusedmedia_failed'] ?? 0);
+        $remaining = absint($_GET['freshet_unusedmedia_remaining'] ?? 0);
         // phpcs:enable WordPress.Security.NonceVerification.Recommended
+
+        $message = sprintf(
+            /* translators: 1: deleted count, 2: skipped count, 3: failed count */
+            __('Deleted %1$d, skipped %2$d (found in use on re-check), failed %3$d.', 'freshet-unused-media'),
+            $deleted,
+            $skipped,
+            $failed
+        );
+
+        // The form posts every ticked box at once and the request stops when
+        // its time is up, so this is the sentence that keeps a short run from
+        // reading as a finished one. The files are untouched and still listed;
+        // saying so is the whole of the resume instruction.
+        if ($remaining > 0) {
+            $message .= ' ' . sprintf(
+                /* translators: %d: number of selected files the request had no time left for */
+                _n(
+                    '%d selected file was not reached before the request ran out of time — it is untouched and still listed.',
+                    '%d selected files were not reached before the request ran out of time — they are untouched and still listed.',
+                    $remaining,
+                    'freshet-unused-media'
+                ),
+                $remaining
+            );
+        }
 
         printf(
             '<div class="notice %s is-dismissible"><p>%s</p></div>',
-            $failed > 0 ? 'notice-warning' : 'notice-success',
-            esc_html(sprintf(
-                /* translators: 1: deleted count, 2: skipped count, 3: failed count */
-                __('Deleted %1$d, skipped %2$d (found in use on re-check), failed %3$d.', 'freshet-unused-media'),
-                $deleted,
-                $skipped,
-                $failed
-            ))
+            $failed > 0 || $remaining > 0 ? 'notice-warning' : 'notice-success',
+            esc_html($message)
         );
     }
 

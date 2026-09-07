@@ -418,6 +418,7 @@ foreach ([
     'src/Scan/QueryFailed.php',
     'src/Scan/Db.php',
     'src/Scan/Reference.php',
+    'src/Scan/SharedReads.php',
     'src/Scan/AttachmentContext.php',
     'src/Scan/FileSize.php',
     'src/Scan/FileGroups.php',

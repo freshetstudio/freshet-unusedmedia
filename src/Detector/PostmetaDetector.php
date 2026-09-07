@@ -7,6 +7,7 @@ namespace FreshetUnusedMedia\Detector;
 use FreshetUnusedMedia\Scan\AttachmentContext;
 use FreshetUnusedMedia\Scan\Db;
 use FreshetUnusedMedia\Scan\Reference;
+use FreshetUnusedMedia\Scan\SharedReads;
 
 defined('ABSPATH') || exit;
 
@@ -23,10 +24,10 @@ final class PostmetaDetector implements DetectorInterface
      * `_wp_attachment_metadata` and `_wp_attachment_backup_sizes` are the two
      * that matter here: both are core's record of the filenames belonging to an
      * attachment — the current generation and the one an in-admin edit
-     * superseded — so a row of either names a file without referencing it. The
-     * query already skips the scanned attachment's own rows (`pm.post_id <>
-     * %d`), but two uploads cut from the same image carry byte-identical values
-     * on these keys, and each would otherwise read as a reference for the other.
+     * superseded — so a row of either names a file without referencing it.
+     * find() already skips the scanned attachment's own rows, but two uploads
+     * cut from the same image carry byte-identical values on these keys, and
+     * each would otherwise read as a reference for the other.
      */
     private const EXCLUDED_KEYS = [
         '_wp_attached_file',
@@ -46,43 +47,59 @@ final class PostmetaDetector implements DetectorInterface
 
     public function find(AttachmentContext $ctx): array
     {
-        global $wpdb;
+        // One broad pass for the whole sibling group where one is open, and the
+        // pass this always was where one is not — SharedReads decides, and hands
+        // back the same candidate rows either way.
+        $rows = SharedReads::candidates($this->id(), $ctx, function (array $ids, array $basenames): array {
+            global $wpdb;
 
-        [$idConditions, $idParams] = LikePatterns::idConditions('pm.meta_value', $ctx->id);
-        [$nameConditions, $nameParams] = LikePatterns::basenameConditions('pm.meta_value', $ctx->basenames);
+            [$idConditions, $idParams] = LikePatterns::anyIdConditions('pm.meta_value', $ids);
+            [$nameConditions, $nameParams] = LikePatterns::basenameConditions('pm.meta_value', $basenames);
 
-        $conditions = array_merge($idConditions, $nameConditions);
-        $keyPlaceholders = implode(',', array_fill(0, count(self::EXCLUDED_KEYS), '%s'));
+            $conditions = array_merge($idConditions, $nameConditions);
+            $keyPlaceholders = implode(',', array_fill(0, count(self::EXCLUDED_KEYS), '%s'));
 
-        // The same revision filter post_content uses, from the same place: an
-        // old version is not a use, but an autosave is an edit in flight, and a
-        // draft whose text was searched while its custom fields were not is one
-        // row the two detectors gave two answers about.
-        [$revisionCondition, $revisionParams] = LikePatterns::revisionCondition('p');
+            // The same revision filter post_content uses, from the same place: an
+            // old version is not a use, but an autosave is an edit in flight, and a
+            // draft whose text was searched while its custom fields were not is one
+            // row the two detectors gave two answers about.
+            [$revisionCondition, $revisionParams] = LikePatterns::revisionCondition('p');
 
-        $sql = "SELECT pm.post_id, pm.meta_key, pm.meta_value, p.post_type, p.post_parent, p.post_status
-                FROM {$wpdb->postmeta} pm
-                INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
-                WHERE {$revisionCondition}
-                  AND pm.post_id <> %d
-                  AND pm.meta_key NOT LIKE %s
-                  AND pm.meta_key NOT IN ({$keyPlaceholders})
-                  AND (" . implode(' OR ', $conditions) . ')';
+            // "A row never references itself" is answered below rather than here.
+            // It is the one condition in this query that is about the row being
+            // scanned instead of about the file, and a shared pass serves several
+            // rows: excluding any one of them would hide it from its siblings,
+            // which legitimately do reference it.
+            $sql = "SELECT pm.post_id, pm.meta_key, pm.meta_value, p.post_type, p.post_parent, p.post_status
+                    FROM {$wpdb->postmeta} pm
+                    INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+                    WHERE {$revisionCondition}
+                      AND pm.meta_key NOT LIKE %s
+                      AND pm.meta_key NOT IN ({$keyPlaceholders})
+                      AND (" . implode(' OR ', $conditions) . ')';
 
-        $params = array_merge(
-            $revisionParams,
-            [$ctx->id, $wpdb->esc_like('_freshet_unusedmedia_') . '%'],
-            self::EXCLUDED_KEYS,
-            $idParams,
-            $nameParams
-        );
+            $params = array_merge(
+                $revisionParams,
+                [$wpdb->esc_like('_freshet_unusedmedia_') . '%'],
+                self::EXCLUDED_KEYS,
+                $idParams,
+                $nameParams
+            );
 
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- placeholders built above, all values bound via prepare().
-        $rows = Db::rows($this->id(), $wpdb->get_results($wpdb->prepare($sql, ...$params)));
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- placeholders built above, all values bound via prepare().
+            return Db::rows($this->id(), $wpdb->get_results($wpdb->prepare($sql, ...$params)));
+        });
 
         $refs = [];
 
         foreach ($rows as $row) {
+            // The scanned attachment's own meta, which is what the query used to
+            // drop with `pm.post_id <> %d`. An attachment whose own custom field
+            // carries its own filename would otherwise make itself used for ever.
+            if ((int) $row->post_id === $ctx->id) {
+                continue;
+            }
+
             $ref = $this->classify($ctx, $row);
 
             if ($ref !== null) {

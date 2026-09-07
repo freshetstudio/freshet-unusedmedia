@@ -7,6 +7,7 @@ namespace FreshetUnusedMedia\Detector;
 use FreshetUnusedMedia\Scan\AttachmentContext;
 use FreshetUnusedMedia\Scan\Db;
 use FreshetUnusedMedia\Scan\Reference;
+use FreshetUnusedMedia\Scan\SharedReads;
 
 defined('ABSPATH') || exit;
 
@@ -22,19 +23,23 @@ final class TermMetaDetector implements DetectorInterface
 
     public function find(AttachmentContext $ctx): array
     {
-        global $wpdb;
+        // One broad pass for the whole sibling group where one is open, and the
+        // pass this always was where one is not — SharedReads decides.
+        $rows = SharedReads::candidates($this->id(), $ctx, function (array $ids, array $basenames): array {
+            global $wpdb;
 
-        [$idConditions, $idParams] = LikePatterns::idConditions('tm.meta_value', $ctx->id);
-        [$nameConditions, $nameParams] = LikePatterns::basenameConditions('tm.meta_value', $ctx->basenames);
+            [$idConditions, $idParams] = LikePatterns::anyIdConditions('tm.meta_value', $ids);
+            [$nameConditions, $nameParams] = LikePatterns::basenameConditions('tm.meta_value', $basenames);
 
-        $conditions = array_merge($idConditions, $nameConditions);
+            $conditions = array_merge($idConditions, $nameConditions);
 
-        $sql = "SELECT tm.term_id, tm.meta_key, tm.meta_value
-                FROM {$wpdb->termmeta} tm
-                WHERE (" . implode(' OR ', $conditions) . ')';
+            $sql = "SELECT tm.term_id, tm.meta_key, tm.meta_value
+                    FROM {$wpdb->termmeta} tm
+                    WHERE (" . implode(' OR ', $conditions) . ')';
 
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- placeholders built above, all values bound via prepare().
-        $rows = Db::rows($this->id(), $wpdb->get_results($wpdb->prepare($sql, ...array_merge($idParams, $nameParams))));
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- placeholders built above, all values bound via prepare().
+            return Db::rows($this->id(), $wpdb->get_results($wpdb->prepare($sql, ...array_merge($idParams, $nameParams))));
+        });
 
         $refs = [];
 

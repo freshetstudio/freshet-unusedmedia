@@ -7,6 +7,7 @@ namespace FreshetUnusedMedia\Detector;
 use FreshetUnusedMedia\Scan\AttachmentContext;
 use FreshetUnusedMedia\Scan\Db;
 use FreshetUnusedMedia\Scan\Reference;
+use FreshetUnusedMedia\Scan\SharedReads;
 
 defined('ABSPATH') || exit;
 
@@ -52,24 +53,29 @@ final class CommentDetector implements DetectorInterface
      */
     private function inContent(AttachmentContext $ctx): array
     {
-        global $wpdb;
+        // One broad pass for the whole sibling group where one is open, and the
+        // pass this always was where one is not — SharedReads decides. Named
+        // apart from the commentmeta read below: two tables, two passes.
+        $rows = SharedReads::candidates($this->id() . ' (content)', $ctx, function (array $ids, array $basenames): array {
+            global $wpdb;
 
-        [$nameConditions, $nameParams] = LikePatterns::basenameConditions('c.comment_content', $ctx->basenames);
-        [$linkConditions, $linkParams] = LikePatterns::attachmentLinkConditions('c.comment_content', $ctx->id);
-        [$classConditions, $classParams] = LikePatterns::imageClassConditions('c.comment_content', $ctx->id);
+            [$nameConditions, $nameParams] = LikePatterns::basenameConditions('c.comment_content', $basenames);
+            [$linkConditions, $linkParams] = LikePatterns::anyAttachmentLinkConditions('c.comment_content', $ids);
+            [$classConditions, $classParams] = LikePatterns::anyImageClassConditions('c.comment_content', $ids);
 
-        // The link and class conditions are always present, so — unlike before —
-        // there is no attachment for which this query binds nothing.
-        $conditions = array_merge($nameConditions, $linkConditions, $classConditions);
-        $params = array_merge($nameParams, $linkParams, $classParams);
+            // The link and class conditions are always present, so — unlike before —
+            // there is no attachment for which this query binds nothing.
+            $conditions = array_merge($nameConditions, $linkConditions, $classConditions);
+            $params = array_merge($nameParams, $linkParams, $classParams);
 
-        $sql = "SELECT c.comment_ID, c.comment_approved, c.comment_content
-                FROM {$wpdb->comments} c
-                WHERE c.comment_approved <> 'spam'
-                  AND (" . implode(' OR ', $conditions) . ')';
+            $sql = "SELECT c.comment_ID, c.comment_approved, c.comment_content
+                    FROM {$wpdb->comments} c
+                    WHERE c.comment_approved <> 'spam'
+                      AND (" . implode(' OR ', $conditions) . ')';
 
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- placeholders built above, all values bound via prepare().
-        $rows = Db::rows($this->id(), $wpdb->get_results($wpdb->prepare($sql, ...$params)));
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- placeholders built above, all values bound via prepare().
+            return Db::rows($this->id(), $wpdb->get_results($wpdb->prepare($sql, ...$params)));
+        });
 
         $refs = [];
 
@@ -108,21 +114,23 @@ final class CommentDetector implements DetectorInterface
 
     private function inMeta(AttachmentContext $ctx): array
     {
-        global $wpdb;
+        $rows = SharedReads::candidates($this->id() . ' (meta)', $ctx, function (array $ids, array $basenames): array {
+            global $wpdb;
 
-        [$idConditions, $idParams] = LikePatterns::idConditions('cm.meta_value', $ctx->id);
-        [$nameConditions, $nameParams] = LikePatterns::basenameConditions('cm.meta_value', $ctx->basenames);
+            [$idConditions, $idParams] = LikePatterns::anyIdConditions('cm.meta_value', $ids);
+            [$nameConditions, $nameParams] = LikePatterns::basenameConditions('cm.meta_value', $basenames);
 
-        $conditions = array_merge($idConditions, $nameConditions);
+            $conditions = array_merge($idConditions, $nameConditions);
 
-        $sql = "SELECT cm.comment_id, cm.meta_key, cm.meta_value, c.comment_approved
-                FROM {$wpdb->commentmeta} cm
-                INNER JOIN {$wpdb->comments} c ON c.comment_ID = cm.comment_id
-                WHERE c.comment_approved <> 'spam'
-                  AND (" . implode(' OR ', $conditions) . ')';
+            $sql = "SELECT cm.comment_id, cm.meta_key, cm.meta_value, c.comment_approved
+                    FROM {$wpdb->commentmeta} cm
+                    INNER JOIN {$wpdb->comments} c ON c.comment_ID = cm.comment_id
+                    WHERE c.comment_approved <> 'spam'
+                      AND (" . implode(' OR ', $conditions) . ')';
 
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- placeholders built above, all values bound via prepare().
-        $rows = Db::rows($this->id() . ' (meta)', $wpdb->get_results($wpdb->prepare($sql, ...array_merge($idParams, $nameParams))));
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- placeholders built above, all values bound via prepare().
+            return Db::rows($this->id() . ' (meta)', $wpdb->get_results($wpdb->prepare($sql, ...array_merge($idParams, $nameParams))));
+        });
 
         $refs = [];
 

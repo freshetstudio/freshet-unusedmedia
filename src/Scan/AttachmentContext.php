@@ -9,6 +9,14 @@ defined('ABSPATH') || exit;
 /**
  * Precomputed facts about one attachment, shared by all detectors:
  * the ID and every filename (basename) the file can be referenced by.
+ *
+ * **The needles a detector binds are not always this row's own.** `id` and
+ * `basenames` are what a detector *verifies* against and are always this
+ * attachment's; `queryIds` and `queryBasenames` are what its broad SQL pass
+ * binds, which is the whole sibling group's when one is open — see SharedReads
+ * for why widening the fetch cannot change an answer, and why narrowing it
+ * would. With no group open the two pairs are the same thing and every query is
+ * the query it always was.
  */
 final class AttachmentContext
 {
@@ -18,15 +26,51 @@ final class AttachmentContext
      *                            mime sources, the generation an in-admin edit
      *                            superseded, size files still on disk that the
      *                            metadata no longer names, encoded spellings).
+     * @param int[]    $queryIds       The ids the broad pass binds.
+     * @param string[] $queryBasenames The basenames the broad pass binds.
+     * @param bool     $shared         Whether that pass is one the group shares.
      */
     private function __construct(
         public readonly int $id,
         public readonly int $parentId,
         public readonly array $basenames,
+        public readonly array $queryIds,
+        public readonly array $queryBasenames,
+        public readonly bool $shared,
     ) {
     }
 
     public static function forAttachment(int $id): self
+    {
+        $names = self::basenamesFor($id);
+
+        // Only a row of the open group reads the group's needles. A scan of some
+        // other attachment while a group is open — a filter's doing, or a nested
+        // call — asks for itself, so a memo can never be read by a row it was
+        // not built for.
+        $shared = SharedReads::isOpen() && in_array($id, SharedReads::ids(), true);
+
+        return new self(
+            id: $id,
+            parentId: (int) (get_post($id)?->post_parent ?? 0),
+            basenames: $names,
+            queryIds: $shared ? SharedReads::ids() : [$id],
+            queryBasenames: $shared ? SharedReads::basenames() : $names,
+            shared: $shared,
+        );
+    }
+
+    /**
+     * Every basename one attachment may be referenced by.
+     *
+     * Split out of forAttachment() so SharedReads can take the union over a
+     * whole sibling group without building a context for each of its rows —
+     * and so that the union is built from the same source the row's own list
+     * is, rather than from a second reading of what a group shares.
+     *
+     * @return string[]
+     */
+    public static function basenamesFor(int $id): array
     {
         $names = [];
 
@@ -142,10 +186,6 @@ final class AttachmentContext
             }
         }
 
-        return new self(
-            id: $id,
-            parentId: (int) (get_post($id)?->post_parent ?? 0),
-            basenames: array_values(array_unique($names)),
-        );
+        return array_values(array_unique($names));
     }
 }

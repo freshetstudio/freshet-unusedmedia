@@ -7,6 +7,7 @@ namespace FreshetUnusedMedia\Detector;
 use FreshetUnusedMedia\Scan\AttachmentContext;
 use FreshetUnusedMedia\Scan\Db;
 use FreshetUnusedMedia\Scan\Reference;
+use FreshetUnusedMedia\Scan\SharedReads;
 
 defined('ABSPATH') || exit;
 
@@ -23,33 +24,37 @@ final class UserMetaDetector implements DetectorInterface
 
     public function find(AttachmentContext $ctx): array
     {
-        global $wpdb;
+        // One broad pass for the whole sibling group where one is open, and the
+        // pass this always was where one is not — SharedReads decides.
+        $rows = SharedReads::candidates($this->id(), $ctx, function (array $ids, array $basenames): array {
+            global $wpdb;
 
-        [$idConditions, $idParams] = LikePatterns::idConditions('um.meta_value', $ctx->id);
-        [$nameConditions, $nameParams] = LikePatterns::basenameConditions('um.meta_value', $ctx->basenames);
+            [$idConditions, $idParams] = LikePatterns::anyIdConditions('um.meta_value', $ids);
+            [$nameConditions, $nameParams] = LikePatterns::basenameConditions('um.meta_value', $basenames);
 
-        $conditions = array_merge($idConditions, $nameConditions);
+            $conditions = array_merge($idConditions, $nameConditions);
 
-        $sql = "SELECT um.user_id, um.meta_key, um.meta_value
-                FROM {$wpdb->usermeta} um
-                WHERE um.meta_key <> 'session_tokens'
-                  AND um.meta_key NOT LIKE %s
-                  AND um.meta_key NOT LIKE %s
-                  AND um.meta_key NOT LIKE %s
-                  AND (" . implode(' OR ', $conditions) . ')';
+            $sql = "SELECT um.user_id, um.meta_key, um.meta_value
+                    FROM {$wpdb->usermeta} um
+                    WHERE um.meta_key <> 'session_tokens'
+                      AND um.meta_key NOT LIKE %s
+                      AND um.meta_key NOT LIKE %s
+                      AND um.meta_key NOT LIKE %s
+                      AND (" . implode(' OR ', $conditions) . ')';
 
-        $params = array_merge(
-            [
-                '%' . $wpdb->esc_like('capabilities'),
-                '%' . $wpdb->esc_like('user_level'),
-                '%' . $wpdb->esc_like('user-settings') . '%',
-            ],
-            $idParams,
-            $nameParams
-        );
+            $params = array_merge(
+                [
+                    '%' . $wpdb->esc_like('capabilities'),
+                    '%' . $wpdb->esc_like('user_level'),
+                    '%' . $wpdb->esc_like('user-settings') . '%',
+                ],
+                $idParams,
+                $nameParams
+            );
 
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- placeholders built above, all values bound via prepare().
-        $rows = Db::rows($this->id(), $wpdb->get_results($wpdb->prepare($sql, ...$params)));
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- placeholders built above, all values bound via prepare().
+            return Db::rows($this->id(), $wpdb->get_results($wpdb->prepare($sql, ...$params)));
+        });
 
         $refs = [];
 

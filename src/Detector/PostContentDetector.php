@@ -7,6 +7,7 @@ namespace FreshetUnusedMedia\Detector;
 use FreshetUnusedMedia\Scan\AttachmentContext;
 use FreshetUnusedMedia\Scan\Db;
 use FreshetUnusedMedia\Scan\Reference;
+use FreshetUnusedMedia\Scan\SharedReads;
 
 defined('ABSPATH') || exit;
 
@@ -35,13 +36,98 @@ final class PostContentDetector implements DetectorInterface
 
     public function find(AttachmentContext $ctx): array
     {
-        global $wpdb;
+        // One broad pass for the whole sibling group where one is open, and the
+        // pass this always was where one is not — SharedReads decides.
+        $rows = SharedReads::candidates($this->id(), $ctx, function (array $ids, array $basenames): array {
+            global $wpdb;
 
-        $id = $ctx->id;
+            $conditions = [];
+            $params = [];
 
-        // Needles are ID-specific so we never fetch every gallery or block post
-        // on the site; PHP verification makes the final call.
-        $needles = [
+            foreach ($ids as $id) {
+                foreach (self::needles((int) $id) as $needle) {
+                    $conditions[] = 'p.post_content LIKE %s';
+                    $params[] = '%' . $wpdb->esc_like($needle) . '%';
+                }
+            }
+
+            [$nameConditions, $nameParams] = LikePatterns::basenameConditions('p.post_content', $basenames);
+            // An image in an excerpt always carries its URL, so basenames suffice there.
+            [$excerptConditions, $excerptParams] = LikePatterns::basenameConditions('p.post_excerpt', $basenames);
+
+            $conditions = array_merge($conditions, $nameConditions, $excerptConditions);
+            $params = array_merge($params, $nameParams, $excerptParams);
+
+            // Revisions are skipped — a reference in an old version is not a use —
+            // except autosaves, which hold edits in flight that are not saved yet.
+            // Shared with PostmetaDetector so the two cannot drift apart on what an
+            // autosave is; see LikePatterns::revisionCondition().
+            [$revisionCondition, $revisionParams] = LikePatterns::revisionCondition('p');
+
+            // Attachment rows are searched like any other post. WordPress stores an
+            // attachment's description in post_content and its caption in
+            // post_excerpt, and both are ordinary rich text that can name another
+            // file — a document linked from a sibling's description was invisible
+            // while post_type excluded 'attachment' here (freshet-148). The row
+            // being scanned is kept out in find() rather than here: a shared pass
+            // serves every row of a sibling group, and dropping any one of them in
+            // SQL would hide it from the siblings that legitimately name it.
+            // nav_menu_item stays excluded: a menu item's content is empty and its
+            // meta is the postmeta detector's.
+            $sql = "SELECT p.ID, p.post_parent, p.post_type, p.post_status, p.post_content, p.post_excerpt
+                    FROM {$wpdb->posts} p
+                    WHERE p.post_type <> 'nav_menu_item'
+                      AND {$revisionCondition}
+                      AND p.post_status <> 'auto-draft'
+                      AND (" . implode(' OR ', $conditions) . ')';
+
+            $params = array_merge($revisionParams, $params);
+
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- placeholders built above, all values bound via prepare().
+            return Db::rows($this->id(), $wpdb->get_results($wpdb->prepare($sql, ...$params)));
+        });
+
+        $refs = [];
+
+        foreach ($rows as $row) {
+            // An attachment whose own description carries its own filename does
+            // not reference itself — what "p.ID <> %d" used to say in SQL.
+            if ((int) $row->ID === $ctx->id) {
+                continue;
+            }
+
+            $match = $this->verify((string) $row->post_content . "\n" . (string) $row->post_excerpt, $ctx);
+
+            if ($match === null) {
+                continue;
+            }
+
+            $autosave = $row->post_type === 'revision';
+
+            $refs[] = new Reference(
+                detector: 'post-content',
+                objectType: 'post',
+                objectId: $autosave ? (int) $row->post_parent : (int) $row->ID,
+                detail: $autosave ? 'autosave' : $match,
+                match: $autosave ? 'autosave' : $match,
+                confidence: $autosave || $row->post_status === 'trash' ? Reference::POSSIBLE : Reference::CONFIRMED,
+            );
+        }
+
+        return $refs;
+    }
+
+    /**
+     * The ID-specific needles the broad pass binds on post_content, so we never
+     * fetch every gallery or block post on the site; PHP verification makes the
+     * final call. One list, called once per row of the sibling group a shared
+     * pass covers.
+     *
+     * @return string[]
+     */
+    private static function needles(int $id): array
+    {
+        return [
             'wp-image-' . $id,    // editor image class
             'wp-att-' . $id,      // link to the attachment page (rel/class marker)
             '"id":' . $id,        // block attribute
@@ -72,72 +158,6 @@ final class PostContentDetector implements DetectorInterface
             "\n" . $id,           // newline before the value
             "\t" . $id,           // tab-indented value
         ];
-
-        $conditions = [];
-        $params = [];
-
-        foreach ($needles as $needle) {
-            $conditions[] = 'p.post_content LIKE %s';
-            $params[] = '%' . $wpdb->esc_like($needle) . '%';
-        }
-
-        [$nameConditions, $nameParams] = LikePatterns::basenameConditions('p.post_content', $ctx->basenames);
-        // An image in an excerpt always carries its URL, so basenames suffice there.
-        [$excerptConditions, $excerptParams] = LikePatterns::basenameConditions('p.post_excerpt', $ctx->basenames);
-
-        $conditions = array_merge($conditions, $nameConditions, $excerptConditions);
-        $params = array_merge($params, $nameParams, $excerptParams);
-
-        // Revisions are skipped — a reference in an old version is not a use —
-        // except autosaves, which hold edits in flight that are not saved yet.
-        // Shared with PostmetaDetector so the two cannot drift apart on what an
-        // autosave is; see LikePatterns::revisionCondition().
-        [$revisionCondition, $revisionParams] = LikePatterns::revisionCondition('p');
-
-        // Attachment rows are searched like any other post. WordPress stores an
-        // attachment's description in post_content and its caption in
-        // post_excerpt, and both are ordinary rich text that can name another
-        // file — a document linked from a sibling's description was invisible
-        // while post_type excluded 'attachment' here (freshet-148). The row
-        // being scanned is kept out by "p.ID <> %d" below, which is what stops
-        // an attachment whose own description carries its own filename from
-        // making itself used for ever. nav_menu_item stays excluded: a menu
-        // item's content is empty and its meta is the postmeta detector's.
-        $sql = "SELECT p.ID, p.post_parent, p.post_type, p.post_status, p.post_content, p.post_excerpt
-                FROM {$wpdb->posts} p
-                WHERE p.post_type <> 'nav_menu_item'
-                  AND {$revisionCondition}
-                  AND p.post_status <> 'auto-draft'
-                  AND p.ID <> %d
-                  AND (" . implode(' OR ', $conditions) . ')';
-
-        $params = array_merge($revisionParams, [$id], $params);
-
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- placeholders built above, all values bound via prepare().
-        $rows = Db::rows($this->id(), $wpdb->get_results($wpdb->prepare($sql, ...$params)));
-
-        $refs = [];
-
-        foreach ($rows as $row) {
-            $match = $this->verify((string) $row->post_content . "\n" . (string) $row->post_excerpt, $ctx);
-
-            if ($match === null) {
-                continue;
-            }
-
-            $autosave = $row->post_type === 'revision';
-
-            $refs[] = new Reference(
-                detector: 'post-content',
-                objectType: 'post',
-                objectId: $autosave ? (int) $row->post_parent : (int) $row->ID,
-                detail: $autosave ? 'autosave' : $match,
-                match: $autosave ? 'autosave' : $match,
-                confidence: $autosave || $row->post_status === 'trash' ? Reference::POSSIBLE : Reference::CONFIRMED,
-            );
-        }
-
-        return $refs;
     }
 
     /** Precise boundary-checked verification; returns the match type or null. */

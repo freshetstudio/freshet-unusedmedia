@@ -246,12 +246,15 @@ final class DeleteController
             $used = 0;
             $unresolved = 0;
 
-            foreach ($rows as $rowId) {
-                $status = $this->scanner->scan($rowId)['status'];
-
-                if ($status === Scanner::STATUS_ERROR) {
+            // Scanned as a group rather than row by row: the rows stand on one
+            // file and so ask the detectors largely the same question, and asking
+            // it once was 94% of what this request spent (freshet-155). Every
+            // row still gets its own verdict below — the group shares the broad
+            // reads, never the answer.
+            foreach ($this->scanner->scanGroup($rows) as $result) {
+                if ($result['status'] === Scanner::STATUS_ERROR) {
                     ++$unresolved;
-                } elseif ($status === ResultStore::STATUS_USED) {
+                } elseif ($result['status'] === ResultStore::STATUS_USED) {
                     ++$used;
                 }
             }

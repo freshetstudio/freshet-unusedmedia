@@ -50,6 +50,16 @@ const FIXTURE_PRE_EDIT_FILE = 'sunset.jpg';
 const FIXTURE_PRE_EDIT_SIZE = 'sunset-300x200.jpg';
 const FIXTURE_EMPTY_BACKUP_ID = 126;
 
+/**
+ * A second attachment row standing on FIXTURE_ID's own `_wp_attached_file` — a
+ * translation copy, a duplicated post, the same image uploaded twice. It is one
+ * file with two rows, which is what a sibling group is, and it carries a size
+ * the first row's metadata does not name so the union of the group's basenames
+ * is provably a union rather than the representative's list.
+ */
+const FIXTURE_SIBLING_ID = 127;
+const FIXTURE_SIBLING_SIZE = 'hero-1024x768.jpg';
+
 function wp_basename(string $path): string
 {
     return basename(str_replace('\\', '/', $path));
@@ -89,8 +99,19 @@ function get_post_meta(int $id, string $key, bool $single = false): mixed
         FIXTURE_UNICODE_ID => '2026/07/' . FIXTURE_UNICODE_NAME,
         FIXTURE_EDITED_ID => '2026/07/' . FIXTURE_EDITED_FILE,
         FIXTURE_EMPTY_BACKUP_ID => '2026/07/beach.jpg',
+        FIXTURE_SIBLING_ID => '2026/07/hero-scaled.jpg',
         default => '',
     };
+}
+
+/**
+ * Core primes a page of rows' postmeta in one read. SharedReads does it before
+ * it takes a group's basenames, so the union costs one round trip rather than
+ * one per row; nothing here caches, so it only has to exist.
+ */
+function update_postmeta_cache(array $ids): bool
+{
+    return true;
 }
 
 /**
@@ -153,6 +174,13 @@ function wp_get_attachment_metadata(int $id): array|false
         // generation and nothing else — which is the whole reason the superseded
         // one has to be read from somewhere.
         FIXTURE_EDITED_ID => ['sizes' => ['medium' => ['file' => FIXTURE_EDITED_SIZE]]],
+        // The same upload, regenerated with one more registered size. Two rows
+        // on one path do not have to agree about their metadata, and this is the
+        // disagreement that decides whether the shared needles are a union.
+        FIXTURE_SIBLING_ID => [
+            'original_image' => 'hero.jpg',
+            'sizes' => ['large' => ['file' => FIXTURE_SIBLING_SIZE]],
+        ],
         default => false,
     };
 }
@@ -345,6 +373,7 @@ $GLOBALS['wpdb'] = new class {
 require_once ABSPATH . 'src/Scan/QueryFailed.php';
 require_once ABSPATH . 'src/Scan/Db.php';
 require_once ABSPATH . 'src/Scan/SizeSiblings.php';
+require_once ABSPATH . 'src/Scan/SharedReads.php';
 require_once ABSPATH . 'src/Scan/AttachmentContext.php';
 require_once ABSPATH . 'src/Scan/Reference.php';
 require_once ABSPATH . 'src/Detector/DetectorInterface.php';
@@ -375,6 +404,7 @@ use FreshetUnusedMedia\License\NoLicense;
 use FreshetUnusedMedia\License\RemoteLicense;
 use FreshetUnusedMedia\Scan\AttachmentContext;
 use FreshetUnusedMedia\Scan\QueryFailed;
+use FreshetUnusedMedia\Scan\SharedReads;
 use FreshetUnusedMedia\Scan\SizeSiblings;
 use FreshetUnusedMedia\Scan\Reference;
 use FreshetUnusedMedia\Scan\UploadGrace;
@@ -806,13 +836,15 @@ check('data-id attribute, single quoted', $match("<figure data-id='123'></figure
 check('data-id attribute, longer id', $match('<figure data-id="1234"></figure>'), null);
 check('data-id attribute, prefixed id', $match('<figure data-id="9123"></figure>'), null);
 
-// The rewritten query: every placeholder bound, autosave filter first, own ID excluded.
+// The rewritten query: every placeholder bound, autosave filter first, then the
+// id needles — the scanned row's own exclusion is no longer in the statement
+// (freshet-155; it is asserted where it moved to, further down).
 $detector->find($ctx);
 $sql = $GLOBALS['wpdb']->lastSql;
 $bound = $GLOBALS['wpdb']->lastParams;
 check('post_content query placeholders match params', substr_count($sql, '%s') + substr_count($sql, '%d'), count($bound));
 check('post_content query first binds the autosave name', $bound[0], '%-autosave-v1');
-check('post_content query second binds the own id', $bound[1], 123);
+check('post_content query then binds the id needles', $bound[1], '%wp-image-123%');
 check('post_content query reaches the excerpt', str_contains($sql, 'p.post_excerpt LIKE'), true);
 check('post_content query admits autosave revisions only', str_contains($sql, "(p.post_type <> 'revision' OR p.post_name LIKE %s)"), true);
 
@@ -1288,11 +1320,6 @@ $captionRow = (object) [
     'ID' => '821', 'post_parent' => '0', 'post_type' => 'attachment', 'post_status' => 'inherit',
     'post_content' => '', 'post_excerpt' => 'Cover shot: hero-300x200.jpg',
 ];
-$menuRow = (object) [
-    'ID' => '822', 'post_parent' => '0', 'post_type' => 'nav_menu_item', 'post_status' => 'publish',
-    'post_content' => $attachmentDescription, 'post_excerpt' => '',
-];
-
 $GLOBALS['wpdb']->rows = [$ownRow, $siblingRow, $captionRow];
 $detector->find($ctx);
 $attachmentBound = $GLOBALS['wpdb']->lastParams;
@@ -1301,17 +1328,16 @@ $GLOBALS['wpdb']->rows = [];
 
 check('the post-content query no longer excludes attachment rows', str_contains($attachmentSql, "'attachment'"), false);
 check('and still excludes menu items, whose content is not a reference', str_contains($attachmentSql, "p.post_type <> 'nav_menu_item'"), true);
-check('the scanned row is excluded in the statement', str_contains($attachmentSql, 'p.ID <> %d'), true);
-// The autosave needle is bound first, then the id, then the needles.
-check('and the id it excludes is the attachment being scanned', $attachmentBound[1], FIXTURE_ID);
+// "A row never references itself" moved out of the statement and into find():
+// the broad pass is shared across a whole sibling group, and a row excluded in
+// SQL would be hidden from the siblings that legitimately name it (freshet-155).
+check('the statement no longer excludes the scanned row', str_contains($attachmentSql, 'p.ID <> %d'), false);
+check('the autosave needle is still what it binds first', $attachmentBound[0], '%-autosave-v1');
 
-// The rows that WHERE leaves behind — filtered by the id the detector bound
-// rather than by a list repeated here, so this cannot pass a fix it did not
-// get.
-$GLOBALS['wpdb']->rows = array_values(array_filter(
-    [$ownRow, $siblingRow, $captionRow, $menuRow],
-    static fn(object $row): bool => (int) $row->ID !== (int) $attachmentBound[1] && $row->post_type !== 'nav_menu_item'
-));
+// Every row the WHERE leaves behind, the scanned attachment's own included —
+// dropping that one is the detector's job now, so handing it back is the test.
+// The menu item stays out: that exclusion is still in SQL.
+$GLOBALS['wpdb']->rows = [$ownRow, $siblingRow, $captionRow];
 $attachmentRefs = $detector->find($ctx);
 $GLOBALS['wpdb']->rows = [];
 
@@ -2451,6 +2477,135 @@ $GLOBALS['wpdb']->rows = [];
 
 check('post content still resolves the same delimiter', array_map(static fn($r) => $r->objectId, $blockContentRefs), [71]);
 check('and still labels it a block field', $blockContentRefs[0]->match, 'acf-block');
+
+// ------------------------------------------- one broad pass for one group
+//
+// Rows standing on one `_wp_attached_file` are one file, and the delete path
+// re-scans every one of them before it removes anything. They ask the detectors
+// nearly the same question — one file, one basename set, different ids — so it
+// was asked once per row, ten times over on a library where a file averages ten
+// rows, and that was 94% of what a delete request spent (freshet-155).
+//
+// Three things have to survive making it one pass. The needles may only widen.
+// Every row still reaches its own verdict. And a read that did not answer must
+// refuse for every row behind it rather than reading as "no references found",
+// which is freshet-141 and the reason this is asserted rather than assumed.
+
+$groupIds = [FIXTURE_ID, FIXTURE_SIBLING_ID];
+
+SharedReads::open($groupIds);
+
+$ownCtx = AttachmentContext::forAttachment(FIXTURE_ID);
+$siblingCtx = AttachmentContext::forAttachment(FIXTURE_SIBLING_ID);
+
+check('both rows of an open group share the pass', [$ownCtx->shared, $siblingCtx->shared], [true, true]);
+check('and both bind every id in it', [$ownCtx->queryIds, $siblingCtx->queryIds], [$groupIds, $groupIds]);
+check('while each still verifies as itself', [$ownCtx->id, $siblingCtx->id], $groupIds);
+
+// The union, and it has to be one: two rows on a path can carry different
+// metadata, and a size named by only one of them that fell out of the needles
+// is a reference nobody fetches — which is a live file offered for deletion.
+check(
+    'the shared needles are the union of the group basenames',
+    in_array(FIXTURE_SIBLING_SIZE, $ownCtx->queryBasenames, true),
+    true
+);
+check(
+    'and a row does not take its sibling name as its own',
+    in_array(FIXTURE_SIBLING_SIZE, $ownCtx->basenames, true),
+    false
+);
+
+// One candidate row, and it is the sibling's own meta naming the shared file.
+// For the row being scanned it is a reference; for the sibling it is that row
+// talking about itself, which never was one. Same fetched row, two answers —
+// which is what "the group shares the reads, never the verdict" has to mean.
+$sharedCandidate = (object) [
+    'post_id' => (string) FIXTURE_SIBLING_ID,
+    'meta_key' => 'gallery_caption',
+    'meta_value' => 'Cover shot: hero-300x200.jpg',
+    'post_type' => 'attachment',
+    'post_parent' => '0',
+    'post_status' => 'inherit',
+];
+
+$postmeta = new PostmetaDetector();
+
+$GLOBALS['wpdb']->rows = [$sharedCandidate];
+$GLOBALS['wpdb']->calls = 0;
+
+$ownRefs = $postmeta->find($ownCtx);
+$groupBound = $GLOBALS['wpdb']->lastParams;
+$siblingRefs = $postmeta->find($siblingCtx);
+
+$GLOBALS['wpdb']->rows = [];
+
+check('the group pays for one broad pass, not one per row', $GLOBALS['wpdb']->calls, 1);
+check('and that pass binds the sibling id as well as its own', in_array('%"' . FIXTURE_SIBLING_ID . '"%', $groupBound, true), true);
+check('and its own', in_array('%"' . FIXTURE_ID . '"%', $groupBound, true), true);
+check("a sibling's caption naming the file is a reference", array_map(static fn($r): int => $r->objectId, $ownRefs), [FIXTURE_SIBLING_ID]);
+check('and it counts as used', $ownRefs[0]->countsAsUsed(), true);
+check('while the sibling does not reference itself', $siblingRefs, []);
+
+// Which is the whole of Acceptance: one shared read, two different verdicts.
+check('so one shared read leaves the two rows on different verdicts', [$ownRefs !== [], $siblingRefs !== []], [true, false]);
+
+// A read that did not answer. It refuses once and goes on refusing: a cached
+// QueryFailed that decayed into a cached empty set would tell nine rows out of
+// ten that nothing references them, which is exactly the silent "unused"
+// freshet-141 exists to prevent.
+SharedReads::close();
+SharedReads::open($groupIds);
+
+$GLOBALS['wpdb']->failWith = 'MySQL server has gone away';
+$GLOBALS['wpdb']->calls = 0;
+
+$firstRefusal = null;
+$secondRefusal = null;
+$secondResult = 'not reached';
+
+try {
+    $postmeta->find($ownCtx);
+} catch (QueryFailed $e) {
+    $firstRefusal = $e;
+}
+
+try {
+    $secondResult = $postmeta->find($siblingCtx);
+} catch (QueryFailed $e) {
+    $secondRefusal = $e;
+}
+
+$GLOBALS['wpdb']->failWith = '';
+$GLOBALS['wpdb']->last_error = '';
+SharedReads::close();
+
+check('a shared read that did not answer refuses', $firstRefusal instanceof QueryFailed, true);
+check('and refuses for every row behind it', $secondRefusal instanceof QueryFailed, true);
+check('rather than handing the row behind it an empty result', $secondResult, 'not reached');
+check('it is the same refusal, not a second one guessed at', $secondRefusal === $firstRefusal, true);
+check('so a failed pass is not re-issued once per row either', $GLOBALS['wpdb']->calls, 1);
+
+// Closed, the group is gone: a row scanned afterwards asks for itself, which is
+// what every caller outside the delete path does and what the whole plugin did
+// before this. The memo cannot outlive the group it was read for.
+$loneCtx = AttachmentContext::forAttachment(FIXTURE_ID);
+
+check('a closed group leaves the row asking for itself', [$loneCtx->shared, $loneCtx->queryIds], [false, [FIXTURE_ID]]);
+check('and with its own basenames, not the union', in_array(FIXTURE_SIBLING_SIZE, $loneCtx->queryBasenames, true), false);
+
+// A group past the bound is left alone rather than asked for in one enormous
+// statement. Nothing is opened, so every row queries for itself exactly as it
+// did before — the fallback needs no reading of its own.
+SharedReads::open(range(1, SharedReads::MAX_ROWS + 1));
+
+check('a group past the bound opens nothing', SharedReads::isOpen(), false);
+
+SharedReads::open([FIXTURE_ID]);
+
+check('and neither does a group of one, which has nothing to share', SharedReads::isOpen(), false);
+
+SharedReads::close();
 
 // ------------------------------------------------------------------ report
 

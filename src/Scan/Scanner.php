@@ -40,6 +40,44 @@ final class Scanner
     }
 
     /**
+     * Scan every row of one sibling group, sharing the broad passes across them.
+     *
+     * The delete path re-verifies by file: it expands one id into every row
+     * standing on the same `_wp_attached_file` and scans all of them, and those
+     * rows name the same file. Scanned one at a time, each of them re-issued the
+     * detectors' whole-table `LIKE` pass for needles that were largely identical
+     * — on a library where a file averages ten rows, the same expensive question
+     * ten times over, and 94% of what a delete request spends (freshet-155).
+     *
+     * SharedReads is what makes it one pass. It is opened here and closed in the
+     * `finally`, so the sharing lasts exactly as long as this group and a later
+     * scan cannot read rows fetched for an earlier one. Nothing about a row's
+     * verdict is shared: each row runs every detector against its own id and its
+     * own basenames, so two rows of a group still reach different statuses —
+     * which they must, because FileGroups::verdict() counts them individually.
+     *
+     * @param int[] $rowIds Every attachment row standing on one file.
+     * @return array<int, array{status: string, refs: Reference[], error?: string}>
+     *         Keyed by row id, in the order given.
+     */
+    public function scanGroup(array $rowIds): array
+    {
+        SharedReads::open($rowIds);
+
+        try {
+            $results = [];
+
+            foreach ($rowIds as $rowId) {
+                $results[(int) $rowId] = $this->scan((int) $rowId);
+            }
+
+            return $results;
+        } finally {
+            SharedReads::close();
+        }
+    }
+
+    /**
      * Run every detector and record the verdict — unless one of them could not
      * read the database, in which case there is no verdict to record.
      *

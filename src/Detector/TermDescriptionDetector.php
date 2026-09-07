@@ -7,6 +7,7 @@ namespace FreshetUnusedMedia\Detector;
 use FreshetUnusedMedia\Scan\AttachmentContext;
 use FreshetUnusedMedia\Scan\Db;
 use FreshetUnusedMedia\Scan\Reference;
+use FreshetUnusedMedia\Scan\SharedReads;
 
 defined('ABSPATH') || exit;
 
@@ -34,20 +35,24 @@ final class TermDescriptionDetector implements DetectorInterface
 
     public function find(AttachmentContext $ctx): array
     {
-        global $wpdb;
+        // One broad pass for the whole sibling group where one is open, and the
+        // pass this always was where one is not — SharedReads decides.
+        $rows = SharedReads::candidates($this->id(), $ctx, function (array $ids, array $basenames): array {
+            global $wpdb;
 
-        [$idConditions, $idParams] = LikePatterns::idConditions('tt.description', $ctx->id);
-        [$nameConditions, $nameParams] = LikePatterns::basenameConditions('tt.description', $ctx->basenames);
+            [$idConditions, $idParams] = LikePatterns::anyIdConditions('tt.description', $ids);
+            [$nameConditions, $nameParams] = LikePatterns::basenameConditions('tt.description', $basenames);
 
-        $conditions = array_merge($idConditions, $nameConditions);
+            $conditions = array_merge($idConditions, $nameConditions);
 
-        $sql = "SELECT tt.term_id, tt.description
-                FROM {$wpdb->term_taxonomy} tt
-                WHERE tt.description <> ''
-                  AND (" . implode(' OR ', $conditions) . ')';
+            $sql = "SELECT tt.term_id, tt.description
+                    FROM {$wpdb->term_taxonomy} tt
+                    WHERE tt.description <> ''
+                      AND (" . implode(' OR ', $conditions) . ')';
 
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- placeholders built above, all values bound via prepare().
-        $rows = Db::rows($this->id(), $wpdb->get_results($wpdb->prepare($sql, ...array_merge($idParams, $nameParams))));
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- placeholders built above, all values bound via prepare().
+            return Db::rows($this->id(), $wpdb->get_results($wpdb->prepare($sql, ...array_merge($idParams, $nameParams))));
+        });
 
         $refs = [];
 

@@ -213,6 +213,63 @@ final class LikePatterns
     }
 
     /**
+     * The same three condition sets, for every row of a sibling group at once.
+     *
+     * A group's rows share their file and therefore their basenames, but not
+     * their ids, so the id half of a shared broad pass is the union of the
+     * group's — see SharedReads. Looping the single-row builders keeps one
+     * definition of each condition set: a second transcription of nineteen
+     * needles is exactly the drift `revisionCondition()` exists to prevent.
+     *
+     * @param int[] $ids
+     * @return array{0: string[], 1: array<int, string>} [conditions, params]
+     */
+    public static function anyIdConditions(string $column, array $ids): array
+    {
+        return self::anyOf([self::class, 'idConditions'], $column, $ids);
+    }
+
+    /**
+     * @param int[] $ids
+     * @return array{0: string[], 1: array<int, string>} [conditions, params]
+     */
+    public static function anyAttachmentLinkConditions(string $column, array $ids): array
+    {
+        return self::anyOf([self::class, 'attachmentLinkConditions'], $column, $ids);
+    }
+
+    /**
+     * @param int[] $ids
+     * @return array{0: string[], 1: array<int, string>} [conditions, params]
+     */
+    public static function anyImageClassConditions(string $column, array $ids): array
+    {
+        return self::anyOf([self::class, 'imageClassConditions'], $column, $ids);
+    }
+
+    /**
+     * One condition builder, OR'd across a list of ids.
+     *
+     * @param callable(string, int): array{0: string[], 1: array<int, string>} $build
+     * @param int[] $ids
+     * @return array{0: string[], 1: array<int, string>} [conditions, params]
+     */
+    private static function anyOf(callable $build, string $column, array $ids): array
+    {
+        $conditions = [];
+        $params = [];
+
+        foreach ($ids as $id) {
+            [$idConditions, $idParams] = $build($column, (int) $id);
+
+            $conditions = array_merge($conditions, $idConditions);
+            $params = array_merge($params, $idParams);
+        }
+
+        return [$conditions, $params];
+    }
+
+    /**
      * OR'd LIKE conditions for the attachment's basenames.
      *
      * @param string[] $basenames

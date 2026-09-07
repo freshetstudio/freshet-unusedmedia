@@ -605,6 +605,7 @@ foreach ([
     'src/Scan/QueryFailed.php',
     'src/Scan/Db.php',
     'src/Scan/Reference.php',
+    'src/Scan/SharedReads.php',
     'src/Scan/AttachmentContext.php',
     'src/Scan/FileSize.php',
     'src/Scan/FileGroups.php',
@@ -654,6 +655,7 @@ use FreshetUnusedMedia\Scan\Reference;
 use FreshetUnusedMedia\Scan\ResultFilters;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\Scanner;
+use FreshetUnusedMedia\Scan\SharedReads;
 use FreshetUnusedMedia\Scan\SizeSiblings;
 use FreshetUnusedMedia\Scan\UploadGrace;
 
@@ -1680,6 +1682,32 @@ check(
     (int) strpos($deleteSource, 'hasRoom()') < (int) strpos($deleteSource, 'FileGroups::siblings('),
     true
 );
+
+// -------------------------------------- one group, one pass, two verdicts
+//
+// The delete path re-verifies a whole group before it removes anything, and it
+// now scans that group as a group: the detectors' broad reads are issued once
+// for it instead of once per row (freshet-155). What must not travel with them
+// is the answer. A group's rows can honestly disagree — that is the whole
+// reason a file is unused only when every row on it is — so a shared read that
+// collapsed them into one verdict would delete a file its used row still shows.
+
+library([
+    100 => ['file' => '2024/01/logo.png', 'used' => true],
+    200 => ['file' => '2024/01/logo.png', 'used' => false],
+]);
+
+$grouped = (new Scanner(new ResultStore()))->scanGroup(FileGroups::siblings(100));
+
+check('scanning a group answers every row of it', array_keys($grouped), [100, 200]);
+check(
+    'and the two rows do not have to agree',
+    [$grouped[100]['status'], $grouped[200]['status']],
+    [ResultStore::STATUS_USED, ResultStore::STATUS_UNUSED]
+);
+check('each row keeps its own verdict in the store', $GLOBALS['meta'][200][ResultStore::META_STATUS], ResultStore::STATUS_UNUSED);
+check('and the file is the used one, which is what keeps it', FileGroups::fileStatus(100)['status'], ResultStore::STATUS_USED);
+check('nothing shared outlives the group it was read for', SharedReads::isOpen(), false);
 
 // ------------------------------------------- the badge a library row shows
 //

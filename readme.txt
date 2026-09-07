@@ -4,7 +4,7 @@ Tags: media, unused media, media library, clean up, attachments
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.0.2
+Stable tag: 1.0.3
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -101,6 +101,18 @@ Per site, yes. Cross-site references (another site embedding this site's file UR
 Never. Scanning only reads and caches results. Deletion happens exclusively when you click a delete action, after re-verification. The licensed WP-CLI command scans and reports; there is deliberately no delete verb on the command line, so nothing can be deleted non-interactively. The licensed evidence report only writes a file to your own browser — it has no delete action either, and exporting changes nothing on the site. The licensed space totals only add up sizes; opening the page deletes nothing.
 
 == Changelog ==
+
+= 1.0.3 =
+* **A failed database read no longer counts as "nothing references this file".** A query that errored used to be indistinguishable from one that honestly found nothing, so a file could be recorded unused because the check never actually ran. A file whose check failed is now left unscanned instead of judged, the scan reports how many checks failed, and a deletion refuses any file it could not re-check.
+* **Deleting one library entry can no longer remove a file another entry still stands on.** Where an entry's resized copy or its pre-scale original was itself uploaded separately, the two entries are separate groups that can honestly reach opposite verdicts. The delete pass now asks who else stands on each file and skips it rather than unlinking it.
+* **A deletion now finishes inside the time PHP gives it.** Every file is re-checked immediately before it goes, and on a large library that could run a batch past the host's time limit — leaving you with no report of what was and was not removed. A batch now stops on a file boundary, says how many files it did not reach, and the next batch carries on from there. Nothing is half-deleted and no check is skipped to make it fit.
+* **The scan says when it cannot read a library's files from disk**, on the Scan tab and in the WP-CLI summary. Where media is offloaded to remote storage, the leftover-thumbnail protection cannot run: those files are judged on what the library records about them and nothing else, so an image whose old thumbnail is still on a page can be reported as unused.
+* Files that an in-admin image edit replaced, and old sizes a theme change stopped generating, still count as names of the image they came from — so a page still pointing at one keeps that image in use.
+* A new "sizes with no original" section lists resized files left on disk with no library entry behind them. They are not counted, not judged and not offered for deletion — there is no entry to judge them with.
+* That list no longer includes an upload whose own filename happens to end in dimensions (`logo-300x200.png`, uploaded as it is), nor a size the entry's own metadata still names.
+* A block that stores its attachment as a plain ID is detected wherever the block markup is kept — a block widget, a theme mod, a stored template in an option, or a custom field — and not only in post content.
+* A link to a file's own attachment page is read as a reference in custom fields, widgets, theme mods, term descriptions and comments, where before only post content read it.
+* Two uploads cut from the same image no longer answer for each other's replaced files, so the unused count and the Usage badge stop reporting a file as used with nothing on the site showing it.
 
 = 1.0.2 =
 * **Deletion now works on the file, not the attachment row.** Where two library entries point at the same file on disk, deleting one no longer removes a file the other still uses. The unused count, the unused list and the delete pass all group by file.

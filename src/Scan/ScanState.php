@@ -15,7 +15,15 @@ final class ScanState
     private const OPTION = 'freshet_unusedmedia_scan';
     private const OPTION_LAST = 'freshet_unusedmedia_last_scan';
 
-    /** @return array{cursor: int, done: int, total: int, started_at: int}|null */
+    /**
+     * `errors` is how many attachments the run could not judge because a query
+     * failed. It rides in the cursor rather than being recounted, because there
+     * is nothing left on the attachment to count: a scan that could not answer
+     * writes no status (see Scanner). Without this the run would finish with a
+     * quietly short answer and no way to say so (freshet-141).
+     *
+     * @return array{cursor: int, done: int, total: int, started_at: int, errors: int}|null
+     */
     public function current(): ?array
     {
         $state = get_option(self::OPTION);
@@ -29,22 +37,24 @@ final class ScanState
             'done' => (int) ($state['done'] ?? 0),
             'total' => (int) ($state['total'] ?? 0),
             'started_at' => (int) ($state['started_at'] ?? 0),
+            'errors' => (int) ($state['errors'] ?? 0),
         ];
     }
 
     public function start(int $total): array
     {
-        $state = ['cursor' => 0, 'done' => 0, 'total' => $total, 'started_at' => time()];
+        $state = ['cursor' => 0, 'done' => 0, 'total' => $total, 'started_at' => time(), 'errors' => 0];
         update_option(self::OPTION, $state, false);
 
         return $state;
     }
 
-    public function advance(int $cursor, int $processed): array
+    public function advance(int $cursor, int $processed, int $errors = 0): array
     {
         $state = $this->current() ?? $this->start(0);
         $state['cursor'] = $cursor;
         $state['done'] += $processed;
+        $state['errors'] += $errors;
         update_option(self::OPTION, $state, false);
 
         return $state;
@@ -58,6 +68,7 @@ final class ScanState
             'finished_at' => time(),
             'scanned' => (int) ($state['done'] ?? 0),
             'unused' => $unusedCount,
+            'errors' => (int) ($state['errors'] ?? 0),
         ], false);
 
         delete_option(self::OPTION);
@@ -68,7 +79,7 @@ final class ScanState
         delete_option(self::OPTION);
     }
 
-    /** @return array{finished_at: int, scanned: int, unused: int}|null */
+    /** @return array{finished_at: int, scanned: int, unused: int, errors: int}|null */
     public function lastScan(): ?array
     {
         $last = get_option(self::OPTION_LAST);
@@ -81,6 +92,7 @@ final class ScanState
             'finished_at' => (int) ($last['finished_at'] ?? 0),
             'scanned' => (int) ($last['scanned'] ?? 0),
             'unused' => (int) ($last['unused'] ?? 0),
+            'errors' => (int) ($last['errors'] ?? 0),
         ];
     }
 }

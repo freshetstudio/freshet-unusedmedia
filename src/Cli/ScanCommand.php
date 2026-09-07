@@ -131,17 +131,24 @@ final class ScanCommand
             }
 
             $processed = 0;
+            $errors = 0;
             $last = $state['cursor'];
 
             foreach ($ids as $id) {
-                $this->scanner->scan($id);
+                if ($this->scanner->scan($id)['status'] === Scanner::STATUS_ERROR) {
+                    // No status was written for it, so it reads as unscanned
+                    // rather than as unused. Counted here so the run can say so
+                    // instead of finishing on a short answer (freshet-141).
+                    ++$errors;
+                }
+
                 OrphanSizes::observeAttachment($id);
                 ++$processed;
                 $last = $id;
                 $progress?->tick();
             }
 
-            $state = $this->state->advance($last, $processed);
+            $state = $this->state->advance($last, $processed, $errors);
 
             $this->releaseBatchMemory();
         }
@@ -157,9 +164,20 @@ final class ScanCommand
             'used' => $counts['used'],
             'unused' => $counts['unused'],
             'unscanned' => $counts['unscanned'],
+            'errors' => $state['errors'],
         ];
 
         Utils\format_items($format, [$summary], array_keys($summary));
+
+        if ($summary['errors'] > 0) {
+            // Before the success line, and a warning rather than a column
+            // nobody reads: a run that could not answer for some of the library
+            // must not read as a clean one.
+            WP_CLI::warning(sprintf(
+                '%d attachment(s) could not be checked — the database returned an error, so they have no result and are in neither list. Re-run the scan.',
+                $summary['errors']
+            ));
+        }
 
         if (!$quiet) {
             WP_CLI::success(sprintf(

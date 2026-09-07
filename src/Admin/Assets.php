@@ -38,6 +38,8 @@ final class Assets
                 'checking' => __('Checking…', 'freshet-unused-media'),
                 'error' => __('Request failed — try again.', 'freshet-unused-media'),
                 'scanning' => __('Scanning…', 'freshet-unused-media'),
+                /* translators: 1: scanned count, 2: total count, 3: number of files the database would not answer for */
+                'scanErrors' => __('%1$s / %2$s — %3$s could not be checked (database error).', 'freshet-unused-media'),
                 'deleting' => __('Deleting…', 'freshet-unused-media'),
                 /* translators: 1: deleted count, 2: skipped count */
                 'deleteDone' => __('Done: %1$s deleted, %2$s skipped (found in use on re-check).', 'freshet-unused-media'),

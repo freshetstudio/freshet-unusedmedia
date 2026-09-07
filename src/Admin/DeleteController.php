@@ -6,6 +6,7 @@ namespace FreshetUnusedMedia\Admin;
 
 use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\FileSize;
+use FreshetUnusedMedia\Scan\QueryFailed;
 use FreshetUnusedMedia\Scan\ReclaimedLedger;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\Scanner;
@@ -69,10 +70,11 @@ final class DeleteController
      * row it is given, so deleting one row of three erases a file the other two
      * still reference. Rows on one path are one decision and one deletion.
      *
-     * The verdict is default-closed and unanimous — one row still in use, or one
-     * row already sitting in the trash, keeps the file. Skipped and failed files
-     * leave the unused pool the same way they always did (re-scanned as used, or
-     * cleared), which is what lets the delete-all loop terminate.
+     * The verdict is default-closed and unanimous — one row still in use, one
+     * row already sitting in the trash, or one row whose re-scan could not read
+     * the database, keeps the file. Skipped and failed files leave the unused
+     * pool the same way they always did (re-scanned as used, or cleared), which
+     * is what lets the delete-all loop terminate.
      *
      * Trash vs permanent is core's call: with MEDIA_TRASH enabled
      * wp_delete_attachment() trashes, otherwise it deletes permanently.
@@ -112,7 +114,19 @@ final class DeleteController
                 continue;
             }
 
-            $rows = FileGroups::siblings($id);
+            try {
+                $rows = FileGroups::siblings($id);
+            } catch (QueryFailed) {
+                // The sibling lookup is what turns one id into every row
+                // standing on the file. When it cannot answer, the group is
+                // unknown — and deleting the single row we were handed unlinks
+                // a file the rows we could not see may still be using.
+                ++$failed;
+                $handled[$id] = true;
+                $this->store->clear($id); // Out of the unused pool so batch loops terminate.
+
+                continue;
+            }
 
             foreach ($rows as $rowId) {
                 $handled[$rowId] = true;
@@ -143,11 +157,28 @@ final class DeleteController
             // Fresh scan of every row right before deletion — the cached results
             // may be stale, and one stale row is enough to lose a live file.
             $used = 0;
+            $unresolved = 0;
 
             foreach ($rows as $rowId) {
-                if ($this->scanner->scan($rowId)['status'] === ResultStore::STATUS_USED) {
+                $status = $this->scanner->scan($rowId)['status'];
+
+                if ($status === Scanner::STATUS_ERROR) {
+                    ++$unresolved;
+                } elseif ($status === ResultStore::STATUS_USED) {
                     ++$used;
                 }
+            }
+
+            // This re-verification is the last thing standing between a stale
+            // verdict and a file that is gone, and it runs in the request most
+            // likely to be cut short. A row whose scan could not read the
+            // database has not been found unused — it has not been judged at
+            // all, and an unjudged row is not one this may delete (freshet-141).
+            if ($unresolved > 0) {
+                ++$failed;
+                $this->clearAll($rows); // The scans wrote nothing; this takes the file out of the pool.
+
+                continue;
             }
 
             if (FileGroups::verdict(count($rows), 0, $used, count($rows) - $used) !== ResultStore::STATUS_UNUSED) {

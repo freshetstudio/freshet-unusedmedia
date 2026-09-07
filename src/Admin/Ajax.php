@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace FreshetUnusedMedia\Admin;
 
+use FreshetUnusedMedia\Scan\Db;
 use FreshetUnusedMedia\Scan\OrphanSizes;
+use FreshetUnusedMedia\Scan\QueryFailed;
 use FreshetUnusedMedia\Scan\ResultFilters;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\Scanner;
@@ -54,6 +56,13 @@ final class Ajax
 
         $result = $this->scanner->scan($id);
 
+        // A check that could not read the database has not found this file
+        // unused — it has found nothing. Answering with a verdict-shaped reply
+        // would put a badge on the row that no scan stands behind (freshet-141).
+        if ($result['status'] === Scanner::STATUS_ERROR) {
+            wp_send_json_error(['message' => QueryFailed::userMessage()], 500);
+        }
+
         // The scan decides this row; the badge reports its file. Rendering what
         // the scan just returned would put "Unused" back on a row whose file a
         // sibling keeps, one click after the column stopped saying it.
@@ -96,24 +105,33 @@ final class Ajax
 
         $state = $this->state->current();
 
-        if ($state === null) {
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- simple count to size the scan.
-            $total = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'attachment'");
-            $state = $this->state->start($total);
+        // Both of these are guarded for the same reason the detectors are: a
+        // failed count sizes the scan at zero and a failed cursor query comes
+        // back as an empty batch, which this method reads as "finished". A
+        // scan that stops early and calls itself complete is the quiet short
+        // answer freshet-141 is about, one level above the detectors.
+        try {
+            if ($state === null) {
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- simple count to size the scan.
+                $total = (int) Db::value('library size', $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'attachment'"));
+                $state = $this->state->start($total);
 
-            // A fresh scan describes the library as it is now, so last time's
-            // orphaned sizes go with the old results rather than outliving them.
-            OrphanSizes::reset();
+                // A fresh scan describes the library as it is now, so last time's
+                // orphaned sizes go with the old results rather than outliving them.
+                OrphanSizes::reset();
+            }
+
+            $batchSize = max(1, (int) apply_filters('freshet_unusedmedia_batch_size', 10));
+
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- ID-ascending cursor batch; picks up mid-scan uploads.
+            $ids = array_map('intval', Db::rows('scan batch', $wpdb->get_col($wpdb->prepare(
+                "SELECT ID FROM {$wpdb->posts} WHERE post_type = 'attachment' AND ID > %d ORDER BY ID ASC LIMIT %d",
+                $state['cursor'],
+                $batchSize
+            ))));
+        } catch (QueryFailed) {
+            wp_send_json_error(['message' => QueryFailed::userMessage()], 500);
         }
-
-        $batchSize = max(1, (int) apply_filters('freshet_unusedmedia_batch_size', 10));
-
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- ID-ascending cursor batch; picks up mid-scan uploads.
-        $ids = array_map('intval', $wpdb->get_col($wpdb->prepare(
-            "SELECT ID FROM {$wpdb->posts} WHERE post_type = 'attachment' AND ID > %d ORDER BY ID ASC LIMIT %d",
-            $state['cursor'],
-            $batchSize
-        )));
 
         if ($ids === []) {
             $unused = $this->store->counts()['unused'];
@@ -124,6 +142,7 @@ final class Ajax
                 'done' => $state['done'],
                 'total' => $state['total'],
                 'unused' => $unused,
+                'errors' => $state['errors'],
             ]);
         }
 
@@ -134,10 +153,17 @@ final class Ajax
         $budget = (float) apply_filters('freshet_unusedmedia_batch_seconds', $limit > 0 ? min(20, $limit / 2) : 20);
         $started = microtime(true);
         $processed = 0;
+        $errors = 0;
         $last = $state['cursor'];
 
         foreach ($ids as $id) {
-            $this->scanner->scan($id);
+            if ($this->scanner->scan($id)['status'] === Scanner::STATUS_ERROR) {
+                // Counted, and the cursor still advances: the attachment now
+                // has no stored status at all, so it reads as unscanned and is
+                // in neither list. The figure is what makes the run say so.
+                ++$errors;
+            }
+
             OrphanSizes::observeAttachment($id);
             ++$processed;
             $last = $id;
@@ -154,12 +180,13 @@ final class Ajax
         SizeSiblings::flush();
         OrphanSizes::flush();
 
-        $state = $this->state->advance($last, $processed);
+        $state = $this->state->advance($last, $processed, $errors);
 
         wp_send_json_success([
             'finished' => false,
             'done' => $state['done'],
             'total' => max($state['total'], $state['done']),
+            'errors' => $state['errors'],
         ]);
     }
 
@@ -194,7 +221,13 @@ final class Ajax
         $filters = ResultFilters::fromRequest(wp_unslash($_POST)); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce checked above; every value is validated in fromRequest().
         $after = absint($_POST['after'] ?? 0); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- as above.
 
-        $batch = $this->store->unusedIds(5, $filters, $after);
+        try {
+            $batch = $this->store->unusedIds(5, $filters, $after);
+        } catch (QueryFailed) {
+            // An empty batch is how this loop is told it has finished. A read
+            // that did not answer must not be allowed to say that.
+            wp_send_json_error(['message' => QueryFailed::userMessage()], 500);
+        }
 
         if ($batch['ids'] === []) {
             wp_send_json_success(array_merge(

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace FreshetUnusedMedia\Admin;
 
 use FreshetUnusedMedia\Scan\FileGroups;
+use FreshetUnusedMedia\Scan\QueryFailed;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\UploadGrace;
 
@@ -39,7 +40,16 @@ final class StatusBadge
      */
     public static function forRow(int $attachmentId, ResultStore $store): string
     {
-        $file = FileGroups::fileStatus($attachmentId);
+        try {
+            $file = FileGroups::fileStatus($attachmentId);
+        } catch (QueryFailed) {
+            // The verdict is a property of the whole group, so a lookup that
+            // did not answer leaves this row with no verdict to draw. Saying so
+            // is the point: the badge that would otherwise appear is "Not
+            // scanned", which reads as a fact about the library rather than as
+            // a failure to read it (freshet-141).
+            return self::unavailable();
+        }
 
         if ($file['held'] !== FileGroups::HELD_NONE) {
             return self::heldBack(FileGroups::heldBackReason($file['held']));
@@ -62,6 +72,12 @@ final class StatusBadge
         // The reference count belongs to this row, and on this branch the row
         // is one of the reasons the file is used — so the number is its own.
         return self::render(ResultStore::STATUS_USED, $refs['count']);
+    }
+
+    /** A row whose verdict could not be read at all, rather than one without a verdict. Escaped HTML. */
+    public static function unavailable(): string
+    {
+        return '<span class="freshet-unusedmedia-badge freshet-unusedmedia-badge--unknown">' . esc_html__('Couldn’t check', 'freshet-unused-media') . '</span>';
     }
 
     /** A file the plugin is protecting rather than offering. Escaped HTML. */

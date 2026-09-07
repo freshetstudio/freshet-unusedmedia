@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace FreshetUnusedMedia\Detector;
 
 use FreshetUnusedMedia\Scan\AttachmentContext;
+use FreshetUnusedMedia\Scan\Db;
 use FreshetUnusedMedia\Scan\Reference;
 
 defined('ABSPATH') || exit;
@@ -33,11 +34,11 @@ final class TermMetaDetector implements DetectorInterface
                 WHERE (" . implode(' OR ', $conditions) . ')';
 
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- placeholders built above, all values bound via prepare().
-        $rows = $wpdb->get_results($wpdb->prepare($sql, ...array_merge($idParams, $nameParams)));
+        $rows = Db::rows($this->id(), $wpdb->get_results($wpdb->prepare($sql, ...array_merge($idParams, $nameParams))));
 
         $refs = [];
 
-        foreach ((array) $rows as $row) {
+        foreach ($rows as $row) {
             $termId = (int) $row->term_id;
             $key = (string) $row->meta_key;
             $value = (string) $row->meta_value;

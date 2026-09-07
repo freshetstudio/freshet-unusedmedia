@@ -498,6 +498,31 @@ final class ToolsPage
             echo '<p class="description">' . esc_html($note) . '</p>';
         }
 
+        // freshet-141: a query that fails comes back in the same shape as one
+        // that matched nothing, so a run that lost half its answers used to
+        // finish looking exactly like a run that found nothing. It no longer
+        // can: an attachment whose scan could not read the database is left
+        // with no verdict at all, and the count of them is said here. The
+        // running figure wins over the finished one — a scan in progress is
+        // the thing the reader can still act on.
+        $scanErrors = (int) ($running['errors'] ?? ($last['errors'] ?? 0));
+
+        if ($scanErrors > 0) {
+            printf(
+                '<div class="notice notice-error inline"><p>%s</p></div>',
+                esc_html(sprintf(
+                    /* translators: %s: number of attachments */
+                    _n(
+                        'The database returned an error while scanning %s file, so it has no result and appears in neither list. Run the scan again — if it keeps happening, the queries are being cut short (an execution-time limit or a dropped connection).',
+                        'The database returned an error while scanning %s files, so they have no result and appear in neither list. Run the scan again — if it keeps happening, the queries are being cut short (an execution-time limit or a dropped connection).',
+                        $scanErrors,
+                        'freshet-unused-media'
+                    ),
+                    number_format_i18n($scanErrors)
+                ))
+            );
+        }
+
         // freshet-D92 (3): a delete orphaned the webp an optimiser had made of
         // the deleted original, and the next scan flagged it — the product
         // working, read as a stale result because nothing had said a cleanup

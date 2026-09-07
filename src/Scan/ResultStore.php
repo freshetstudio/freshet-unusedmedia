@@ -276,18 +276,24 @@ final class ResultStore
      * cursor is a plain WHERE on the grouped set rather than a filter hook,
      * because the set is a subquery here and not a WP_Query.
      *
+     * This is the delete loop's own listing query, so it raises rather than
+     * answering empty: an empty batch is how the loop is told it has finished,
+     * and a read that failed would end the run claiming it had deleted
+     * everything there was (freshet-141).
+     *
      * @return int[]
+     * @throws QueryFailed
      */
     private function idsAfter(string $status, ResultFilters $filters, int $after, int $limit): array
     {
         global $wpdb;
 
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- the grouped subquery; no WP API groups on _wp_attached_file.
-        return array_map('intval', (array) $wpdb->get_col($this->prepared(
+        return array_map('intval', Db::rows('unused batch', $wpdb->get_col($this->prepared(
             FileGroups::subquery($status, $filters),
             'SELECT fg.fg_id FROM ({{groups}}) fg WHERE fg.fg_id > %d ORDER BY fg.fg_id ASC LIMIT %d',
             [$after, $limit]
-        )));
+        ))));
     }
 
     /**

@@ -302,6 +302,19 @@ $GLOBALS['wpdb'] = new class {
     public string $lastSql = '';
     public array $lastParams = [];
 
+    /**
+     * wpdb's own two fields for "did that work", and the switch this test
+     * drives them with. Set $failWith and the next read behaves exactly as a
+     * failed one does in core: last_error carries the driver's message and the
+     * result is the same empty array a query matching nothing returns.
+     */
+    public string $last_error = '';
+    public string $failWith = '';
+
+    /** Which read fails: 0 or 1 is all of them, N is the Nth onward. */
+    public int $failFrom = 0;
+    public int $calls = 0;
+
     public function esc_like(string $text): string
     {
         return addcslashes($text, '_%\\');
@@ -320,10 +333,17 @@ $GLOBALS['wpdb'] = new class {
 
     public function get_results(string $sql): array
     {
-        return $this->rows;
+        ++$this->calls;
+
+        $fails = $this->failWith !== '' && $this->calls >= max(1, $this->failFrom);
+        $this->last_error = $fails ? $this->failWith : '';
+
+        return $fails ? [] : $this->rows;
     }
 };
 
+require_once ABSPATH . 'src/Scan/QueryFailed.php';
+require_once ABSPATH . 'src/Scan/Db.php';
 require_once ABSPATH . 'src/Scan/SizeSiblings.php';
 require_once ABSPATH . 'src/Scan/AttachmentContext.php';
 require_once ABSPATH . 'src/Scan/Reference.php';
@@ -354,6 +374,7 @@ use FreshetUnusedMedia\License\LicenseClient;
 use FreshetUnusedMedia\License\NoLicense;
 use FreshetUnusedMedia\License\RemoteLicense;
 use FreshetUnusedMedia\Scan\AttachmentContext;
+use FreshetUnusedMedia\Scan\QueryFailed;
 use FreshetUnusedMedia\Scan\SizeSiblings;
 use FreshetUnusedMedia\Scan\Reference;
 use FreshetUnusedMedia\Scan\UploadGrace;
@@ -1947,6 +1968,86 @@ $siblingKeys = array_map(static fn($ref): string => $ref->detail, $siblingRefs);
 check('a sibling attachment\'s backup record is not a reference', in_array('_wp_attachment_backup_sizes', $siblingKeys, true), false);
 check('an ordinary meta key carrying the same filename still is', in_array('hero_html', $siblingKeys, true), true);
 check('so the pair yields exactly one reference', count($siblingRefs), 1);
+
+// -------------------------------- a query that failed is not an empty answer
+
+// The defect (freshet-141): $wpdb hands back the same empty array for "no rows
+// matched" and for "the query never ran" — last_result is emptied before every
+// query and a failed one leaves it empty — so every detector read a timed-out
+// query as "nothing references this file", and the file went to the deletable
+// pool.
+//
+// Both directions are asserted, and the empty one is not a formality: a
+// detector that had stopped answering altogether would pass the error case on
+// its own. The pair says the detector still reports nothing when there is
+// nothing, and refuses to report anything when it could not look.
+
+$failureCtx = AttachmentContext::forAttachment(FIXTURE_ID);
+
+$queryDetectors = [
+    'postmeta' => new PostmetaDetector(),
+    'post-content' => new PostContentDetector(),
+    'options' => new OptionsDetector(),
+    'termmeta' => new TermMetaDetector(),
+    'term-description' => new TermDescriptionDetector(),
+    'usermeta' => new UserMetaDetector(),
+    'comment' => new CommentDetector(),
+];
+
+foreach ($queryDetectors as $label => $detector) {
+    $GLOBALS['wpdb']->failWith = '';
+    $GLOBALS['wpdb']->rows = [];
+
+    check("{$label}: a genuinely empty result is still no references", $detector->find($failureCtx), []);
+
+    $GLOBALS['wpdb']->failWith = 'MySQL server has gone away';
+    $thrown = null;
+
+    try {
+        $detector->find($failureCtx);
+    } catch (QueryFailed $e) {
+        $thrown = $e;
+    }
+
+    check("{$label}: a failed query refuses to answer", $thrown instanceof QueryFailed, true);
+    check("{$label}: and it names which read failed", $thrown?->context, $label);
+    check("{$label}: and carries the driver's message", str_contains((string) $thrown?->getMessage(), 'gone away'), true);
+}
+
+$GLOBALS['wpdb']->failWith = '';
+$GLOBALS['wpdb']->last_error = '';
+$GLOBALS['wpdb']->rows = [];
+
+// The second half of the comment detector: its meta query is a separate read in
+// a separate method, so the content read is let through and only the meta one
+// fails. A guard on the first read alone would leave this one silent, and
+// silent is the whole defect.
+$GLOBALS['wpdb']->calls = 0;
+$GLOBALS['wpdb']->failFrom = 2;
+$GLOBALS['wpdb']->failWith = 'Lost connection to MySQL server during query';
+$metaThrown = null;
+
+try {
+    (new CommentDetector())->find($failureCtx);
+} catch (QueryFailed $e) {
+    $metaThrown = $e;
+}
+
+check('the comment meta read refuses on its own', $metaThrown instanceof QueryFailed, true);
+check('and says which of the two it was', $metaThrown?->context, 'comment (meta)');
+
+$GLOBALS['wpdb']->failFrom = 0;
+$GLOBALS['wpdb']->calls = 0;
+$GLOBALS['wpdb']->failWith = '';
+$GLOBALS['wpdb']->last_error = '';
+
+// A stale error left on $wpdb by someone else's query is not this plugin's to
+// interpret, and Db::forget() is what a scan starts from — without it the first
+// detector in the request inherits a failure it did not cause.
+$GLOBALS['wpdb']->last_error = 'Table \'wp_somebody_else\' doesn\'t exist';
+\FreshetUnusedMedia\Scan\Db::forget();
+check('a foreign error is forgotten at the start of a scan', $GLOBALS['wpdb']->last_error, '');
+check('and the detector then answers normally', (new PostmetaDetector())->find($failureCtx), []);
 
 // ------------------------------------------------------------------ report
 

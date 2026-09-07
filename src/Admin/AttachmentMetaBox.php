@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace FreshetUnusedMedia\Admin;
 
 use FreshetUnusedMedia\Scan\FileGroups;
+use FreshetUnusedMedia\Scan\QueryFailed;
 use FreshetUnusedMedia\Scan\Reference;
 use FreshetUnusedMedia\Scan\ResultStore;
 
@@ -101,7 +102,16 @@ final class AttachmentMetaBox
     /** Full evidence fragment (status + list) for an attachment. Escaped HTML. */
     public function renderEvidence(int $attachmentId): string
     {
-        $file = FileGroups::fileStatus($attachmentId);
+        try {
+            $file = FileGroups::fileStatus($attachmentId);
+        } catch (QueryFailed) {
+            // Nothing below can be said without the group's verdict, and a
+            // panel that fell back to the stored meta would print the answer of
+            // a scan this read just failed to confirm (freshet-141).
+            return '<p>' . StatusBadge::unavailable() . '</p>'
+                . '<p class="description">' . esc_html(QueryFailed::userMessage()) . '</p>';
+        }
+
         $status = $this->store->status($attachmentId);
         $scannedAt = $this->store->scannedAt($attachmentId);
         $data = $this->store->refs($attachmentId);

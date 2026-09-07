@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace FreshetUnusedMedia\Detector;
 
 use FreshetUnusedMedia\Scan\AttachmentContext;
+use FreshetUnusedMedia\Scan\Db;
 use FreshetUnusedMedia\Scan\Reference;
 
 defined('ABSPATH') || exit;
@@ -70,11 +71,11 @@ final class PostmetaDetector implements DetectorInterface
         );
 
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- placeholders built above, all values bound via prepare().
-        $rows = $wpdb->get_results($wpdb->prepare($sql, ...$params));
+        $rows = Db::rows($this->id(), $wpdb->get_results($wpdb->prepare($sql, ...$params)));
 
         $refs = [];
 
-        foreach ((array) $rows as $row) {
+        foreach ($rows as $row) {
             $ref = $this->classify($ctx, (int) $row->post_id, (string) $row->meta_key, (string) $row->meta_value, (string) $row->post_status);
 
             if ($ref !== null) {

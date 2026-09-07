@@ -228,11 +228,15 @@ function wp_send_json_error(array $data = [], int $status = 0): never
  * Detectors are emptied so Scanner runs no SQL: the verdict for one row comes
  * from the fixture, because what is under test here is the reply the delete
  * loop sends, not what a detector finds.
+ *
+ * $GLOBALS['detectors'] is the one exception, and it exists for the
+ * re-verification test: a detector whose query fails is the only way to reach
+ * the branch where a scan has no answer at all.
  */
 function apply_filters(string $hook, mixed $value, mixed ...$rest): mixed
 {
     if ($hook === 'freshet_unusedmedia_detectors') {
-        return [];
+        return $GLOBALS['detectors'] ?? [];
     }
 
     if ($hook === 'freshet_unusedmedia_is_used') {
@@ -257,6 +261,28 @@ $GLOBALS['wpdb'] = new class {
 
     /** @var array<int, array{sql: string, params: array<int, mixed>}> */
     public array $queries = [];
+
+    /**
+     * wpdb's own "did that work" field, and the switch this test drives it
+     * with: a read whose SQL contains $failOn behaves exactly as a failed one
+     * does in core — last_error carries the driver's message and the result is
+     * the same empty answer a query matching nothing gives.
+     */
+    public string $last_error = '';
+    public string $failOn = '';
+
+    private function fails(string $sql): bool
+    {
+        $this->last_error = '';
+
+        if ($this->failOn !== '' && str_contains($sql, $this->failOn)) {
+            $this->last_error = 'MySQL server has gone away';
+
+            return true;
+        }
+
+        return false;
+    }
 
     public function esc_like(string $text): string
     {
@@ -288,6 +314,10 @@ $GLOBALS['wpdb'] = new class {
     {
         $query = $this->resolve($sql);
 
+        if ($this->fails($query['sql'])) {
+            return [];
+        }
+
         // The representatives, after the cursor and capped by the limit.
         if (str_contains($query['sql'], 'SELECT fg.fg_id')) {
             $ids = [];
@@ -313,6 +343,10 @@ $GLOBALS['wpdb'] = new class {
     public function get_results(string $sql, mixed $output = null): array
     {
         $query = $this->resolve($sql);
+
+        if ($this->fails($query['sql'])) {
+            return [];
+        }
 
         // Every attachment row standing on any of these paths — the sibling
         // lookup, and it takes a whole page of paths at a time.
@@ -352,11 +386,13 @@ $GLOBALS['wpdb'] = new class {
 
     public function get_var(string $sql): ?string
     {
-        return '0';
+        return $this->fails($this->resolve($sql)['sql']) ? null : '0';
     }
 };
 
 foreach ([
+    'src/Scan/QueryFailed.php',
+    'src/Scan/Db.php',
     'src/Scan/Reference.php',
     'src/Scan/AttachmentContext.php',
     'src/Scan/FileSize.php',
@@ -546,6 +582,28 @@ function deleteBatch(): array
     return [];
 }
 
+/**
+ * A detector whose query fails. It is the shape every real detector has — one
+ * read, then the rows are interpreted — with the read arranged to error, which
+ * is the only way to reach Scanner's no-answer branch from here.
+ */
+final class FailingDetector implements \FreshetUnusedMedia\Detector\DetectorInterface
+{
+    public const NEEDLE = 'SELECT this_read_fails';
+
+    public function id(): string
+    {
+        return 'failing';
+    }
+
+    public function find(\FreshetUnusedMedia\Scan\AttachmentContext $ctx): array
+    {
+        global $wpdb;
+
+        return \FreshetUnusedMedia\Scan\Db::rows($this->id(), $wpdb->get_results(self::NEEDLE));
+    }
+}
+
 function onDisk(string $file): bool
 {
     return file_exists(UPLOADS . '/' . $file);
@@ -638,6 +696,82 @@ check(
     preg_match('/\b(static\s+\$|get_transient|set_transient|wp_cache_(get|set))\b/', $ajaxSource . $storeSource),
     0
 );
+
+// ------------------------------- a read that failed never confirms a deletion
+//
+// freshet-141. $wpdb answers a query that errored with the same empty array it
+// answers one that matched nothing, so a re-verification that could not run at
+// all used to agree that the file was unused — the guard and the guarded
+// failing together, in the same direction, in the request most likely to be cut
+// short. Both halves of the delete path are exercised: the sibling lookup that
+// decides which rows a file has, and the re-scan that decides whether they use
+// it.
+
+// The genuinely-empty direction first, as the control: nothing here is proof of
+// a fix unless a scan that honestly finds nothing still deletes.
+library([
+    401 => ['file' => '2024/03/control.png'],
+]);
+
+check('a scan that finds nothing still says unused', (new ResultStore())->status(401), ResultStore::STATUS_UNUSED);
+check('and the file is deleted', deleteBatch()['deleted'], 1);
+check('and it is off the disk', onDisk('2024/03/control.png'), false);
+
+// The sibling lookup: two rows on one file, and the query that would reveal the
+// second one fails. Deleting on that answer unlinks a file the row it could not
+// see is standing on.
+library([
+    501 => ['file' => '2024/03/shared.png'],
+    502 => ['file' => '2024/03/shared.png'],
+]);
+
+check('one file, two rows, unused', (new ResultStore())->counts()['unused'], 1);
+
+$GLOBALS['wpdb']->failOn = 'pm.meta_value IN';
+$siblingsFailed = deleteBatch();
+$GLOBALS['wpdb']->failOn = '';
+
+check('a failed sibling lookup deletes nothing', $siblingsFailed['deleted'], 0);
+check('and is reported as a failure, not a skip', $siblingsFailed['failed'], 1);
+check('and the file is still there', onDisk('2024/03/shared.png'), true);
+check('and the file has left the unused pool, so the loop terminates', (new ResultStore())->counts()['unused'], 0);
+
+// The re-verification: a detector whose query fails. The scan has not found the
+// file unused — it has found nothing — and the deletion has to refuse.
+library([
+    601 => ['file' => '2024/03/verified.png'],
+]);
+
+check('the file starts out unused', (new ResultStore())->status(601), ResultStore::STATUS_UNUSED);
+
+$GLOBALS['detectors'] = [new FailingDetector()];
+$GLOBALS['wpdb']->failOn = FailingDetector::NEEDLE;
+
+$scanned = (new Scanner(new ResultStore()))->scan(601);
+
+check('a scan that cannot read the database has no verdict', $scanned['status'], Scanner::STATUS_ERROR);
+check('and it is not one of the two stored verdicts', in_array($scanned['status'], [ResultStore::STATUS_USED, ResultStore::STATUS_UNUSED], true), false);
+check('and the stale verdict is cleared rather than left standing', (new ResultStore())->status(601), null);
+
+// Put it back in the pool: the assertion above emptied it, and what the delete
+// loop has to refuse is a file its own listing is still offering.
+$GLOBALS['detectors'] = [];
+$GLOBALS['wpdb']->failOn = '';
+(new Scanner(new ResultStore()))->scan(601);
+
+check('the listing offers it again', (new ResultStore())->counts()['unused'], 1);
+
+$GLOBALS['detectors'] = [new FailingDetector()];
+$GLOBALS['wpdb']->failOn = FailingDetector::NEEDLE;
+
+$verifyFailed = deleteBatch();
+
+$GLOBALS['wpdb']->failOn = '';
+$GLOBALS['detectors'] = [];
+
+check('a failed re-verification deletes nothing', $verifyFailed['deleted'], 0);
+check('and refuses rather than confirming', $verifyFailed['failed'], 1);
+check('and the file is still on disk', onDisk('2024/03/verified.png'), true);
 
 // ------------------------------------------------------------------ result
 

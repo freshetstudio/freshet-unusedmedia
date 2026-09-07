@@ -109,6 +109,7 @@ final class FileGroups
      * mirror of the bug this class fixes.
      *
      * @return int[]
+     * @throws QueryFailed if the lookup could not be answered — see fetch().
      */
     public static function siblings(int $attachmentId): array
     {
@@ -170,7 +171,15 @@ final class FileGroups
         }
 
         $wanted = array_keys($wanted);
-        $found = self::fetch($wanted);
+
+        try {
+            $found = self::fetch($wanted);
+        } catch (QueryFailed) {
+            // An optimisation and never a precondition, so a read that did not
+            // answer caches nothing and says nothing: siblings() will ask again
+            // for each row, and it is the one that has to refuse.
+            return;
+        }
 
         foreach ($wanted as $key) {
             // A path that came back with no rows is still an answer, and caching
@@ -197,8 +206,14 @@ final class FileGroups
      * The comparison is on whole paths — an `IN` over equalities, never a LIKE
      * on a basename, which is the mirror of the bug this class fixes.
      *
+     * **A read that did not answer raises rather than returning an empty set.**
+     * This is the delete path's first query: an empty result here reads as "no
+     * other row stands on this file", and deleting on that answer unlinks a
+     * file the rows it could not see are still using (freshet-141).
+     *
      * @param string[] $keys
      * @return array<string, int[]>
+     * @throws QueryFailed
      */
     private static function fetch(array $keys): array
     {
@@ -207,13 +222,13 @@ final class FileGroups
         $placeholders = implode(', ', array_fill(0, count($keys), '%s'));
 
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders -- rows sharing one file; no WP API groups on _wp_attached_file. Placeholders are counted from the key list and every value is prepared.
-        $rows = (array) $wpdb->get_results($wpdb->prepare(
+        $rows = Db::rows('file grouping', $wpdb->get_results($wpdb->prepare(
             "SELECT p.ID AS fg_id, pm.meta_value AS fg_key FROM {$wpdb->posts} p
              INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID AND pm.meta_key = %s
              WHERE p.post_type = 'attachment' AND pm.meta_value IN ({$placeholders})
              ORDER BY p.ID ASC",
             array_merge([self::META_FILE], $keys)
-        ), ARRAY_A);
+        ), ARRAY_A));
 
         $groups = [];
 

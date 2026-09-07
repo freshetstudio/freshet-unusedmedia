@@ -114,7 +114,15 @@
         }
 
         post('freshet_unusedmedia_scan_batch', config.nonceManage).then(function (data) {
-            updateProgress(data.done, data.total);
+            // A run that lost answers says so while it is still running, not
+            // only on the notice after the reload: the count is the difference
+            // between "nothing references these files" and "nobody asked".
+            updateProgress(data.done, data.total, data.errors
+                ? config.i18n.scanErrors
+                    .replace('%1$s', data.done)
+                    .replace('%2$s', data.total)
+                    .replace('%3$s', data.errors)
+                : undefined);
 
             if (data.finished) {
                 window.location.reload();

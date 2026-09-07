@@ -54,16 +54,23 @@ final class PostmetaDetector implements DetectorInterface
         $conditions = array_merge($idConditions, $nameConditions);
         $keyPlaceholders = implode(',', array_fill(0, count(self::EXCLUDED_KEYS), '%s'));
 
-        $sql = "SELECT pm.post_id, pm.meta_key, pm.meta_value, p.post_status
+        // The same revision filter post_content uses, from the same place: an
+        // old version is not a use, but an autosave is an edit in flight, and a
+        // draft whose text was searched while its custom fields were not is one
+        // row the two detectors gave two answers about.
+        [$revisionCondition, $revisionParams] = LikePatterns::revisionCondition('p');
+
+        $sql = "SELECT pm.post_id, pm.meta_key, pm.meta_value, p.post_type, p.post_parent, p.post_status
                 FROM {$wpdb->postmeta} pm
                 INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
-                WHERE p.post_type <> 'revision'
+                WHERE {$revisionCondition}
                   AND pm.post_id <> %d
                   AND pm.meta_key NOT LIKE %s
                   AND pm.meta_key NOT IN ({$keyPlaceholders})
                   AND (" . implode(' OR ', $conditions) . ')';
 
         $params = array_merge(
+            $revisionParams,
             [$ctx->id, $wpdb->esc_like('_freshet_unusedmedia_') . '%'],
             self::EXCLUDED_KEYS,
             $idParams,
@@ -76,7 +83,7 @@ final class PostmetaDetector implements DetectorInterface
         $refs = [];
 
         foreach ($rows as $row) {
-            $ref = $this->classify($ctx, (int) $row->post_id, (string) $row->meta_key, (string) $row->meta_value, (string) $row->post_status);
+            $ref = $this->classify($ctx, $row);
 
             if ($ref !== null) {
                 $refs[] = $ref;
@@ -86,16 +93,31 @@ final class PostmetaDetector implements DetectorInterface
         return $refs;
     }
 
-    private function classify(AttachmentContext $ctx, int $postId, string $key, string $value, string $postStatus): ?Reference
+    private function classify(AttachmentContext $ctx, object $row): ?Reference
     {
+        $postId = (int) $row->post_id;
+        $key = (string) $row->meta_key;
+        $value = (string) $row->meta_value;
+        $postStatus = (string) $row->post_status;
+
+        // Only autosaves reach here as revisions — the query admits no other
+        // kind. An autosave has no screen of its own, so the reference points
+        // at the parent post the edit belongs to, and it is `possible` however
+        // precisely the value verified: the edit may never be saved. Both
+        // readings match what post_content already gives the same row.
+        $autosave = (string) ($row->post_type ?? '') === 'revision';
+        $parentId = (int) ($row->post_parent ?? 0);
+
         $make = static fn(string $match, string $confidence): Reference => new Reference(
             detector: 'postmeta',
             objectType: 'post',
-            objectId: $postId,
+            objectId: $autosave ? $parentId : $postId,
             detail: $key,
-            match: $match,
+            match: $autosave ? 'autosave' : $match,
             // Trashed posts are restorable — keep them blocking, but flag as possible.
-            confidence: $postStatus === 'trash' && $confidence === Reference::CONFIRMED ? Reference::POSSIBLE : $confidence,
+            confidence: $autosave || ($postStatus === 'trash' && $confidence === Reference::CONFIRMED)
+                ? Reference::POSSIBLE
+                : $confidence,
         );
 
         // Known core/plugin keys first.

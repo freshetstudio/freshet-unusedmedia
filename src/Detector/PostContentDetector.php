@@ -90,15 +90,19 @@ final class PostContentDetector implements DetectorInterface
 
         // Revisions are skipped — a reference in an old version is not a use —
         // except autosaves, which hold edits in flight that are not saved yet.
+        // Shared with PostmetaDetector so the two cannot drift apart on what an
+        // autosave is; see LikePatterns::revisionCondition().
+        [$revisionCondition, $revisionParams] = LikePatterns::revisionCondition('p');
+
         $sql = "SELECT p.ID, p.post_parent, p.post_type, p.post_status, p.post_content, p.post_excerpt
                 FROM {$wpdb->posts} p
                 WHERE p.post_type NOT IN ('attachment', 'nav_menu_item')
-                  AND (p.post_type <> 'revision' OR p.post_name LIKE %s)
+                  AND {$revisionCondition}
                   AND p.post_status <> 'auto-draft'
                   AND p.ID <> %d
                   AND (" . implode(' OR ', $conditions) . ')';
 
-        $params = array_merge(['%' . $wpdb->esc_like('-autosave-v1'), $id], $params);
+        $params = array_merge($revisionParams, [$id], $params);
 
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- placeholders built above, all values bound via prepare().
         $rows = Db::rows($this->id(), $wpdb->get_results($wpdb->prepare($sql, ...$params)));

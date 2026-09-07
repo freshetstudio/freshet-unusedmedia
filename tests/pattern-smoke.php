@@ -1175,11 +1175,14 @@ check('the verifier returns nothing for the prefixed id either', in_array(24, $c
 
 // --- postmeta
 
+// The fixture rows carry every column the SELECT names, post_type and
+// post_parent included — the query joins the posts table to read them, and a
+// row that omits one only exercises the fallback.
 $GLOBALS['wpdb']->rows = [
-    (object) ['post_id' => '31', 'meta_key' => 'intro_html', 'meta_value' => $quotedMarkup, 'post_status' => 'publish'],
-    (object) ['post_id' => '32', 'meta_key' => 'intro_html', 'meta_value' => $longerId, 'post_status' => 'publish'],
-    (object) ['post_id' => '33', 'meta_key' => 'intro_html', 'meta_value' => $prefixedId, 'post_status' => 'publish'],
-    (object) ['post_id' => '34', 'meta_key' => 'settings', 'meta_value' => '{"hero":{"image":123}}', 'post_status' => 'publish'],
+    (object) ['post_id' => '31', 'meta_key' => 'intro_html', 'meta_value' => $quotedMarkup, 'post_type' => 'page', 'post_parent' => '0', 'post_status' => 'publish'],
+    (object) ['post_id' => '32', 'meta_key' => 'intro_html', 'meta_value' => $longerId, 'post_type' => 'page', 'post_parent' => '0', 'post_status' => 'publish'],
+    (object) ['post_id' => '33', 'meta_key' => 'intro_html', 'meta_value' => $prefixedId, 'post_type' => 'page', 'post_parent' => '0', 'post_status' => 'publish'],
+    (object) ['post_id' => '34', 'meta_key' => 'settings', 'meta_value' => '{"hero":{"image":123}}', 'post_type' => 'page', 'post_parent' => '0', 'post_status' => 'publish'],
 ];
 
 $postMetaRefs = (new PostmetaDetector())->find($ctx);
@@ -1191,6 +1194,68 @@ check('the postmeta quoted id is labelled as markup', $postMetaRefs[0]->match, '
 check('the postmeta reference points at its post', $postMetaRefs[0]->objectId, 31);
 check('a postmeta value that decodes keeps its serialized verdict', $postMetaRefs[1]->match, 'serialized');
 check('the postmeta query admits a quoted id in markup', $admits($postMetaBound, $quotedMarkup), true);
+
+// --- the two post-table detectors agree about autosaves
+//
+// They used to disagree: post_content admitted a revision whose post_name ends
+// '-autosave-v1', postmeta excluded every revision outright, so an unsaved
+// draft's text was searched and its custom fields were not. One row, two
+// answers about whether it exists — which is the defect, independent of how
+// often it bites. Both conditions now come from LikePatterns::revisionCondition()
+// and both readings of the fetched row match: the reference belongs to the
+// parent post (an autosave has no screen of its own) and it is `possible`
+// however precisely the value verified, because the edit may never be saved.
+//
+// Direction chosen on a measurement, not on the reasoning: on two production
+// copies one attachment is named by an autosave's field and by nothing else on
+// the site, so excluding autosaves from both would have widened deletion onto a
+// live draft's file. Admitting them cannot delete anything that is used.
+
+$autosaveContent = '<img class="wp-image-123" src="/other.png">';
+
+$GLOBALS['wpdb']->rows = [
+    (object) [
+        'ID' => '910', 'post_parent' => '900', 'post_type' => 'revision', 'post_status' => 'inherit',
+        'post_content' => $autosaveContent, 'post_excerpt' => '',
+    ],
+];
+$autosaveContentRefs = $detector->find($ctx);
+$autosaveContentBound = $GLOBALS['wpdb']->lastParams;
+$autosaveContentSql = $GLOBALS['wpdb']->lastSql;
+
+$GLOBALS['wpdb']->rows = [
+    (object) [
+        'post_id' => '910', 'meta_key' => 'hero_image', 'meta_value' => '123',
+        'post_type' => 'revision', 'post_parent' => '900', 'post_status' => 'inherit',
+    ],
+];
+$autosaveMetaRefs = (new PostmetaDetector())->find($ctx);
+$autosaveMetaBound = $GLOBALS['wpdb']->lastParams;
+$autosaveMetaSql = $GLOBALS['wpdb']->lastSql;
+$GLOBALS['wpdb']->rows = [];
+
+// One condition, one answer: the same clause text and the same bound needle in
+// both queries, and the needle is a suffix with no trailing '%', so a plain
+// revision is still excluded from both.
+check('both queries carry the same revision condition', [
+    str_contains($autosaveContentSql, "(p.post_type <> 'revision' OR p.post_name LIKE %s)"),
+    str_contains($autosaveMetaSql, "(p.post_type <> 'revision' OR p.post_name LIKE %s)"),
+], [true, true]);
+check('both queries bind the same autosave needle first', [$autosaveContentBound[0], $autosaveMetaBound[0]], ['%-autosave-v1', '%-autosave-v1']);
+check('the autosave needle is a suffix, so a plain revision stays out', str_ends_with($autosaveMetaBound[0], '-autosave-v1'), true);
+
+// And the same fetched autosave is read the same way by both.
+$verdict = static fn(array $refs): array => $refs === []
+    ? ['no reference']
+    : [$refs[0]->objectType, $refs[0]->objectId, $refs[0]->match, $refs[0]->confidence, $refs[0]->countsAsUsed()];
+
+check('one autosave, one reference, from each detector', [count($autosaveContentRefs), count($autosaveMetaRefs)], [1, 1]);
+check('both detectors read the fixture autosave identically', $verdict($autosaveMetaRefs), $verdict($autosaveContentRefs));
+check('the shared verdict is the parent post, possible, and used', $verdict($autosaveContentRefs), ['post', 900, 'autosave', Reference::POSSIBLE, true]);
+
+// The meta_key survives the relabelling: 'autosave' is what the row *is*, and
+// the field it sits in is still the useful half of the detail line.
+check('the postmeta autosave reference still names its field', $autosaveMetaRefs[0]->detail, 'hero_image');
 
 // --- options: all three branches, because all three are behind one query
 

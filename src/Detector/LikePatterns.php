@@ -25,6 +25,13 @@ final class LikePatterns
     private const CYCLE_MARK = "\0freshet_unusedmedia_path\0";
 
     /**
+     * The suffix core gives an autosave's post_name: "<parent id>-autosave-v1".
+     *
+     * @see wp_create_post_autosave()
+     */
+    public const AUTOSAVE_SUFFIX = '-autosave-v1';
+
+    /**
      * OR'd SQL conditions matching an attachment ID inside a text column:
      * exact value, comma lists, serialized int/string, JSON "id", compact
      * JSON array members, JSON values under any other key, and a link to the
@@ -148,6 +155,35 @@ final class LikePatterns
                 '%' . $wpdb->esc_like('attachment_id=' . $id) . '%',
                 '%' . $wpdb->esc_like('wp-att-' . $id) . '%',
             ],
+        ];
+    }
+
+    /**
+     * The revision filter every detector reading the posts table shares: a
+     * reference in an old version is not a use, so revisions are skipped —
+     * except autosaves, which hold an edit in flight that has not been saved
+     * yet, and whose file would otherwise be deleted out from under the draft.
+     *
+     * It lives here, and not inline in each detector, because two detectors
+     * reading the same row disagreeing about whether that row exists is a
+     * defect on its own: post_content admitted autosaves while postmeta
+     * excluded them, so an unsaved draft's text was searched and its custom
+     * fields were not (freshet-147). One condition, one answer.
+     *
+     * A caller that admits autosaves must also read them as autosaves — the
+     * reference belongs to the parent post, which is the only thing with a
+     * screen, and its confidence is `possible` however precisely the value
+     * verified, because the edit may never be saved.
+     *
+     * @return array{0: string, 1: array<int, string>} [condition, params]
+     */
+    public static function revisionCondition(string $alias): array
+    {
+        global $wpdb;
+
+        return [
+            "({$alias}.post_type <> 'revision' OR {$alias}.post_name LIKE %s)",
+            ['%' . $wpdb->esc_like(self::AUTOSAVE_SUFFIX)],
         ];
     }
 

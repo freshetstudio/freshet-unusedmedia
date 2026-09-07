@@ -348,6 +348,33 @@ $GLOBALS['wpdb'] = new class {
             return [];
         }
 
+        // The file-claims guard's two reads, in the order it makes them: the
+        // rows whose own file is in one directory, then the metadata of those
+        // same rows. This fixture's library carries no attachment metadata at
+        // all (wp_get_attachment_metadata() above returns false), so the second
+        // has nothing to answer and only the first can produce a claim — which
+        // it does not here, because a row on the path being deleted is in the
+        // group and a row on another path is not one of its files.
+        if (str_contains($query['sql'], 'fc_file')) {
+            return [];
+        }
+
+        if (str_contains($query['sql'], 'SELECT post_id, meta_value')) {
+            $prefix = rtrim(str_replace('\\', '', (string) end($query['params'])), '%');
+            $root = str_contains($query['sql'], 'NOT LIKE');
+            $found = [];
+
+            foreach ($GLOBALS['rows'] as $id => $row) {
+                if ($root ? str_contains($row['file'], '/') : !str_starts_with($row['file'], $prefix)) {
+                    continue;
+                }
+
+                $found[] = ['post_id' => (string) $id, 'meta_value' => $row['file']];
+            }
+
+            return $found;
+        }
+
         // Every attachment row standing on any of these paths — the sibling
         // lookup, and it takes a whole page of paths at a time.
         if (str_contains($query['sql'], 'pm.meta_value IN')) {
@@ -397,6 +424,7 @@ foreach ([
     'src/Scan/AttachmentContext.php',
     'src/Scan/FileSize.php',
     'src/Scan/FileGroups.php',
+    'src/Scan/FileClaims.php',
     'src/Scan/ResultFilters.php',
     'src/Scan/ResultSort.php',
     'src/Scan/UploadGrace.php',

@@ -163,8 +163,9 @@ function update_postmeta_cache(array $ids): bool
 function wp_get_attachment_metadata(int $id): array|false
 {
     $sizes = $GLOBALS['rows'][$id]['sizes'] ?? [];
+    $original = $GLOBALS['rows'][$id]['original'] ?? '';
 
-    if ($sizes === []) {
+    if ($sizes === [] && $original === '') {
         return false;
     }
 
@@ -172,6 +173,13 @@ function wp_get_attachment_metadata(int $id): array|false
 
     foreach ($sizes as $name => $file) {
         $meta['sizes'][$name] = ['file' => $file];
+    }
+
+    // The pre-scale upload core keeps beside a big image. It is a *different
+    // file* from the one the row is grouped on, and the whole of freshet-142 is
+    // that some other attachment can have been uploaded as exactly it.
+    if ($original !== '') {
+        $meta['original_image'] = $original;
     }
 
     return $meta;
@@ -233,6 +241,13 @@ function wp_delete_attachment(int $id, bool $force = false): WP_Post|false|null
     // intermediate size comes to outlive the attachment it was cut from.
     foreach ($row['sizes'] ?? [] as $size) {
         $files[] = dirname($row['file']) . '/' . $size;
+    }
+
+    // And the pre-scale original, unlinked **by name** in the row's own
+    // directory with no check on who else might be standing on that name —
+    // wp_delete_attachment_files() guards only the legacy $meta['thumb'].
+    if (($row['original'] ?? '') !== '') {
+        $files[] = dirname($row['file']) . '/' . $row['original'];
     }
 
     foreach ($files as $file) {
@@ -343,6 +358,9 @@ $GLOBALS['wpdb'] = new class {
     public string $posts = 'wp_posts';
     public string $postmeta = 'wp_postmeta';
 
+    /** What core leaves behind after a query that did not run. Db reads it. */
+    public string $last_error = '';
+
     /** @var array<int, array{sql: string, params: array<int, mixed>}> */
     public array $queries = [];
 
@@ -437,6 +455,37 @@ $GLOBALS['wpdb'] = new class {
     {
         $query = $this->resolve($sql);
 
+        // The rows in one directory and the path each stands on — the first half
+        // of the file-claims guard, and the half that answers both collisions
+        // the reviews measured (the file about to go is another row's own file).
+        if (str_contains($query['sql'], 'SELECT post_id, meta_value')) {
+            if ($this->refuse()) {
+                return [];
+            }
+
+            return $this->inDirectory($query, static fn(int $id, array $row): array
+                => [['post_id' => (string) $id, 'meta_value' => $row['file']]]);
+        }
+
+        // The metadata of those same rows, joined to the file it describes —
+        // the mirror half: a neighbour that *names* the file being unlinked.
+        if (str_contains($query['sql'], 'fc_file')) {
+            if ($this->refuse()) {
+                return [];
+            }
+
+            return $this->inDirectory($query, static function (int $id, array $row): array {
+                $meta = wp_get_attachment_metadata($id);
+
+                return $meta === false ? [] : [[
+                    'post_id' => (string) $id,
+                    'meta_key' => '_wp_attachment_metadata',
+                    'meta_value' => serialize($meta),
+                    'fc_file' => $row['file'],
+                ]];
+            });
+        }
+
         // Every attachment row standing on any of these paths — the sibling
         // lookup, and it takes a whole page of paths at a time.
         if (str_contains($query['sql'], 'pm.meta_value IN')) {
@@ -464,6 +513,65 @@ $GLOBALS['wpdb'] = new class {
         return '0';
     }
 
+    /**
+     * Fail the claims read the way the driver does: an empty array, exactly
+     * what "no rows matched" looks like, and the message left on $wpdb. Db is
+     * the only thing that can tell the two apart, and the guard has to refuse
+     * on it rather than read the silence as "nobody else needs these files".
+     *
+     * Scoped to the claims reads on purpose — a flag the sibling lookup also
+     * honoured would fail the deletion one step earlier and prove nothing
+     * about this guard.
+     */
+    private function refuse(): bool
+    {
+        if (($GLOBALS['dbError'] ?? false) !== true) {
+            return false;
+        }
+
+        $this->last_error = 'MySQL server has gone away';
+
+        return true;
+    }
+
+    /**
+     * The fixture rows whose file sits in the directory a `LIKE` names, run
+     * through a shaper that builds the columns that read asked for.
+     *
+     * The directory is always the query's last parameter, and the root case is
+     * the `NOT LIKE '%/%'` OrphanSizes established — a library with "organize
+     * by date" switched off. The `LIKE` deliberately matches subdirectories
+     * here, exactly as it does in MySQL, so the caller's own whole-directory
+     * comparison is the thing under test rather than something the fixture
+     * quietly did for it.
+     *
+     * @param array{sql: string, params: array<int, mixed>} $query
+     * @param callable(int, array<string, mixed>): array<int, array<string, string>> $shape
+     * @return array<int, array<string, string>>
+     */
+    private function inDirectory(array $query, callable $shape): array
+    {
+        $prefix = rtrim(str_replace('\\', '', (string) end($query['params'])), '%');
+        $root = str_contains($query['sql'], 'NOT LIKE');
+        $found = [];
+
+        foreach ($GLOBALS['rows'] as $id => $row) {
+            if ($row['file'] === '') {
+                continue;
+            }
+
+            if ($root ? str_contains($row['file'], '/') : !str_starts_with($row['file'], $prefix)) {
+                continue;
+            }
+
+            foreach ($shape((int) $id, $row) as $out) {
+                $found[] = $out;
+            }
+        }
+
+        return $found;
+    }
+
     /** @return array{sql: string, params: array<int, mixed>} */
     public function last(): array
     {
@@ -478,6 +586,7 @@ foreach ([
     'src/Scan/AttachmentContext.php',
     'src/Scan/FileSize.php',
     'src/Scan/FileGroups.php',
+    'src/Scan/FileClaims.php',
     'src/Scan/ResultFilters.php',
     'src/Scan/ResultSort.php',
     'src/Scan/UploadGrace.php',
@@ -510,6 +619,7 @@ use FreshetUnusedMedia\Admin\StatusBadge;
 use FreshetUnusedMedia\Detector\LikePatterns;
 use FreshetUnusedMedia\Detector\RecentUploadDetector;
 use FreshetUnusedMedia\Scan\AttachmentContext;
+use FreshetUnusedMedia\Scan\FileClaims;
 use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\FileSize;
 use FreshetUnusedMedia\Scan\OrphanSizes;
@@ -561,6 +671,11 @@ function library(array $rows): void
     $GLOBALS['meta'] = [];
     $GLOBALS['options'] = [];
 
+    // A new library is a healthy database again, and an error left on $wpdb by
+    // the last fixture would make every read after it refuse.
+    $GLOBALS['dbError'] = false;
+    $GLOBALS['wpdb']->last_error = '';
+
     // A new library is a new request: the sibling groups memoised for the last
     // fixture describe rows that no longer exist, and so does the directory
     // listing read for the last fixture's basenames.
@@ -575,6 +690,7 @@ function library(array $rows): void
             'used' => $row['used'] ?? false,
             'uploaded' => $row['uploaded'] ?? time(),
             'sizes' => $row['sizes'] ?? [],
+            'original' => $row['original'] ?? '',
         ];
 
         if ($row['file'] === '') {
@@ -591,6 +707,13 @@ function library(array $rows): void
 
         foreach ($row['sizes'] ?? [] as $size) {
             file_put_contents(dirname($path) . '/' . $size, str_repeat('x', 256));
+        }
+
+        // Written only if nothing else has: where the collision under test is
+        // that another row *is* this original, that row's own file is this one
+        // and there is a single file on disk, which is the whole point.
+        if (($row['original'] ?? '') !== '' && !file_exists(dirname($path) . '/' . $row['original'])) {
+            file_put_contents(dirname($path) . '/' . $row['original'], str_repeat('x', 2048));
         }
     }
 }
@@ -936,6 +1059,189 @@ $result = $deleter()->deleteVerified([500, 501, 502]);
 
 check('three representatives of one file are one deletion', $result['deleted'], 1);
 check('and are sized once', ReclaimedLedger::read()['bytes'], 4096);
+
+// -------------------------------------- one file, two groups (freshet-142)
+//
+// The grouping key is the row's own `_wp_attached_file`, and an attachment owns
+// more files than that one. Two of them can be another attachment's own file,
+// and then the two rows key on different paths, land in groups that never see
+// each other, and can honestly reach opposite verdicts about one file on disk —
+// while `wp_delete_attachment_files()` unlinks every size and every original
+// **by name**, with no cross-attachment guard beyond the legacy `$meta['thumb']`
+// lookup.
+//
+// The two ways in were found independently by two reviewers on three different
+// production libraries, and both are asserted here. The key itself is left
+// alone: it has to stay expressible in SQL as keySql(), and both relations live
+// inside a serialized metadata blob. So the guard sits on the delete path, which
+// is the only thing in this plugin that unlinks anything.
+
+// --- the first way in: `original_image`. A big upload is scaled, so the row
+// stands on `hero-scaled.jpg` and its metadata names `hero.jpg` — which is,
+// separately, a whole other attachment's own file.
+
+library([
+    100 => ['file' => '2026/11/hero-scaled.jpg', 'original' => 'hero.jpg'],
+    200 => ['file' => '2026/11/hero.jpg', 'used' => true],
+]);
+
+check('a scaled upload and its original are two keys', FileGroups::keyFor(100) === FileGroups::keyFor(200), false);
+check('so neither is the other\'s sibling', FileGroups::siblings(100), [100]);
+check('deleting the scaled row would unlink the original', isset(FileClaims::unlinks([100])['2026/11/hero.jpg']), true);
+check('and that original is another row\'s own file', FileClaims::claimants([100]), ['2026/11/hero.jpg' => 200]);
+
+$result = $deleter()->deleteVerified([100]);
+
+check('so the deletion is refused', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0]);
+check('the file the other entry stands on survives', onDisk('2026/11/hero.jpg'), true);
+check('and so does the row that was offered', isset($GLOBALS['rows'][100]), true);
+check('a refused file reclaims nothing', ReclaimedLedger::read()['files'], 0);
+check('and leaves the unused pool so a batch loop can end', isset($GLOBALS['meta'][100][ResultStore::META_STATUS]), false);
+
+// The mirror of it, which is the same collision with the other row picked for
+// deletion: removing 200 unlinks 200's own file, and 100's metadata names it.
+
+library([
+    100 => ['file' => '2026/11/hero-scaled.jpg', 'original' => 'hero.jpg', 'used' => true],
+    200 => ['file' => '2026/11/hero.jpg'],
+]);
+
+check('a neighbour that merely names the file claims it too', FileClaims::claimants([200]), ['2026/11/hero.jpg' => 100]);
+
+$result = $deleter()->deleteVerified([200]);
+
+check('deleting the row that owns the shared file is refused too', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0]);
+check('the used entry keeps its original', onDisk('2026/11/hero.jpg'), true);
+check('and its own scaled file is untouched', onDisk('2026/11/hero-scaled.jpg'), true);
+
+// --- the second way in: a shared `sizes[].file`, on the real rows the review
+// names. An upload whose own name already ends in dimensions has its sizes cut
+// from the whole of that name — and that generated name is exactly what a
+// second row was uploaded as.
+
+library([
+    1905 => ['file' => '2019/07/canon-300x225-300x225.jpg', 'used' => true],
+    1926 => ['file' => '2019/07/canon-300x225.jpg', 'sizes' => ['medium' => 'canon-300x225-300x225.jpg']],
+    1906 => ['file' => '2019/07/donner-225x300-225x300.jpg', 'used' => true],
+    1927 => ['file' => '2019/07/donner-225x300.jpg', 'sizes' => ['medium' => 'donner-225x300-225x300.jpg']],
+]);
+
+check('a row and another row\'s size are two keys', FileGroups::keyFor(1926) === FileGroups::keyFor(1905), false);
+check('the size a deletion would unlink is the other row\'s own file', FileClaims::claimants([1926]), ['2019/07/canon-300x225-300x225.jpg' => 1905]);
+check('and the same holds for the second pair', FileClaims::claimants([1927]), ['2019/07/donner-225x300-225x300.jpg' => 1906]);
+
+$result = $deleter()->deleteVerified([1926, 1927]);
+
+check('both are refused rather than deleted', $result, ['deleted' => 0, 'skipped' => 2, 'failed' => 0]);
+check('the file the first used row stands on survives', onDisk('2019/07/canon-300x225-300x225.jpg'), true);
+check('and so does the second', onDisk('2019/07/donner-225x300-225x300.jpg'), true);
+check('neither used row was touched', isset($GLOBALS['rows'][1905], $GLOBALS['rows'][1906]), true);
+
+// The mirror again: the row that owns the shared file is the unused one.
+
+library([
+    1905 => ['file' => '2019/07/canon-300x225-300x225.jpg'],
+    1926 => ['file' => '2019/07/canon-300x225.jpg', 'sizes' => ['medium' => 'canon-300x225-300x225.jpg'], 'used' => true],
+]);
+
+$result = $deleter()->deleteVerified([1905]);
+
+check('deleting the row a live size stands on is refused', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0]);
+check('the live entry keeps the size it renders', onDisk('2019/07/canon-300x225-300x225.jpg'), true);
+
+// --- and the boundaries, because a guard that stops every deletion protects
+// nothing: it has to be this collision it refuses, not the neighbourhood.
+
+library([
+    100 => ['file' => '2026/12/hero-scaled.jpg', 'original' => 'hero.jpg', 'sizes' => ['medium' => 'hero-300x200.jpg']],
+    200 => ['file' => '2026/12/unrelated.jpg', 'original' => 'unrelated-big.jpg', 'used' => true],
+    300 => ['file' => '2027/01/hero.jpg', 'used' => true],
+]);
+
+check('a neighbour with no file in common claims nothing', FileClaims::claimants([100]), []);
+
+$result = $deleter()->deleteVerified([100]);
+
+check('an unused file with a clear directory still deletes', $result, ['deleted' => 1, 'skipped' => 0, 'failed' => 0]);
+check('its own file goes', onDisk('2026/12/hero-scaled.jpg'), false);
+check('its original goes with it', onDisk('2026/12/hero.jpg'), false);
+check('its size goes with it', onDisk('2026/12/hero-300x200.jpg'), false);
+check('the same basename in another directory is not a claim', onDisk('2027/01/hero.jpg'), true);
+check('and the neighbour in its own directory is untouched', onDisk('2026/12/unrelated.jpg'), true);
+
+// Two rows on one path are one group and one deletion — they must not read as
+// claiming each other's file, or a duplicated upload would become undeletable.
+
+library([
+    100 => ['file' => '2027/02/logo.png'],
+    200 => ['file' => '2027/02/logo.png'],
+]);
+
+check('a group does not claim its own file', FileClaims::claimants(FileGroups::siblings(100)), []);
+
+$result = $deleter()->deleteVerified([100]);
+
+check('so an ordinary duplicate group still deletes', $result, ['deleted' => 1, 'skipped' => 0, 'failed' => 0]);
+check('and the file goes', onDisk('2027/02/logo.png'), false);
+
+// A read that did not answer is not an answer of "nobody else needs this file".
+// Same reading as the sibling lookup and the re-scan: the file is not deleted,
+// and it leaves the unused pool so the batch loop still terminates.
+
+library([
+    100 => ['file' => '2027/03/hero-scaled.jpg', 'original' => 'hero.jpg'],
+    200 => ['file' => '2027/03/hero.jpg', 'used' => true],
+]);
+
+$GLOBALS['dbError'] = true;
+$result = $deleter()->deleteVerified([100]);
+
+check('a claims read that did not answer refuses the deletion', $result, ['deleted' => 0, 'skipped' => 0, 'failed' => 1]);
+check('and nothing on disk was touched', onDisk('2027/03/hero.jpg') && onDisk('2027/03/hero-scaled.jpg'), true);
+check('and the file left the unused pool anyway', isset($GLOBALS['meta'][100][ResultStore::META_STATUS]), false);
+
+$GLOBALS['dbError'] = false;
+
+// --- the twinning the guard had to leave intact. Every count, every listing
+// and the delete loop rest on keyFor() and keySql() being the same key, and the
+// reason the fix is on the delete path rather than in the key is that this pair
+// must go on agreeing. keySql() is read here rather than described: its shape is
+// matched and then evaluated against the same fixture rows keyFor() is given.
+
+/**
+ * keySql(), executed. The expression is COALESCE(NULLIF(<value>, ''), CONCAT(
+ * '<prefix>', <id>)) and nothing else, so it can be run in PHP against a row's
+ * stored value — and if it ever stops being that expression this stops
+ * pretending it can, rather than silently asserting something weaker.
+ */
+function evaluateKeySql(string $storedValue, int $id): string
+{
+    $sql = FileGroups::keySql();
+
+    if (preg_match("/^COALESCE\(NULLIF\(fgf\.meta_value, ''\), CONCAT\('(.+)', p\.ID\)\)$/", $sql, $matches) !== 1) {
+        return 'keySql() is no longer an expression this test can evaluate: ' . $sql;
+    }
+
+    return $storedValue !== '' ? $storedValue : $matches[1] . $id;
+}
+
+library([
+    100 => ['file' => '2024/01/logo.png'],
+    200 => ['file' => '2024/01/logo.png'],
+    300 => ['file' => '2025/06/logo.png'],
+    900 => ['file' => ''],
+]);
+
+$twins = [];
+
+foreach (array_keys($GLOBALS['rows']) as $id) {
+    $twins[$id] = FileGroups::keyFor($id) === evaluateKeySql($GLOBALS['rows'][$id]['file'], $id);
+}
+
+check('the PHP key and the SQL key agree on every fixture row', $twins, [100 => true, 200 => true, 300 => true, 900 => true]);
+check('the SQL key still reads the attached file and nothing else', substr_count(FileGroups::keySql(), 'meta_value'), 1);
+check('the guard added no column to the grouped subquery', str_contains(FileGroups::subquery()['sql'], 'fc_file'), false);
+check('and no second join to it', substr_count(FileGroups::subquery()['sql'], 'LEFT JOIN'), 2);
 
 // ------------------------------------------- the stale intermediate size
 //

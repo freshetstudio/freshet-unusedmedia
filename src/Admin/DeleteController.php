@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace FreshetUnusedMedia\Admin;
 
+use FreshetUnusedMedia\Scan\FileClaims;
 use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\FileSize;
 use FreshetUnusedMedia\Scan\QueryFailed;
@@ -16,6 +17,14 @@ defined('ABSPATH') || exit;
 /**
  * Deletion of verified-unused files. Every row on a file is re-scanned
  * immediately before deletion — one row still in use keeps the whole file.
+ *
+ * Two questions are asked before that re-scan, and they are different
+ * questions. FileGroups answers *which rows stand on this path*, so the file
+ * goes with all of them or not at all. FileClaims answers *whether the files
+ * this would unlink belong to anyone else* — an attachment's original or one of
+ * its sizes can be another attachment's own file, and those two rows are in
+ * groups that never meet. A yes to the second is a skip, not a partial delete:
+ * there is no half of a file worth taking.
  */
 final class DeleteController
 {
@@ -152,6 +161,39 @@ final class DeleteController
 
                     continue 2;
                 }
+            }
+
+            // An attachment owns more files than the one it is grouped on, and
+            // one of those can be another attachment's own file: a `-scaled`
+            // upload's `original_image`, or a size cut from a name that is
+            // itself size-shaped. Those two rows key on different paths, so
+            // they are in different groups and neither sibling lookup nor the
+            // re-scan below can see the collision — while core unlinks every
+            // size and original **by name** with no cross-attachment guard
+            // beyond the legacy `$meta['thumb']` check. Asked before the
+            // re-scan because it is the cheaper of the two and settles the file
+            // outright (freshet-142).
+            try {
+                $claimed = FileClaims::claimants($rows);
+            } catch (QueryFailed) {
+                // Same reading as the sibling lookup above: a read that did not
+                // answer is not an answer of "nobody else needs these files".
+                ++$failed;
+                $this->clearAll($rows); // Out of the unused pool so batch loops terminate.
+
+                continue;
+            }
+
+            if ($claimed !== []) {
+                // The file is in use — by a library entry standing on it rather
+                // than by content pointing at it, which is the same sentence
+                // this plugin says everywhere else about a shared file. Cleared
+                // rather than left, because no scan wrote a status here and an
+                // uncleared file would be offered to the next batch for ever.
+                ++$skipped;
+                $this->clearAll($rows);
+
+                continue;
             }
 
             // Fresh scan of every row right before deletion — the cached results

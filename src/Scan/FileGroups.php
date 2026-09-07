@@ -30,6 +30,16 @@ defined('ABSPATH') || exit;
  * duplicates, and nothing should: whatever made two rows point at one path,
  * they are one file.
  *
+ * **What this key does NOT catch, so nobody reads it as more than it is.** An
+ * attachment owns more files than the one it is grouped on — its `sizes`, its
+ * pre-scale `original_image` — and one of those can be a *different*
+ * attachment's own `_wp_attached_file`. Those two rows key on different paths
+ * and are correctly two groups, yet core's deleter would unlink the shared file
+ * for either of them. That is not fixable here: the relation lives inside a
+ * serialized metadata blob, and this key has to stay expressible as keySql().
+ * FileClaims answers it on the delete path instead, and DeleteController asks
+ * before it removes anything.
+ *
  * **Match on basenames, group on paths.** The detectors match basenames,
  * because that is how a reference appears in content. Grouping must not:
  * `2024/01/logo.png` and `2025/06/logo.png` share a basename and are two

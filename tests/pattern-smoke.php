@@ -2159,6 +2159,60 @@ check('and prints nothing where a response body would be', $emitted, '');
 check('and the run counts it as a directory it could not read', SizeSiblings::takeDirectoryReads(), ['read' => 0, 'unread' => 1]);
 check('the tally is handed over once and starts again', SizeSiblings::takeDirectoryReads(), ['read' => 0, 'unread' => 0]);
 
+// A batch is a page of attachment IDs, and ID order is not directory order: an
+// import, a re-upload or a plugin that writes its own files puts two months
+// next to each other in the same page. With one remembered listing that batch
+// re-read a directory per attachment, so the memo holds a few — bounded,
+// because a scan eventually visits every directory the library has and
+// remembering all of them trades a directory read for memory that grows with
+// the library (freshet-149).
+
+$memoDirs = [];
+
+foreach (['08', '09', '10', '11', '12'] as $month) {
+    $memoDir = sys_get_temp_dir() . '/freshet-unusedmedia-disk-read/2026/' . $month;
+
+    if (!is_dir($memoDir)) {
+        mkdir($memoDir, 0777, true);
+    }
+
+    foreach (['hero-scaled.jpg', 'hero-300x200.jpg'] as $diskFixture) {
+        file_put_contents($memoDir . '/' . $diskFixture, 'x');
+    }
+
+    $memoDirs[] = $memoDir;
+}
+
+SizeSiblings::flush();
+SizeSiblings::takeDirectoryReads();
+
+for ($alternating = 0; $alternating < 6; $alternating++) {
+    SizeSiblings::forFile($memoDirs[$alternating % 2] . '/hero-scaled.jpg');
+}
+
+check('a batch alternating between two directories reads each of them once', SizeSiblings::takeDirectoryReads(), ['read' => 2, 'unread' => 0]);
+
+SizeSiblings::flush();
+SizeSiblings::takeDirectoryReads();
+SizeSiblings::forFile($memoDirs[0] . '/hero-scaled.jpg');
+
+check('and the batch boundary still drops what was remembered', SizeSiblings::takeDirectoryReads(), ['read' => 1, 'unread' => 0]);
+
+// One directory more than the memo holds. The oldest goes, the newest stays,
+// and the answer is the directory's own either way — which is the property that
+// matters: a memo that returned a neighbour's listing would attach one
+// attachment's leftover sizes to another.
+foreach ($memoDirs as $memoDir) {
+    SizeSiblings::forFile($memoDir . '/hero-scaled.jpg');
+}
+
+SizeSiblings::takeDirectoryReads();
+
+check('the oldest listing is the one evicted', SizeSiblings::forFile($memoDirs[0] . '/hero-scaled.jpg'), ['hero-300x200.jpg']);
+check('so asking for it again is a read', SizeSiblings::takeDirectoryReads(), ['read' => 1, 'unread' => 0]);
+check('while the most recent is still remembered', SizeSiblings::forFile($memoDirs[4] . '/hero-scaled.jpg'), ['hero-300x200.jpg']);
+check('and costs nothing to ask for', SizeSiblings::takeDirectoryReads(), ['read' => 0, 'unread' => 0]);
+
 SizeSiblings::flush();
 
 // --------------------------------------------- the superseded generation

@@ -29,17 +29,35 @@ defined('ABSPATH') || exit;
  *   *this* attachment's stem, compared whole. `hero.jpg` and `hero-1.jpg` are
  *   two uploads, and `hero-1-300x200.jpg` belongs to the second one — admitting
  *   it for the first would attach a reference to the wrong file.
- * - **One directory at a time.** The listing is remembered for a single
- *   directory, so a batch of attachments from the same month reads it once, and
- *   nothing is held across batches (flush()).
+ * - **A few directories at a time.** Listings are remembered for a handful of
+ *   directories at once, so a batch of attachments from the same month reads it
+ *   once and a batch that alternates between months still reads each of them
+ *   once. The map is bounded — a scan walks every directory a library has, and
+ *   remembering all of them would trade a directory read for unbounded memory —
+ *   and nothing is held across batches (flush()).
  */
 final class SizeSiblings
 {
-    /** The directory whose listing is remembered. Exactly one, ever. */
-    private static string $dir = '';
+    /**
+     * How many directory listings are remembered at once.
+     *
+     * Four rather than one because ID order is not directory order: with a
+     * single slot, a batch whose attachments alternate between two months
+     * re-reads both of those directories on every attachment. Four rather than
+     * many because a listing is the expensive thing to hold — tens of thousands
+     * of names on a flat directory — and a scan eventually visits every
+     * directory a library has, so an unbounded map grows with the library
+     * rather than with the batch.
+     */
+    private const MEMO_SLOTS = 4;
 
-    /** @var string[] Entry names in that directory. */
-    private static array $listing = [];
+    /**
+     * @var array<string, string[]> Entry names, keyed by directory. Insertion
+     *      ordered, and the oldest is evicted first: a batch works through a
+     *      handful of directories at a time, so the one read longest ago is the
+     *      one least likely to be asked for again.
+     */
+    private static array $listings = [];
 
     /** Directories this request has read. */
     private static int $read = 0;
@@ -63,18 +81,25 @@ final class SizeSiblings
      */
     public static function listing(string $dir): array
     {
-        if ($dir === self::$dir) {
-            return self::$listing;
+        if (array_key_exists($dir, self::$listings)) {
+            return self::$listings[$dir];
         }
-
-        self::$dir = $dir;
-        self::$listing = [];
 
         if ($dir === '') {
             return [];
         }
 
-        // Suppressed for the same reason scandir() is on the line below, and it
+        if (count(self::$listings) >= self::MEMO_SLOTS) {
+            unset(self::$listings[(string) array_key_first(self::$listings)]);
+        }
+
+        // Recorded before the reads below rather than after, so a directory
+        // that cannot be read is remembered as the empty listing it yields and
+        // is not re-attempted — and is counted once, which is what keeps the
+        // tally saying the same thing it said with one slot.
+        self::$listings[$dir] = [];
+
+        // Suppressed for the same reason scandir() is further down, and it
         // has to be: `is_dir()` on a path whose scheme no stream wrapper claims
         // — `s3://…`, which is how an offload plugin filters get_attached_file()
         // — emits `Unable to find the wrapper` before returning false. That is
@@ -93,7 +118,12 @@ final class SizeSiblings
             return [];
         }
 
-        $entries = @scandir($dir);
+        // Unsorted: every caller either matches each name against a pattern or
+        // builds a map out of them, and the one list that reaches a screen is
+        // sorted where it is stored (OrphanSizes::record()). Sorting here is a
+        // sort of every name in the directory — up to six figures of them on a
+        // flat uploads tree — for an order nothing reads.
+        $entries = @scandir($dir, SCANDIR_SORT_NONE);
 
         if ($entries === false) {
             ++self::$unread;
@@ -103,13 +133,17 @@ final class SizeSiblings
 
         ++self::$read;
 
+        $names = [];
+
         foreach ($entries as $entry) {
             if ($entry !== '.' && $entry !== '..') {
-                self::$listing[] = $entry;
+                $names[] = $entry;
             }
         }
 
-        return self::$listing;
+        self::$listings[$dir] = $names;
+
+        return $names;
     }
 
     /**
@@ -128,12 +162,13 @@ final class SizeSiblings
      * figures would say the same thing multiplied by an arbitrary number.
      *
      * These are counts of *reads*, not of distinct directories, and the
-     * difference is why nothing quotes them as a number. Only one listing is
-     * remembered at a time, so a run whose attachments alternate between
-     * directories reads one of them more than once, and a directory that
-     * straddles a batch boundary is read again in the next request. What is
-     * exact either way is whether each count is zero — which is all the two
-     * things that read this ask: did any directory fail, and did any succeed.
+     * difference is why nothing quotes them as a number. A bounded number of
+     * listings is remembered at a time, so a run whose attachments visit more
+     * directories than there are slots reads some of them more than once, and a
+     * directory that straddles a batch boundary is read again in the next
+     * request. What is exact either way is whether each count is zero — which is
+     * all the two things that read this ask: did any directory fail, and did any
+     * succeed.
      *
      * Read-and-reset, so the caller adds a delta to the run's own total. Not
      * folded into flush(): the two callers flush on either side of where they
@@ -152,11 +187,10 @@ final class SizeSiblings
         return $tally;
     }
 
-    /** Drop the remembered listing. Called at every batch boundary. */
+    /** Drop the remembered listings. Called at every batch boundary. */
     public static function flush(): void
     {
-        self::$dir = '';
-        self::$listing = [];
+        self::$listings = [];
     }
 
     /**
@@ -275,7 +309,8 @@ final class SizeSiblings
      * files are, not where core would have put them.
      *
      * @param array<string, mixed>|false|null $meta The attachment's metadata.
-     * @return string[] Basenames, in directory order.
+     * @return string[] Basenames, in the order the directory reported them —
+     *         which is the filesystem's own and is not an order to rely on.
      */
     public static function forFile(string $path, mixed $meta = null): array
     {

@@ -11,10 +11,11 @@ use FreshetUnusedMedia\Scan\Reference;
 defined('ABSPATH') || exit;
 
 /**
- * Finds references in comments: a file URL or a link to the file's attachment
- * page in a comment body, and IDs or URLs in commentmeta (review photos,
- * attachments on replies, ACF comment fields). Spam is ignored; trashed
- * comments are restorable, so they block deletion but only as possible.
+ * Finds references in comments: a file URL, the editor's image class, or a link
+ * to the file's attachment page in a comment body, and IDs or URLs in
+ * commentmeta (review photos, attachments on replies, ACF comment fields). Spam
+ * is ignored; trashed comments are restorable, so they block deletion but only
+ * as possible.
  */
 final class CommentDetector implements DetectorInterface
 {
@@ -29,14 +30,25 @@ final class CommentDetector implements DetectorInterface
     }
 
     /**
-     * comment_content: a file URL, or a link to the file's own attachment page.
+     * comment_content: a file URL, the class the editor writes on an image it
+     * has inserted, or a link to the file's own attachment page.
      *
-     * The id shapes are deliberately not bound here — a comment body is prose,
-     * so a bare number in it is noise — but a link is not a shape, it is the
-     * ordinary way a reply references a document: a support answer or a
-     * documentation comment points at the PDF rather than embedding it. Only a
-     * URL used to be looked for, so that comment kept the file alive and the
-     * link did not.
+     * The id shapes are still deliberately not bound here — a comment body is
+     * prose, so a bare number in it is noise, and nothing in a sentence quotes,
+     * brackets or serializes it. What IS bound are the three forms that are
+     * markup rather than numbers, because a comment carries markup verbatim: the
+     * file's own URL, the editor's `class="wp-image-123"` — which is not
+     * something a commenter types but what a paste out of the editor produces —
+     * and the attachment-page link a reply points at a document with. Each names
+     * this attachment and nothing else, which is why all three are confirmed
+     * here exactly as post_content confirms the identical markup.
+     *
+     * `[gallery ids="123,456"]` in a comment is deliberately NOT resolved. Every
+     * needle that would fetch it is a quoted-id shape ('"123"', '"123,',
+     * ',123"'), and binding one on this column is a widening measured and
+     * declined (freshet-146): the existing predicates cannot reach the row
+     * because no condition here admits it, so catching it means new SQL rather
+     * than a new verifier.
      */
     private function inContent(AttachmentContext $ctx): array
     {
@@ -44,11 +56,12 @@ final class CommentDetector implements DetectorInterface
 
         [$nameConditions, $nameParams] = LikePatterns::basenameConditions('c.comment_content', $ctx->basenames);
         [$linkConditions, $linkParams] = LikePatterns::attachmentLinkConditions('c.comment_content', $ctx->id);
+        [$classConditions, $classParams] = LikePatterns::imageClassConditions('c.comment_content', $ctx->id);
 
-        // The link conditions are always present, so — unlike before — there is
-        // no attachment for which this query binds nothing.
-        $conditions = array_merge($nameConditions, $linkConditions);
-        $params = array_merge($nameParams, $linkParams);
+        // The link and class conditions are always present, so — unlike before —
+        // there is no attachment for which this query binds nothing.
+        $conditions = array_merge($nameConditions, $linkConditions, $classConditions);
+        $params = array_merge($nameParams, $linkParams, $classParams);
 
         $sql = "SELECT c.comment_ID, c.comment_approved, c.comment_content
                 FROM {$wpdb->comments} c
@@ -65,6 +78,10 @@ final class CommentDetector implements DetectorInterface
 
             $match = match (true) {
                 LikePatterns::containsBasename($content, $ctx->basenames) => 'url',
+                // The image the editor inserted, pasted into a comment with the
+                // class it was written with. Same verifier as post_content, so
+                // the digit boundary that keeps 1234 out of 123 is the same one.
+                LikePatterns::hasImageClass($content, $ctx->id) => 'wp-image-class',
                 // Confirmed like the URL, and for the same reason: the link
                 // names this attachment and nothing else, which is how
                 // post_content reads the identical markup.

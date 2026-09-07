@@ -528,6 +528,18 @@ check('wp-image is not wp-att', LikePatterns::hasAttachmentLinkId('<img class="w
 check('uppercase wp-att marker', LikePatterns::hasAttachmentLinkId('<a rel="attachment WP-ATT-123">hero</a>', $id), true);
 check('uppercase wp-att, longer id', LikePatterns::hasAttachmentLinkId('<a rel="attachment WP-ATT-1234">x</a>', $id), false);
 
+// The editor's image class, the one verifier post_content and comment_content
+// share. The needle behind it is left-delimited only, so the longer id IS
+// fetched and these boundaries are the whole of what rejects it.
+check('wp-image class', LikePatterns::hasImageClass('<img class="wp-image-123" src="/x.jpg">', $id), true);
+check('wp-image class among others', LikePatterns::hasImageClass('<img class="alignnone size-large wp-image-123">', $id), true);
+check('wp-image class, longer id', LikePatterns::hasImageClass('<img class="wp-image-1234">', $id), false);
+check('wp-image class, prefixed id', LikePatterns::hasImageClass('<img class="wp-image-9123">', $id), false);
+check('wp-att is not wp-image', LikePatterns::hasImageClass('<a rel="attachment wp-att-123">x</a>', $id), false);
+check('a bare number in prose is not an image class', LikePatterns::hasImageClass('<p>We ordered 123 of them.</p>', $id), false);
+check('uppercase wp-image class', LikePatterns::hasImageClass('<img class="WP-IMAGE-123">', $id), true);
+check('uppercase wp-image class, longer id', LikePatterns::hasImageClass('<img class="WP-IMAGE-1234">', $id), false);
+
 check('data-id attribute', LikePatterns::hasDataId('<figure data-id="123"></figure>', $id), true);
 check('data-id, single quoted', LikePatterns::hasDataId("<figure data-id='123'></figure>", $id), true);
 check('data-id, unquoted', LikePatterns::hasDataId('<figure data-id=123></figure>', $id), true);
@@ -668,6 +680,14 @@ check('compact array member patterns', [$params[11], $params[12], $params[13]], 
 check('whitespace-anchored number patterns', [$params[14], $params[15], $params[16]], ['% 123%', "%\n123%", "%\t123%"]);
 check('attachment-page link patterns', [$params[17], $params[18]], ['%attachment\_id=123%', '%wp-att-123%']);
 check('the link conditions are the same two the helper builds alone', LikePatterns::attachmentLinkConditions('c.comment_content', $id)[1], [$params[17], $params[18]]);
+
+// The image-class needle is its own builder and is NOT part of idConditions() —
+// it is bound by the one column that wants markup needles without id ones, and
+// adding it here would widen the nineteen every id-carrying detector pays.
+[$classConditions, $classParams] = LikePatterns::imageClassConditions('c.comment_content', $id);
+check('the image-class builder is one condition', [count($classConditions), count($classParams)], [1, 1]);
+check('the image-class pattern is the editor class, wildcarded', $classParams[0], '%wp-image-123%');
+check('idConditions does not carry the image class', in_array('%wp-image-123%', $params, true), false);
 
 [$nameConditions, $nameParams] = LikePatterns::basenameConditions('p.post_content', $names);
 check('one condition per basename', count($nameConditions), count($names));
@@ -1067,15 +1087,18 @@ check('the commentmeta reference points at its comment', $commentMetaRefs[0]->ob
 check('a commentmeta value that decodes keeps its serialized verdict', $commentMetaRefs[1]->match, 'serialized');
 check('the commentmeta query admits a quoted id', $admits($commentMetaBound, $quotedShortcode), true);
 
-// --- comment_content, which now binds two id conditions of its own
+// --- comment_content, which now binds three markup conditions of its own
 //
 // It used to bind basenames alone, on the reasoning that only a URL can
 // reference a file in a comment. A link to the file's own attachment page is
 // the counter-example, and the ordinary one for a document: a support reply
 // points at the PDF instead of embedding it, and that comment kept nothing
-// alive. The id shapes stay out — a bare number in prose is noise, not a
-// reference — so the quoted-id condition is still deliberately absent here, and
-// that remains asserted rather than assumed.
+// alive. The editor's image class is the other: a comment carrying markup
+// pasted out of the editor carries `class="wp-image-123"` with it, which is not
+// a shape a commenter types but the one the editor writes. The id shapes stay
+// out — a bare number in prose is noise, not a reference — so the quoted-id
+// condition is still deliberately absent here, and that remains asserted rather
+// than assumed, together with the bare integer it would drag in.
 $inContent = new ReflectionMethod(CommentDetector::class, 'inContent');
 $inContent->setAccessible(true);
 
@@ -1083,6 +1106,10 @@ $commentLinkQuery = '<p>See <a href="https://example.test/?attachment_id=123">th
 $commentLinkRel = '<p><a href="/brochure/" rel="attachment wp-att-123">Brochure</a></p>';
 $commentLinkLonger = '<p><a href="/?attachment_id=1234">Another file</a></p>';
 $commentLinkPrefixed = '<p><a rel="attachment wp-att-9123">Another file</a></p>';
+$commentImageClass = '<p>Like this one:</p><figure><img class="alignnone size-large wp-image-123" src="/other.png"></figure>';
+$commentImageLonger = '<figure><img class="wp-image-1234" src="/other.png"></figure>';
+$commentBareId = '<p>Order 123 arrived, and 1230 is still open.</p>';
+$commentGalleryShortcode = '<p>[gallery ids="123,456"]</p>';
 
 $GLOBALS['wpdb']->rows = [
     (object) ['comment_ID' => '21', 'comment_approved' => '1', 'comment_content' => $commentLinkQuery],
@@ -1091,6 +1118,9 @@ $GLOBALS['wpdb']->rows = [
     (object) ['comment_ID' => '24', 'comment_approved' => '1', 'comment_content' => $commentLinkPrefixed],
     (object) ['comment_ID' => '25', 'comment_approved' => 'trash', 'comment_content' => $commentLinkQuery],
     (object) ['comment_ID' => '26', 'comment_approved' => '1', 'comment_content' => '<img src="/wp-content/uploads/2026/07/hero.jpg">'],
+    (object) ['comment_ID' => '27', 'comment_approved' => '1', 'comment_content' => $commentImageClass],
+    (object) ['comment_ID' => '28', 'comment_approved' => '1', 'comment_content' => $commentImageLonger],
+    (object) ['comment_ID' => '29', 'comment_approved' => '1', 'comment_content' => $commentBareId],
 ];
 
 $commentContentRefs = $inContent->invoke($commentDetector, $ctx);
@@ -1098,7 +1128,7 @@ $contentBound = $GLOBALS['wpdb']->lastParams;
 $GLOBALS['wpdb']->rows = [];
 $commentContentIds = array_map(static fn($r) => $r->objectId, $commentContentRefs);
 
-check('both link forms in a comment resolve, neither near-miss does', $commentContentIds, [21, 22, 25, 26]);
+check('both link forms and the image class resolve, no near-miss does', $commentContentIds, [21, 22, 25, 26, 27]);
 check('a linked attachment page in a comment is labelled as one', $commentContentRefs[0]->match, 'attachment-page');
 check('the rel marker resolves to the same label', $commentContentRefs[1]->match, 'attachment-page');
 check('a linked attachment page in a comment is confirmed', $commentContentRefs[0]->confidence, Reference::CONFIRMED);
@@ -1107,9 +1137,32 @@ check('the comment reference names the body column', $commentContentRefs[0]->det
 check('the comment reference points at its comment', $commentContentRefs[0]->objectId, 21);
 check('a link in a trashed comment stays possible', $commentContentRefs[2]->confidence, Reference::POSSIBLE);
 check('a file URL in a comment is still a URL match', $commentContentRefs[3]->match, 'url');
-check('comment_content binds basenames and the two link conditions', count($contentBound), count($names) + 2);
+check('comment_content binds basenames, the two link conditions and the image class', count($contentBound), count($names) + 3);
 check('comment_content admits both link forms', [$admits($contentBound, $commentLinkQuery), $admits($contentBound, $commentLinkRel)], [true, true]);
+check('comment_content admits the editor image class', $admits($contentBound, $commentImageClass), true);
 check('comment_content still never fetches a quoted id', $admits($contentBound, $quotedShortcode), false);
+
+// The image class in a comment body, which is what a paste out of the editor
+// produces — the id form Review A named, and the only one added here.
+check('an image class in a comment is labelled as content', $commentContentRefs[4]->match, 'wp-image-class');
+check('an image class in a comment is confirmed', $commentContentRefs[4]->confidence, Reference::CONFIRMED);
+check('an image class in a comment counts as used', $commentContentRefs[4]->countsAsUsed(), true);
+check('the image-class reference points at its comment', $commentContentRefs[4]->objectId, 27);
+check('comment_content admits a longer id in the class, having no right boundary', $admits($contentBound, $commentImageLonger), true);
+check('the verifier rejects the longer id in the class', in_array(28, $commentContentIds, true), false);
+
+// The line this task must not cross: a bare integer in prose is not a
+// reference. No condition on this column admits one, so the row is never
+// fetched — and were it fetched anyway (a basename that happens to appear in
+// the same comment), no verifier here answers a naked number either.
+check('comment_content never fetches a bare id in prose', $admits($contentBound, $commentBareId), false);
+check('a bare id in prose resolves to nothing even when handed over', in_array(29, $commentContentIds, true), false);
+
+// [gallery ids="…"] in a comment stays out, and this is the assertion behind
+// that decision rather than a silence: every needle that would fetch it is a
+// quoted-id shape, so the existing predicates cannot reach the row and catching
+// it would mean new SQL on this column.
+check('comment_content does not fetch a gallery shortcode', $admits($contentBound, $commentGalleryShortcode), false);
 
 // The boundaries, as the pair each needle earns: 'attachment_id=' has no
 // right-hand delimiter, so the longer id IS fetched and the verifier is what

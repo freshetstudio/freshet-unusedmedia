@@ -122,9 +122,10 @@ final class LikePatterns
      * OR'd LIKE conditions for a link to the attachment's own page:
      * ?attachment_id=123 in an href, and the rel/class marker wp-att-123 the
      * editor writes on the same anchor. Separate from idConditions() because
-     * comment_content binds these two and none of the id conditions — a comment
-     * body is prose, so the id shapes would be noise there, while the link is
-     * exactly how a comment references a document.
+     * comment_content binds these two — and the image class below them — and
+     * none of the id conditions: a comment body is prose, so the id shapes would
+     * be noise there, while the link is exactly how a comment references a
+     * document.
      *
      * Both needles are left-delimited only ('=' and '-'), so attachment_id=1234
      * is admitted for 123 and hasAttachmentIdQuery()/hasAttachmentLinkId() are
@@ -147,6 +148,31 @@ final class LikePatterns
                 '%' . $wpdb->esc_like('attachment_id=' . $id) . '%',
                 '%' . $wpdb->esc_like('wp-att-' . $id) . '%',
             ],
+        ];
+    }
+
+    /**
+     * The OR'd LIKE condition for the class the block editor writes on an image
+     * it has inserted: class="wp-image-123". Kept beside the link pair above and
+     * apart from idConditions() for the same reason — comment_content binds
+     * these three and none of the id shapes, because the id shapes are numbers
+     * and a comment body is prose, while this class is not something a commenter
+     * types at all: it arrives verbatim inside markup copied out of the editor.
+     *
+     * Left-delimited only ('-'), exactly like wp-att- above, so wp-image-1234 is
+     * admitted for 123 and hasImageClass() is what rejects it. The prefix is
+     * what keeps that cheap: a row can only be over-fetched if it already
+     * carries an editor image class.
+     *
+     * @return array{0: string[], 1: array<int, string>} [conditions, params]
+     */
+    public static function imageClassConditions(string $column, int $id): array
+    {
+        global $wpdb;
+
+        return [
+            ["{$column} LIKE %s"],
+            ['%' . $wpdb->esc_like('wp-image-' . $id) . '%'],
         ];
     }
 
@@ -310,6 +336,18 @@ final class LikePatterns
     public static function hasAttachmentPageLink(string $text, int $id): bool
     {
         return self::hasAttachmentIdQuery($text, $id) || self::hasAttachmentLinkId($text, $id);
+    }
+
+    /**
+     * The class the editor writes on an image it inserts — wp-image-123. The
+     * literal prefix anchors the left boundary and (?!\d) the right, so
+     * wp-image-1234 can never satisfy 123. Case-folded for the same reason as
+     * the link forms above: the LIKE that fetches it folds, and an <img>
+     * carrying the class in any case is still the file on a page.
+     */
+    public static function hasImageClass(string $text, int $id): bool
+    {
+        return (bool) preg_match('/wp-image-' . $id . '(?!\d)/i', $text);
     }
 
     /**

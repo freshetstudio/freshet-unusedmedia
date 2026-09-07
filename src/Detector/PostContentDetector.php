@@ -136,12 +136,11 @@ final class PostContentDetector implements DetectorInterface
             return 'url';
         }
 
-        // Case-folded like the LikePatterns markup predicates: 'wp-image-123'
-        // is one of this detector's own LIKE needles, and that fetch folds, so
-        // a case-sensitive verifier here drops a row the query admitted. The
-        // class is written by the editor in lower case, but an <img> carrying
-        // it in any case is still the file on a page.
-        if (preg_match('/wp-image-' . $id . '(?!\d)/i', $content)) {
+        // The editor's image class. One implementation, in LikePatterns with
+        // the other markup predicates, because comment_content reads the same
+        // form — a comment carries markup pasted out of the editor verbatim —
+        // and a second copy of the regex beside this one is drift.
+        if (LikePatterns::hasImageClass($content, $id)) {
             return 'wp-image-class';
         }
 

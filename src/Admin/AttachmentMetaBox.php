@@ -322,6 +322,7 @@ final class AttachmentMetaBox
             'serialized' => __('Stored data', 'freshet-unused-media'),
             'comma-list' => __('ID list', 'freshet-unused-media'),
             'attached' => __('Uploaded to', 'freshet-unused-media'),
+            'file-claim' => __('Shared file', 'freshet-unused-media'),
             default => __('ID value', 'freshet-unused-media'),
         };
     }

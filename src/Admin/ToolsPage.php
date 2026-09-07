@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace FreshetUnusedMedia\Admin;
 
 use FreshetUnusedMedia\License\LicenseInterface;
+use FreshetUnusedMedia\Scan\FileClaims;
 use FreshetUnusedMedia\Scan\FileSize;
 use FreshetUnusedMedia\Scan\OrphanSizes;
 use FreshetUnusedMedia\Scan\ResultFilters;
@@ -1046,10 +1047,22 @@ final class ToolsPage
      * Whether that holds is UploadGrace's to answer, not this method's: the
      * Media Library badge asks the same question one click away and the two
      * screens must not each have their own opinion (freshet-D97 (3)).
+     *
+     * A file kept because deleting it would take another entry's file with it
+     * reads the same way and for the same reason (freshet-153) — it is a file
+     * this plugin is protecting, and the number beside it would be a count of
+     * entries that would be damaged rather than of places it is used. Asked
+     * first, because it is the reason that does not expire.
      */
     private function renderReferencesCell(int $id): void
     {
         $data = $this->store->refs($id);
+
+        if (FileClaims::holdsAlone($data)) {
+            echo '<td>' . esc_html(FileClaims::heldBack()) . '</td>';
+
+            return;
+        }
 
         echo '<td>' . esc_html(UploadGrace::holdsAlone($id, $data)
             ? UploadGrace::heldBack()

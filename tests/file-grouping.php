@@ -342,7 +342,14 @@ function apply_filters(string $hook, mixed $value, mixed ...$rest): mixed
     }
 
     if ($hook === 'freshet_unusedmedia_is_used') {
-        return $GLOBALS['rows'][$rest[1]->id]['used'] ?? false;
+        // The fixture's `used` flag stands in for the content references no
+        // detector is here to find — and it stands in for the filter itself,
+        // which a site really does use to overrule the detectors. So it wins
+        // by default, and a case about what a DETECTOR decides opts out with
+        // $GLOBALS['detectorsDecide'] rather than reading its own flag back.
+        $flag = $GLOBALS['rows'][$rest[1]->id]['used'] ?? false;
+
+        return ($GLOBALS['detectorsDecide'] ?? false) ? ($flag || $value) : $flag;
     }
 
     return $value;
@@ -469,21 +476,36 @@ $GLOBALS['wpdb'] = new class {
 
         // The metadata of those same rows, joined to the file it describes —
         // the mirror half: a neighbour that *names* the file being unlinked.
+        //
+        // Read a page at a time, so the cursor and the limit are modelled here
+        // too: a directory is not bounded by anything, and the plugin must not
+        // be allowed to pass a test by holding one in memory whole. The row id
+        // stands in for meta_id, which is all the paging needs of it.
         if (str_contains($query['sql'], 'fc_file')) {
             if ($this->refuse()) {
                 return [];
             }
 
-            return $this->inDirectory($query, static function (int $id, array $row): array {
+            $params = $query['params'];
+            $limit = (int) array_pop($params);
+            $after = (int) array_pop($params);
+
+            $rows = $this->inDirectory($query, static function (int $id, array $row): array {
                 $meta = wp_get_attachment_metadata($id);
 
                 return $meta === false ? [] : [[
+                    'meta_id' => (string) $id,
                     'post_id' => (string) $id,
                     'meta_key' => '_wp_attachment_metadata',
                     'meta_value' => serialize($meta),
                     'fc_file' => $row['file'],
                 ]];
-            });
+            }, rtrim(str_replace('\\', '', (string) end($params)), '%'));
+
+            $rows = array_values(array_filter($rows, static fn(array $r): bool => (int) $r['meta_id'] > $after));
+            usort($rows, static fn(array $a, array $b): int => (int) $a['meta_id'] <=> (int) $b['meta_id']);
+
+            return array_slice($rows, 0, $limit);
         }
 
         // Every attachment row standing on any of these paths — the sibling
@@ -549,9 +571,9 @@ $GLOBALS['wpdb'] = new class {
      * @param callable(int, array<string, mixed>): array<int, array<string, string>> $shape
      * @return array<int, array<string, string>>
      */
-    private function inDirectory(array $query, callable $shape): array
+    private function inDirectory(array $query, callable $shape, ?string $prefix = null): array
     {
-        $prefix = rtrim(str_replace('\\', '', (string) end($query['params'])), '%');
+        $prefix ??= rtrim(str_replace('\\', '', (string) end($query['params'])), '%');
         $root = str_contains($query['sql'], 'NOT LIKE');
         $found = [];
 
@@ -597,6 +619,7 @@ foreach ([
     'src/Scan/OrphanSizes.php',
     'src/Scan/Scanner.php',
     'src/Detector/DetectorInterface.php',
+    'src/Detector/FileClaimDetector.php',
     'src/Detector/LikePatterns.php',
     'src/Detector/AttachedDetector.php',
     'src/Detector/CommentDetector.php',
@@ -617,6 +640,7 @@ foreach ([
 use FreshetUnusedMedia\Admin\DeleteController;
 use FreshetUnusedMedia\Admin\MediaColumn;
 use FreshetUnusedMedia\Admin\StatusBadge;
+use FreshetUnusedMedia\Detector\FileClaimDetector;
 use FreshetUnusedMedia\Detector\LikePatterns;
 use FreshetUnusedMedia\Detector\RecentUploadDetector;
 use FreshetUnusedMedia\Scan\AttachmentContext;
@@ -679,11 +703,13 @@ function library(array $rows): void
     $GLOBALS['wpdb']->last_error = '';
 
     // A new library is a new request: the sibling groups memoised for the last
-    // fixture describe rows that no longer exist, and so does the directory
-    // listing read for the last fixture's basenames.
+    // fixture describe rows that no longer exist, and so do the directory
+    // listing read for the last fixture's basenames and the claims index read
+    // for the directory it was in.
     FileGroups::flush();
     SizeSiblings::flush();
     OrphanSizes::flush();
+    FileClaims::flush();
 
     foreach ($rows as $id => $row) {
         $GLOBALS['rows'][$id] = [
@@ -1825,6 +1851,139 @@ check('one held row, one sentence', substr_count($badge200, 'Held back'), 1);
 check('the row the grace holds still says the grace', str_contains(StatusBadge::forRow(100, $store), 'Held back — uploaded in the last 24 hours'), true);
 
 unset($GLOBALS['detectors']);
+
+// ------------------- the same file, decided at the scan (freshet-153)
+//
+// The guard above keeps the file, and that is where this stopped: the listing
+// went on offering 1926, the user selected it, and the refusal reached the
+// screen as a "skipped … found in use on re-check" tally with no reason on the
+// row. One file on disk, and the scan disagreeing with itself out loud about
+// it — 1905 used, 1926 unused, because the two key on different paths.
+//
+// FileClaimDetector asks the delete path's question at scan time, of the same
+// class, so a claimed file never gets on the list. Every case below runs the
+// real detector through the real Scanner: what is under test is the verdict a
+// scan reaches, not a hand-written meta payload.
+
+$GLOBALS['detectors'] = [new FileClaimDetector()];
+$GLOBALS['detectorsDecide'] = true;
+
+library([
+    1905 => ['file' => '2019/07/canon-300x225-300x225.jpg', 'used' => true],
+    1926 => ['file' => '2019/07/canon-300x225.jpg', 'sizes' => ['medium' => 'canon-300x225-300x225.jpg']],
+    1906 => ['file' => '2019/07/donner-225x300-225x300.jpg', 'used' => true],
+    1927 => ['file' => '2019/07/donner-225x300.jpg', 'sizes' => ['medium' => 'donner-225x300-225x300.jpg']],
+]);
+
+$verdict = static fn(int $id): string => $scan($id)['status'];
+
+check('the pair no longer disagrees about one file', [$verdict(1905), $verdict(1926)], [ResultStore::STATUS_USED, ResultStore::STATUS_USED]);
+check('and neither does the second pair', [$verdict(1906), $verdict(1927)], [ResultStore::STATUS_USED, ResultStore::STATUS_USED]);
+
+$refs = $scan(1926)['refs'];
+
+check('the held row carries exactly one piece of evidence', count($refs), 1);
+check('it is a claim rather than a reference to this row', $refs[0]->match, FileClaims::MATCH);
+check('it names the entry that would lose a file', $refs[0]->objectId, 1905);
+check('and the file it would lose', $refs[0]->detail, '2019/07/canon-300x225-300x225.jpg');
+check('a claim counts as used, or the listing would go on offering it', $refs[0]->countsAsUsed(), true);
+
+$store = new ResultStore();
+$badge1926 = StatusBadge::forRow(1926, $store);
+
+check('a claim is the only thing holding the file', FileClaims::holdsAlone($store->refs(1926)), true);
+check('so the row says why', str_contains($badge1926, 'Held back — deleting it would remove a file another library entry uses'), true);
+check('rather than a count of places it is used', str_contains($badge1926, 'Used ('), false);
+check('one held row, one sentence', substr_count($badge1926, 'Held back'), 1);
+
+// The delete path still refuses it. This narrows what reaches that guard; it
+// does not replace it — the library can change between the scan and the click.
+$result = $deleter()->deleteVerified([1926]);
+
+check('the guard from freshet-142 is untouched', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0, 'remaining' => []]);
+check('and the file the other entry stands on survives', onDisk('2019/07/canon-300x225-300x225.jpg'), true);
+
+// Stored refs are capped, and a truncated list cannot say what the whole list
+// would have said. Same reading as the grace: believing one is how a used file
+// gets called held.
+check('a truncated list is not claim-only', FileClaims::holdsAlone(['count' => 4, 'refs' => $refs]), false);
+check('and neither is a list with a real reference in it', FileClaims::holdsAlone(['count' => 2, 'refs' => [$refs[0], new Reference(
+    detector: 'post-content',
+    objectType: 'post',
+    objectId: 12,
+    detail: 'post_content',
+    match: 'url',
+    confidence: Reference::CONFIRMED,
+)]]), false);
+
+// --- and the boundaries. A detector that holds every file back protects
+// nothing: what it must refuse is this collision, not the neighbourhood.
+
+library([
+    100 => ['file' => '2027/04/hero-scaled.jpg', 'original' => 'hero.jpg', 'sizes' => ['medium' => 'hero-300x200.jpg']],
+    200 => ['file' => '2027/04/unrelated.jpg', 'used' => true],
+]);
+
+check('a file nothing else claims still scans unused', $verdict(100), ResultStore::STATUS_UNUSED);
+check('and holds nothing back on its row', StatusBadge::forRow(100, new ResultStore()), StatusBadge::render(ResultStore::STATUS_UNUSED));
+
+// The claim is asked of the whole group, never of one row. claimants() excludes
+// the rows it is asked about, so a lone row would report its own siblings —
+// every duplicated upload claiming its twin, and a library of files nothing
+// could ever delete.
+
+library([
+    100 => ['file' => '2027/05/logo.png'],
+    200 => ['file' => '2027/05/logo.png'],
+]);
+
+check('a duplicate group does not claim itself into use', $verdict(100), ResultStore::STATUS_UNUSED);
+check('from either of its rows', $verdict(200), ResultStore::STATUS_UNUSED);
+
+// A read that did not answer is not an answer of "nobody else needs this file".
+// The scan reaches no verdict at all rather than reaching "unused" (freshet-141).
+
+library([
+    1905 => ['file' => '2019/07/canon-300x225-300x225.jpg', 'used' => true],
+    1926 => ['file' => '2019/07/canon-300x225.jpg', 'sizes' => ['medium' => 'canon-300x225-300x225.jpg']],
+]);
+
+$GLOBALS['dbError'] = true;
+
+check('a scan whose claims read failed records no verdict', $scan(1926)['status'], Scanner::STATUS_ERROR);
+check('and stores none', isset($GLOBALS['meta'][1926][ResultStore::META_STATUS]), false);
+
+$GLOBALS['dbError'] = false;
+
+// --- what makes asking this on every scanned row affordable: the two reads are
+// per directory, and a directory is read once. A month of uploads shares one,
+// so the cost of the detector across a batch is two queries, not two per file.
+
+library([
+    1905 => ['file' => '2019/07/canon-300x225-300x225.jpg', 'used' => true],
+    1926 => ['file' => '2019/07/canon-300x225.jpg', 'sizes' => ['medium' => 'canon-300x225-300x225.jpg']],
+    1906 => ['file' => '2019/07/donner-225x300-225x300.jpg', 'used' => true],
+    1927 => ['file' => '2019/07/donner-225x300.jpg', 'sizes' => ['medium' => 'donner-225x300-225x300.jpg']],
+]);
+
+$before = count($GLOBALS['wpdb']->queries);
+FileClaims::claimants([1926]);
+$first = count($GLOBALS['wpdb']->queries) - $before;
+
+FileClaims::claimants([1927]);
+$second = count($GLOBALS['wpdb']->queries) - $before - $first;
+
+check('the first claim in a directory reads it twice', $first, 2);
+check('every claim after that in the same directory reads nothing', $second, 0);
+
+FileClaims::flush();
+$before = count($GLOBALS['wpdb']->queries);
+FileClaims::claimants([1926]);
+
+check('and a flush makes the next one read again', count($GLOBALS['wpdb']->queries) - $before, 2);
+check('a memo that was not flushed is still the right answer', FileClaims::claimants([1926]), ['2019/07/canon-300x225-300x225.jpg' => 1905]);
+
+unset($GLOBALS['detectors'], $GLOBALS['detectorsDecide']);
 
 // The filter above the badges reads the same grouped set they do. A meta_query
 // on the row's own status is the disagreement, not the plumbing.

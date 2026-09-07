@@ -44,6 +44,15 @@ defined('ABSPATH') || exit;
  * take a file that some attachment outside them still stands on or still
  * names?** If it would, the file is not this plugin's to delete.
  *
+ * **And the scan asks the same question, of this same class** (freshet-153).
+ * The guard alone left the two halves of the plugin disagreeing out loud: the
+ * listing went on offering a file the delete path would always refuse, and the
+ * refusal reached the screen as a "skipped" tally with no reason on the row.
+ * FileClaimDetector asks claimants() during the scan, so a claimed file never
+ * reaches the unused list and says on its own row why. That narrows what the
+ * delete path sees; it does not replace the guard, which still runs against a
+ * library that changed after the scan.
+ *
  * **Directory-scoped, because core builds every derivative path in the
  * attachment's own directory.** `wp_delete_attachment_files()` composes each
  * size, the original and every companion as `dirname($file) . '/' . $name`, so
@@ -65,6 +74,46 @@ final class FileClaims
 
     /** Core's record of the generation an in-admin image edit superseded. */
     private const META_BACKUP = '_wp_attachment_backup_sizes';
+
+    /**
+     * The match value of the evidence a claim produces.
+     *
+     * A claim is a reason a file is kept, so it reaches a screen the way every
+     * other reason does — as a Reference, resolved to a label at render time.
+     * FileClaimDetector writes it; holdsAlone() reads it back.
+     */
+    public const MATCH = 'file-claim';
+
+    /**
+     * Metadata rows read per query while a directory's index is built.
+     *
+     * The bound is on memory rather than on round trips: a blob for an image
+     * with two dozen registered sizes is a few kilobytes, and a directory is
+     * not bounded by anything. See eachMetadataIn().
+     */
+    private const METADATA_PAGE = 500;
+
+    /**
+     * The directory whose two reads are remembered. Exactly one, ever.
+     *
+     * Nullable rather than '' as the empty marker, because '' is a real
+     * directory here — a library whose "organize by date" is off.
+     */
+    private static ?string $dir = null;
+
+    /**
+     * That directory's two relations, path => the rows claiming it, ascending.
+     *
+     * `attached` is the rows whose own `_wp_attached_file` is that path;
+     * `named` is the rows whose metadata names it as one of their files. Both
+     * are derived once and the metadata blobs they were built from are dropped
+     * — the blobs are the part that grows with the library rather than with
+     * the directory, and a request that kept them has kept the wrong thing
+     * (the freshet-124 shape).
+     *
+     * @var array{attached: array<string, int[]>, named: array<string, int[]>}
+     */
+    private static array $index = ['attached' => [], 'named' => []];
 
     /**
      * Metadata keys naming a single companion file beside the original.
@@ -118,34 +167,148 @@ final class FileClaims
         $claimed = [];
 
         foreach (array_keys($dirs) as $dir) {
+            $index = self::index($dir);
+
             // The rows in this directory, and the path each one stands on. This
             // is the half that answers both measured collisions: in each of
             // them the file about to go is another attachment's own file.
-            foreach (self::attachedIn($dir) as $rowId => $file) {
-                if (!isset($group[$rowId]) && isset($paths[$file]) && !isset($claimed[$file])) {
-                    $claimed[$file] = $rowId;
-                }
-            }
-
-            // And the mirror of it, which is the same collision with the other
-            // row chosen for deletion: a file this deletion unlinks that a
-            // neighbour's metadata names as one of *its* sizes, originals or
+            //
+            // And then the mirror of it, which is the same collision with the
+            // other row chosen for deletion: a file this deletion unlinks that
+            // a neighbour's metadata names as one of *its* sizes, originals or
             // superseded generations. Without this half, deleting the row that
             // owns the shared file destroys the row that merely names it.
-            foreach (self::metadataIn($dir) as $rowId => $row) {
-                if (isset($group[$rowId])) {
-                    continue;
-                }
+            //
+            // Standing on a path is checked before naming it, so a file with
+            // both kinds of claimant is reported against the row that would
+            // lose its own file.
+            foreach (['attached', 'named'] as $relation) {
+                foreach ($index[$relation] as $file => $rowIds) {
+                    if (!isset($paths[$file]) || isset($claimed[$file])) {
+                        continue;
+                    }
 
-                foreach (array_keys(self::claimsOf($row['file'], $row['meta'], $row['backup'])) as $claim) {
-                    if (isset($paths[$claim]) && !isset($claimed[$claim])) {
-                        $claimed[$claim] = $rowId;
+                    foreach ($rowIds as $rowId) {
+                        if (!isset($group[$rowId])) {
+                            $claimed[$file] = $rowId;
+
+                            break;
+                        }
                     }
                 }
             }
         }
 
         return $claimed;
+    }
+
+    /**
+     * Is a claim the only thing keeping this file out of the unused pool?
+     *
+     * The peer of UploadGrace::holdsAlone(), and the same three-part test minus
+     * the clock: a claim is not time-bound the way the upload grace is, so
+     * there is nothing here to re-read at render (freshet-D98 bites on the
+     * grace because its sentence quotes a window that expires).
+     *
+     * Nothing truncated is the part that matters. Refs are capped at storage,
+     * so a file with more references than were kept cannot be claim-only
+     * however the kept ones read — believing a truncated list is how a used
+     * file gets called held.
+     *
+     * @param array{count: int, refs: Reference[]} $data exactly what ResultStore::refs() returns
+     */
+    public static function holdsAlone(array $data): bool
+    {
+        if ($data['refs'] === [] || $data['count'] !== count($data['refs'])) {
+            return false;
+        }
+
+        foreach ($data['refs'] as $ref) {
+            if ($ref->match !== self::MATCH) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * How a file kept by a claim reads wherever one file is named — the
+     * listing cell and the Media Library badge.
+     *
+     * The settled phrasing for a file this plugin is protecting rather than
+     * missing (freshet-D95): "Held back — <why>", em dash, lower case, no
+     * alarm. UploadGrace::heldBack() and FileGroups::heldBackReason() are its
+     * siblings; a user meets one sentence pattern rather than three
+     * inventions.
+     *
+     * It says what a sibling hold does not: the entry that would lose
+     * something is on a *different* file, and what it shares with this one is
+     * a generated size or an original that core would unlink by name.
+     */
+    public static function heldBack(): string
+    {
+        return __('Held back — deleting it would remove a file another library entry uses', 'freshet-unused-media');
+    }
+
+    /**
+     * Drop the remembered directory. Called at every batch boundary, and by
+     * the delete loop, which removes rows the index describes.
+     */
+    public static function flush(): void
+    {
+        self::$dir = null;
+        self::$index = ['attached' => [], 'named' => []];
+    }
+
+    /**
+     * One directory's two relations, read once.
+     *
+     * Both queries are per directory rather than per attachment, so the memo is
+     * what makes asking this on every scanned row affordable: a month's worth
+     * of uploads shares one directory, and reads it once per batch instead of
+     * once per file. One directory is remembered at a time, for the reason
+     * SizeSiblings remembers one listing at a time — the structure grows with
+     * the library rather than with the batch.
+     *
+     * @return array{attached: array<string, int[]>, named: array<string, int[]>}
+     * @throws QueryFailed
+     */
+    private static function index(string $dir): array
+    {
+        if (self::$dir === $dir) {
+            return self::$index;
+        }
+
+        $index = ['attached' => [], 'named' => []];
+
+        foreach (self::attachedIn($dir) as $rowId => $file) {
+            $index['attached'][$file][$rowId] = true;
+        }
+
+        self::eachMetadataIn($dir, static function (int $rowId, string $file, string $key, mixed $value) use (&$index): void {
+            $backup = $key === self::META_BACKUP;
+
+            foreach (array_keys(self::claimsOf($file, $backup ? null : $value, $backup ? $value : null)) as $claim) {
+                $index['named'][$claim][$rowId] = true;
+            }
+        });
+
+        // Keyed by row while it is built so a row named twice — its two meta
+        // keys, or two pages — is one claimant; ascending afterwards so which
+        // claimant a shared path is reported against does not depend on the
+        // order the database happened to return.
+        foreach (['attached', 'named'] as $relation) {
+            foreach ($index[$relation] as $file => $rowIds) {
+                ksort($rowIds);
+                $index[$relation][$file] = array_keys($rowIds);
+            }
+        }
+
+        self::$dir = $dir;
+        self::$index = $index;
+
+        return $index;
     }
 
     /**
@@ -322,16 +485,29 @@ final class FileClaims
     }
 
     /**
-     * The metadata of the rows whose own file is in this directory, joined to
-     * that file so each blob is read against the directory it describes.
+     * Every metadata blob belonging to a row whose own file is in this
+     * directory, handed to $fold one at a time and then let go.
      *
-     * One query for the whole directory rather than `get_post_meta()` per row:
-     * the per-row shape is what ran a scan out of memory once already.
+     * One query per page rather than `get_post_meta()` per row — the per-row
+     * shape is what ran a scan out of memory once already — but deliberately
+     * **not** one query for the whole directory. A directory is not bounded by
+     * anything: a real library carries a flat 4,535-row upload folder whose
+     * blobs come to **137 MB read in one go**, which is past a stock PHP
+     * memory limit on its own. Paged and folded, the same directory costs one
+     * page. It was one query before this was on the scan path, where it ran
+     * only for a directory something was being deleted from; now every scanned
+     * row asks, so an unbounded read here is a scan that dies on a library it
+     * should merely be slow on (the freshet-124 shape).
      *
-     * @return array<int, array{file: string, meta: mixed, backup: mixed}>
+     * A row's two keys may land in different pages, and that needs no handling:
+     * $fold is given one key at a time and every path it yields goes into the
+     * same index, so the union is the same however the pages fall.
+     *
+     * @param callable(int, string, string, mixed): void $fold rowId, its own
+     *        path, the meta key, the unserialized value.
      * @throws QueryFailed
      */
-    private static function metadataIn(string $dir): array
+    private static function eachMetadataIn(string $dir, callable $fold): void
     {
         global $wpdb;
 
@@ -339,42 +515,59 @@ final class FileClaims
             ? ['f.meta_value NOT LIKE %s', '%/%']
             : ['f.meta_value LIKE %s', $wpdb->esc_like($dir . '/') . '%'];
 
-        $sql = $wpdb->prepare(
-            "SELECT m.post_id, m.meta_key, m.meta_value, f.meta_value AS fc_file FROM {$wpdb->postmeta} m"
-            . " INNER JOIN {$wpdb->postmeta} f ON f.post_id = m.post_id AND f.meta_key = %s"
-            . " WHERE m.meta_key IN (%s, %s) AND {$where[0]}",
-            FileGroups::META_FILE,
-            self::META_DATA,
-            self::META_BACKUP,
-            $where[1]
-        );
+        $after = 0;
 
-        // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery -- prepared above; one read per directory, and only when something is being deleted from it.
-        $rows = Db::rows('file claims', $wpdb->get_results($sql, ARRAY_A));
+        while (true) {
+            $sql = $wpdb->prepare(
+                "SELECT m.meta_id, m.post_id, m.meta_key, m.meta_value, f.meta_value AS fc_file FROM {$wpdb->postmeta} m"
+                . " INNER JOIN {$wpdb->postmeta} f ON f.post_id = m.post_id AND f.meta_key = %s"
+                . " WHERE m.meta_key IN (%s, %s) AND {$where[0]} AND m.meta_id > %d"
+                . ' ORDER BY m.meta_id ASC LIMIT %d',
+                FileGroups::META_FILE,
+                self::META_DATA,
+                self::META_BACKUP,
+                $where[1],
+                $after,
+                self::METADATA_PAGE
+            );
 
-        $found = [];
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery -- prepared above; one read per page of one directory, and only for a directory being scanned or deleted from.
+            $rows = Db::rows('file claims', $wpdb->get_results($sql, ARRAY_A));
 
-        foreach ($rows as $row) {
-            if (!is_array($row)) {
-                continue;
+            if ($rows === []) {
+                return;
             }
 
-            $path = self::normalise((string) ($row['fc_file'] ?? ''));
+            $cursor = $after;
 
-            if ($path === '' || self::directoryOf($path) !== $dir) {
-                continue;
+            foreach ($rows as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+
+                $after = max($after, (int) ($row['meta_id'] ?? 0));
+                $path = self::normalise((string) ($row['fc_file'] ?? ''));
+
+                if ($path === '' || self::directoryOf($path) !== $dir) {
+                    continue;
+                }
+
+                $fold(
+                    (int) ($row['post_id'] ?? 0),
+                    $path,
+                    (string) ($row['meta_key'] ?? ''),
+                    maybe_unserialize((string) ($row['meta_value'] ?? ''))
+                );
             }
 
-            $rowId = (int) ($row['post_id'] ?? 0);
-            $found[$rowId] ??= ['file' => $path, 'meta' => null, 'backup' => null];
-
-            $value = maybe_unserialize((string) ($row['meta_value'] ?? ''));
-            $key = (string) ($row['meta_key'] ?? '') === self::META_BACKUP ? 'backup' : 'meta';
-
-            $found[$rowId][$key] = $value;
+            // A full page that did not move the cursor would be read again for
+            // ever. It takes a `meta_id` that is missing or zero to happen, so
+            // it should not — and a scan that never ends is not the failure to
+            // find out on.
+            if (count($rows) < self::METADATA_PAGE || $after <= $cursor) {
+                return;
+            }
         }
-
-        return $found;
     }
 
     /** One row's stored path, normalised the way every key here is. */

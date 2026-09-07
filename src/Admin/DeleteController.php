@@ -287,8 +287,11 @@ final class DeleteController
 
             // The rows just removed are a whole sibling group, so anything this
             // request remembered about the library's grouping now describes rows
-            // that are gone. A stale sibling set is a wrong verdict.
+            // that are gone. A stale sibling set is a wrong verdict, and a stale
+            // claims index is one too — it is read from the same rows, and the
+            // deletion just took a path out of the directory it describes.
             FileGroups::flush();
+            FileClaims::flush();
 
             if (!$removed) {
                 // Some row survived, so the file may still be on disk. Clearing

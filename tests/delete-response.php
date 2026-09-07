@@ -442,6 +442,7 @@ foreach ([
     'src/Scan/SizeSiblings.php',
     'src/Scan/Scanner.php',
     'src/Detector/DetectorInterface.php',
+    'src/Detector/FileClaimDetector.php',
     'src/Detector/LikePatterns.php',
     'src/Detector/AttachedDetector.php',
     'src/Detector/CommentDetector.php',

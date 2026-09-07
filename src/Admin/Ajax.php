@@ -6,6 +6,8 @@ namespace FreshetUnusedMedia\Admin;
 
 use FreshetUnusedMedia\Scan\Db;
 use FreshetUnusedMedia\Scan\DeleteBudget;
+use FreshetUnusedMedia\Scan\FileClaims;
+use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\OrphanSizes;
 use FreshetUnusedMedia\Scan\QueryFailed;
 use FreshetUnusedMedia\Scan\ResultFilters;
@@ -147,6 +149,11 @@ final class Ajax
             ]);
         }
 
+        // One query for the whole batch's sibling groups instead of one per
+        // file: FileClaimDetector asks for them, and an unprimed lookup scans
+        // every attached-file row in the library.
+        FileGroups::prime($ids);
+
         // Time-box the batch: a request that hits max_execution_time never
         // advances the cursor, and the scan would retry the same IDs forever.
         // Stopping early keeps every batch making progress on large libraries.
@@ -180,6 +187,7 @@ final class Ajax
         // thing (freshet-124).
         SizeSiblings::flush();
         OrphanSizes::flush();
+        FileClaims::flush();
 
         $state = $this->state->advance($last, $processed, $errors, SizeSiblings::takeDirectoryReads());
 

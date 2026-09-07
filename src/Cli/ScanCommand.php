@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace FreshetUnusedMedia\Cli;
 
 use FreshetUnusedMedia\License\LicenseInterface;
+use FreshetUnusedMedia\Scan\FileClaims;
 use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\FileSize;
 use FreshetUnusedMedia\Scan\OrphanSizes;
@@ -129,6 +130,11 @@ final class ScanCommand
             if ($ids === []) {
                 break;
             }
+
+            // One query for the whole chunk's sibling groups instead of one
+            // per file: FileClaimDetector asks for them, and the lookup is a
+            // scan of every attached-file row when it is not primed.
+            FileGroups::prime($ids);
 
             $processed = 0;
             $errors = 0;
@@ -353,18 +359,20 @@ final class ScanCommand
         global $wpdb, $wp_object_cache;
 
         // Membership resolved for a page of rows, and derived from rows that are
-        // about to be evicted. The scan itself never primes it — no detector
-        // touches FileGroups — but a site-registered detector could, and a memo
-        // outliving its rows is how a wrong verdict happens. It is also the one
-        // structure here that would otherwise grow for the whole run.
+        // about to be evicted. The scan primes it per chunk for
+        // FileClaimDetector, and a memo outliving its rows is how a wrong
+        // verdict happens. It is also one of the structures here that would
+        // otherwise grow for the whole run.
         FileGroups::flush();
 
-        // The directory listing read for the basenames, and the record of which
-        // directories this run has already examined. Both grow with the library
+        // The directory listing read for the basenames, the record of which
+        // directories this run has already examined, and the claims index read
+        // for the directory the last chunk was in. All grow with the library
         // rather than with the batch, and this command is the one caller that
         // runs long enough for that to matter.
         SizeSiblings::flush();
         OrphanSizes::flush();
+        FileClaims::flush();
 
         // SAVEQUERIES keeps every query of the run, which on a six-figure scan is
         // the larger half of the problem.

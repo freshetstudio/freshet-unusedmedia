@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace FreshetUnusedMedia\Admin;
 
+use FreshetUnusedMedia\Scan\FileClaims;
 use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\QueryFailed;
 use FreshetUnusedMedia\Scan\ResultStore;
@@ -30,11 +31,13 @@ final class StatusBadge
      * A held-back row says why instead of naming a verdict it did not reach on
      * its own, in the settled sentence pattern (freshet-D95).
      *
-     * Three things can hold one row, and it says **one** sentence. The order is
-     * the group's reasons first, the upload grace last, because the group's
-     * reasons are the durable ones: a sibling that uses the file, or a copy in
-     * the trash, still holds it tomorrow, while the grace expires by the clock.
-     * Naming the reason that outlives the other is the one a person can act on.
+     * Four things can hold one row, and it says **one** sentence. The order is
+     * the group's reasons first, then a claim from outside the group, and the
+     * upload grace last, because the first three are the durable ones: a
+     * sibling that uses the file, a copy in the trash, or another entry that
+     * would lose a file with this one, all still hold it tomorrow, while the
+     * grace expires by the clock. Naming the reason that outlives the others is
+     * the one a person can act on.
      *
      * Escaped HTML.
      */
@@ -60,6 +63,14 @@ final class StatusBadge
         }
 
         $refs = $store->refs($attachmentId);
+
+        // A file kept because deleting it would take another entry's file with
+        // it is not used by anything either, and it is the durable reason of
+        // the two — it holds until one of the two entries goes, where the grace
+        // expires by the clock. Asked first for that reason (freshet-153).
+        if (FileClaims::holdsAlone($refs)) {
+            return self::heldBack(FileClaims::heldBack());
+        }
 
         // "Used (1 reference)" for a file the plugin is holding back for a day
         // is the number someone goes hunting behind (freshet-D92 (4)): the row

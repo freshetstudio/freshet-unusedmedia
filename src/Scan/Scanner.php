@@ -7,6 +7,7 @@ namespace FreshetUnusedMedia\Scan;
 use FreshetUnusedMedia\Detector\AttachedDetector;
 use FreshetUnusedMedia\Detector\CommentDetector;
 use FreshetUnusedMedia\Detector\DetectorInterface;
+use FreshetUnusedMedia\Detector\FileClaimDetector;
 use FreshetUnusedMedia\Detector\OptionsDetector;
 use FreshetUnusedMedia\Detector\PostContentDetector;
 use FreshetUnusedMedia\Detector\PostmetaDetector;
@@ -76,6 +77,7 @@ final class Scanner
             new CommentDetector(),
             new RecentUploadDetector(),
             new AttachedDetector(),
+            new FileClaimDetector(),
         ];
 
         /** @var DetectorInterface[] $detectors */

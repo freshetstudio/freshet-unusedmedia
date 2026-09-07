@@ -779,6 +779,14 @@ final class ToolsPage
 
         echo '</div>';
 
+        // Directly under the button that starts the run, not at the foot of the
+        // page. A delete-all is minutes long and the only other thing it changes
+        // in view is the button greying out, so a bar a full page of rows below
+        // it is a screen that reads as having stopped responding (freshet-159).
+        if ($list['total'] > 0) {
+            $this->renderProgress();
+        }
+
         if (!(defined('MEDIA_TRASH') && MEDIA_TRASH)) {
             echo '<p class="freshet-unusedmedia-warning">' . esc_html(sprintf(
                 /* translators: 1: MEDIA_TRASH constant name, 2: the PHP line to add to wp-config.php */
@@ -846,8 +854,6 @@ final class ToolsPage
         $this->renderPagination(self::TAB_UNUSED, 'unused_page', $page, $list['total']);
 
         $this->renderDeleteSelectedButton($filters);
-
-        $this->renderProgress();
 
         echo '</form>';
         echo '</div>';

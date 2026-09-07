@@ -41,8 +41,14 @@ final class Assets
                 /* translators: 1: scanned count, 2: total count, 3: number of files the database would not answer for */
                 'scanErrors' => __('%1$s / %2$s — %3$s could not be checked (database error).', 'freshet-unused-media'),
                 'deleting' => __('Deleting…', 'freshet-unused-media'),
-                /* translators: 1: deleted count, 2: skipped count */
-                'deleteDone' => __('Done: %1$s deleted, %2$s skipped (found in use on re-check).', 'freshet-unused-media'),
+                /* translators: 1: files decided so far, 2: total files in the set, 3: deleted count, 4: skipped count, 5: failed count */
+                'deleteProgress' => __('%1$s / %2$s — %3$s deleted, %4$s skipped, %5$s failed', 'freshet-unused-media'),
+                /* translators: 1: deleted count, 2: skipped count, 3: failed count */
+                'deleteDone' => __('Done: %1$s deleted, %2$s skipped (found in use on re-check), %3$s failed.', 'freshet-unused-media'),
+                /* translators: 1: deleted count, 2: skipped count, 3: failed count */
+                'deleteStopped' => __('Stopped before finishing: %1$s deleted, %2$s skipped (found in use on re-check), %3$s failed.', 'freshet-unused-media'),
+                /* translators: %s: number of files the run never reached */
+                'deleteNotReached' => __('Not reached: %s — untouched and still listed.', 'freshet-unused-media'),
             ],
         ];
 

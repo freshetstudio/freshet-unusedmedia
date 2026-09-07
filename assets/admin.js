@@ -172,6 +172,57 @@
     var deleteFilters = '';
     var deleteCursor = 0;
 
+    // The size of that same set, read off the button's label. It is the
+    // denominator of the bar: every batch decides some of these files, so the
+    // client already holds both halves of a real percentage and the server
+    // needs no extra field for it.
+    var deleteTotal = 0;
+
+    /** Files this run has an answer for — deleted, skipped or failed. */
+    function deleteDecided() {
+        return totals.deleted + totals.skipped + totals.failed;
+    }
+
+    /**
+     * The files the run never got an answer for. Zero on an ordinary completed
+     * pass; non-zero when the loop stopped early, which is the one thing the
+     * counts alone cannot say. Floored, because the pool can shrink under a
+     * long run and a negative remainder is not a report.
+     */
+    function deleteNotReached() {
+        return Math.max(0, deleteTotal - deleteDecided());
+    }
+
+    /**
+     * The completion sentence, from whichever opening the run earned. Parity
+     * with the checkbox form's admin notice: the same three counts, and the
+     * same "untouched and still listed" line for what was left — a file the
+     * delete path could not remove is never silently absent from it.
+     */
+    function deleteReport(template) {
+        var message = template
+            .replace('%1$s', String(totals.deleted))
+            .replace('%2$s', String(totals.skipped))
+            .replace('%3$s', String(totals.failed));
+
+        var left = deleteNotReached();
+
+        if (left > 0) {
+            message += ' ' + config.i18n.deleteNotReached.replace('%s', String(left));
+        }
+
+        return message;
+    }
+
+    function deleteProgress() {
+        updateProgress(deleteDecided(), deleteTotal, config.i18n.deleteProgress
+            .replace('%1$s', String(deleteDecided()))
+            .replace('%2$s', String(deleteTotal))
+            .replace('%3$s', String(totals.deleted))
+            .replace('%4$s', String(totals.skipped))
+            .replace('%5$s', String(totals.failed)));
+    }
+
     function deleteLoop() {
         var payload = {};
 
@@ -192,19 +243,21 @@
             updateCount('unused', data.unused_display);
 
             if (data.finished) {
-                window.alert(
-                    config.i18n.deleteDone
-                        .replace('%1$s', String(totals.deleted))
-                        .replace('%2$s', String(totals.skipped))
-                );
+                // Move the bar before the modal blocks on it, so what is behind
+                // the alert agrees with what the alert says.
+                deleteProgress();
+                window.alert(deleteReport(config.i18n.deleteDone));
                 window.location.reload();
                 return;
             }
 
-            updateProgress(0, 0, config.i18n.deleting + ' ' + totals.deleted);
+            deleteProgress();
             deleteLoop();
         }).catch(function () {
-            window.alert(config.i18n.error);
+            // A run that ended here has not made a pass, and the counts alone
+            // cannot tell the two apart — so the opening word does, and what it
+            // never reached is named rather than left to the reload.
+            window.alert(config.i18n.error + '\n\n' + deleteReport(config.i18n.deleteStopped));
             window.location.reload();
         });
     }
@@ -221,8 +274,9 @@
             totals = { deleted: 0, skipped: 0, failed: 0 };
             deleteFilters = deleteAllButton.getAttribute('data-filters') || '';
             deleteCursor = 0;
+            deleteTotal = parseInt(count, 10) || 0;
             deleteAllButton.disabled = true;
-            updateProgress(0, 0, config.i18n.deleting);
+            updateProgress(0, deleteTotal, config.i18n.deleting);
             deleteLoop();
         });
     }

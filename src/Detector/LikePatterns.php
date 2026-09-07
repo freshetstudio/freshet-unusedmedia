@@ -272,10 +272,96 @@ final class LikePatterns
     }
 
     /**
+     * A namespaced block delimiter whose attribute JSON carries the ID —
+     * field-framework blocks (ACF and the plugins built on the same model) and
+     * any other vendor block. Their values live in the delimiter: IDs only, no
+     * URL, and for a dynamic block no rendered HTML is ever saved, so the
+     * delimiter is the only record of the reference.
+     *
+     * This lives here rather than in the post-content detector because block
+     * markup is not confined to post_content: a `widget_block` widget, a theme
+     * mod, a page-builder option, a meta field holding a stored template all
+     * carry the same delimiters, and the bare integer inside one satisfies none
+     * of the string verifiers above — a quoted id survives by accident, an
+     * unquoted one was fetched by the query and answered by nothing.
+     *
+     * Core blocks are deliberately not searched. Their attribute schemas are
+     * core-defined and finite, every one that carries an attachment names it
+     * "id"/"ids" — already verified by hasJsonId(), with digit boundaries — and
+     * each also saves the URL or a wp-image-N class into its markup. There is
+     * no unknown key space to miss, while core's numeric attributes (height,
+     * width, columns) are everywhere, so widening to them buys no coverage.
+     *
+     * @param string[] $basenames
+     */
+    public static function hasBlockAttribute(string $text, int $id, array $basenames): bool
+    {
+        $seenObjects = [];
+
+        return self::searchBlockAttributes($text, $id, $basenames, $seenObjects, 0);
+    }
+
+    /**
+     * The parse behind hasBlockAttribute(), sharing the structure walk's depth
+     * budget — block markup can nest inside a decoded leaf that itself came out
+     * of block markup, so the two recursions have to be bounded together rather
+     * than each starting from zero.
+     *
+     * @param string[]         $basenames
+     * @param array<int, true> $seenObjects
+     */
+    private static function searchBlockAttributes(
+        string $text,
+        int $id,
+        array $basenames,
+        array &$seenObjects,
+        int $depth
+    ): bool {
+        // Cheap gate: the pattern below cannot match without this substring, and
+        // this runs on every string leaf of every walked structure.
+        if (!str_contains($text, 'wp:')) {
+            return false;
+        }
+
+        if ($depth > self::MAX_STRUCTURE_DEPTH) {
+            return true; // Same fail-safe direction as the walk: unresolvable reads as used.
+        }
+
+        if (!preg_match_all('/<!--\s+wp:[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*\s+(\{[\s\S]+?\})\s+\/?-->/', $text, $matches)) {
+            return false;
+        }
+
+        foreach ($matches[1] as $json) {
+            $attrs = json_decode($json, true);
+
+            if (!is_array($attrs)) {
+                // Undecodable delimiter: a digit-bounded ID is enough to keep the file.
+                if (preg_match('/(?<![\d.])' . $id . '(?![\d.])/', $json)) {
+                    return true;
+                }
+
+                continue;
+            }
+
+            // Every attribute, at any depth. An id under a key we do not
+            // recognise still keeps the file; a dimension that happens to equal
+            // the id keeps one file too many, which is the recoverable half of
+            // the trade.
+            if (self::searchStructure($attrs, $id, $basenames, $seenObjects, $depth + 1)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Recursively search an unserialized/decoded structure for the ID or a
      * basename. A string leaf that is itself a JSON object/array is decoded and
      * searched too — settings blobs keep IDs under arbitrary keys, and
-     * serialized theme mods nest JSON strings.
+     * serialized theme mods nest JSON strings. A leaf that is not JSON but does
+     * carry block markup is parsed as block markup, which is what puts the
+     * delimiter within reach of every detector that walks a stored value.
      *
      * A stored value is not guaranteed to be a tree. Serialized reference
      * tokens (r:/R:) unserialize into a graph that points back at itself, and
@@ -332,8 +418,16 @@ final class LikePatterns
 
             $decoded = self::decodeJson($value);
 
-            return $decoded !== null
-                && self::searchStructure($decoded, $id, $basenames, $seenObjects, $depth + 1);
+            if ($decoded !== null) {
+                return self::searchStructure($decoded, $id, $basenames, $seenObjects, $depth + 1);
+            }
+
+            // Not JSON, so the leaf is markup or prose. Block delimiters keep
+            // their values as attribute JSON inside an HTML comment — opaque to
+            // every verifier that wants a delimiter around the digits, and the
+            // shape a `widget_block` widget, a theme mod or a stored template
+            // arrives in.
+            return self::searchBlockAttributes($value, $id, $basenames, $seenObjects, $depth + 1);
         }
 
         if (is_object($value)) {

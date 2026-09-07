@@ -2049,6 +2049,128 @@ $GLOBALS['wpdb']->last_error = 'Table \'wp_somebody_else\' doesn\'t exist';
 check('a foreign error is forgotten at the start of a scan', $GLOBALS['wpdb']->last_error, '');
 check('and the detector then answers normally', (new PostmetaDetector())->find($failureCtx), []);
 
+// ------------------------------- block markup outside post_content (143)
+//
+// A block delimiter is not confined to post_content. A `widget_block` widget,
+// a theme mod, an option holding a stored template, a meta field holding a
+// page-builder payload — all of them carry the same
+// `<!-- wp:vendor/name {…} /-->` markup, and a field-framework block keeps its
+// attachment as a bare integer inside that attribute JSON.
+//
+// Every id condition the query binds wants a delimiter hard against the digits
+// (":123,", ":123}", "\"123\"", "i:123;"), so those rows ARE fetched — but the
+// only verifier that could read them, the block parse, lived privately inside
+// PostContentDetector and nothing else called it. A leaf beginning "<" is not
+// JSON, so the structure walk stopped there too: the row came back, was handed
+// to every verifier in turn, and each one declined. The string form
+// ({"logo":"123"}) survived by accident on the quoted-id fall-through; the
+// integer form did not, and the file scanned unused.
+//
+// The carriers below are the five the review executed, plus termmeta and
+// usermeta, which store the same thing. The parser is now one implementation in
+// LikePatterns, reached from the structure walk's string leaf (so every
+// detector that walks a stored value gets it) and directly by the two callers
+// that have no walk to enter — post content, and a plain option value.
+
+$blockCarrier = '<!-- wp:acf/hero {"id":"block_64a1f2","name":"acf/hero","data":{"logo":123,"_logo":"field_a1"},"mode":"edit"} /-->';
+$blockDecoy = '<!-- wp:acf/hero {"id":"block_7c3e","name":"acf/hero","data":{"logo":1234,"_logo":"field_a1"},"mode":"edit"} /-->';
+$blockPrefixDecoy = '<!-- wp:acme/hero {"imageId":9123} /-->';
+
+// The two option branches that unserialize before they walk.
+$blockWidget = serialize([2 => ['content' => $blockCarrier]]);
+$blockWidgetDecoy = serialize([2 => ['content' => $blockDecoy]]);
+$blockThemeMod = serialize(['footer_html' => $blockCarrier]);
+$blockSerializedOption = serialize(['intro' => $blockCarrier]);
+
+check('the shared parser reads an int id out of a block delimiter', LikePatterns::hasBlockAttribute($blockCarrier, $id, $names), true);
+check('and rejects a longer id in the same position', LikePatterns::hasBlockAttribute($blockDecoy, $id, $names), false);
+check('and rejects a prefixed one', LikePatterns::hasBlockAttribute($blockPrefixDecoy, $id, $names), false);
+check('block markup with no delimiter at all is not a reference', LikePatterns::hasBlockAttribute('<p>123</p>', $id, $names), false);
+check('the structure walk reaches the delimiter at a string leaf', LikePatterns::structureContains(['content' => $blockCarrier], $id, $names), true);
+check('and the walk rejects the decoy at the same leaf', LikePatterns::structureContains(['content' => $blockDecoy], $id, $names), false);
+
+// A delimiter nested inside JSON, where the namespace slash and the attribute
+// quotes are escaped: the raw text does not match the delimiter pattern at all,
+// and only the walk — which decodes the leaf first — can reach it.
+$blockInJson = json_encode(['blocks' => [['markup' => $blockCarrier]]]);
+check('a json-escaped delimiter resolves through the walk', LikePatterns::structureContains(LikePatterns::decodeStored((string) $blockInJson), $id, $names), true);
+
+// --- options: widget_block, a theme mod, a plain option and a serialized one
+
+$GLOBALS['wpdb']->rows = [
+    (object) ['option_name' => 'widget_block', 'option_value' => $blockWidget],
+    (object) ['option_name' => 'theme_mods_freshet', 'option_value' => $blockThemeMod],
+    (object) ['option_name' => 'my_plugin_template', 'option_value' => $blockCarrier],
+    (object) ['option_name' => 'my_plugin_settings', 'option_value' => $blockSerializedOption],
+    (object) ['option_name' => 'widget_block', 'option_value' => $blockWidgetDecoy],
+    (object) ['option_name' => 'my_plugin_template', 'option_value' => $blockDecoy],
+    (object) ['option_name' => 'my_plugin_template', 'option_value' => $blockPrefixDecoy],
+];
+
+$blockOptionRefs = (new OptionsDetector())->find($ctx);
+$blockOptionBound = $GLOBALS['wpdb']->lastParams;
+$GLOBALS['wpdb']->rows = [];
+
+check('all four option carriers resolve and no decoy does', count($blockOptionRefs), 4);
+check('a block in a widget_block widget is used', $blockOptionRefs[0]->countsAsUsed(), true);
+check('and is resolved in the widget structure', $blockOptionRefs[0]->match, 'widget');
+check('a block in a theme mod is used', $blockOptionRefs[1]->countsAsUsed(), true);
+check('and keeps its theme-mod object type', $blockOptionRefs[1]->objectType, 'theme_mod');
+check('a block in a plain option is used', $blockOptionRefs[2]->countsAsUsed(), true);
+check('and is labelled as the block field it is', $blockOptionRefs[2]->match, 'acf-block');
+check('a block inside a serialized option is used', $blockOptionRefs[3]->countsAsUsed(), true);
+check('the options query already fetches the widget carrier', $admits($blockOptionBound, $blockWidget), true);
+check('the options query already fetches the theme mod', $admits($blockOptionBound, $blockThemeMod), true);
+check('the options query already fetches the plain option', $admits($blockOptionBound, $blockCarrier), true);
+check('the options query already fetches the serialized option', $admits($blockOptionBound, $blockSerializedOption), true);
+
+// --- postmeta, termmeta, usermeta: the same markup parked in a meta value
+
+$GLOBALS['wpdb']->rows = [
+    (object) ['post_id' => '41', 'meta_key' => 'hero_block', 'meta_value' => $blockCarrier, 'post_status' => 'publish'],
+    (object) ['post_id' => '42', 'meta_key' => 'hero_block', 'meta_value' => $blockDecoy, 'post_status' => 'publish'],
+    (object) ['post_id' => '43', 'meta_key' => 'hero_block', 'meta_value' => $blockPrefixDecoy, 'post_status' => 'publish'],
+];
+$blockPostRefs = (new PostmetaDetector())->find($ctx);
+$blockPostBound = $GLOBALS['wpdb']->lastParams;
+$GLOBALS['wpdb']->rows = [];
+
+check('a block in a postmeta value resolves and neither decoy does', array_map(static fn($r) => $r->objectId, $blockPostRefs), [41]);
+check('and it counts as used', $blockPostRefs[0]->countsAsUsed(), true);
+check('the postmeta query already fetches the carrier', $admits($blockPostBound, $blockCarrier), true);
+
+$GLOBALS['wpdb']->rows = [
+    (object) ['term_id' => '51', 'meta_key' => 'hero_block', 'meta_value' => $blockCarrier],
+    (object) ['term_id' => '52', 'meta_key' => 'hero_block', 'meta_value' => $blockDecoy],
+];
+$blockTermRefs = (new TermMetaDetector())->find($ctx);
+$GLOBALS['wpdb']->rows = [];
+
+check('a block in a termmeta value resolves and the decoy does not', array_map(static fn($r) => $r->objectId, $blockTermRefs), [51]);
+check('and it counts as used', $blockTermRefs[0]->countsAsUsed(), true);
+
+$GLOBALS['wpdb']->rows = [
+    (object) ['user_id' => '61', 'meta_key' => 'hero_block', 'meta_value' => $blockCarrier],
+    (object) ['user_id' => '62', 'meta_key' => 'hero_block', 'meta_value' => $blockDecoy],
+];
+$blockUserRefs = (new UserMetaDetector())->find($ctx);
+$GLOBALS['wpdb']->rows = [];
+
+check('a block in a usermeta value resolves and the decoy does not', array_map(static fn($r) => $r->objectId, $blockUserRefs), [61]);
+check('and it counts as used', $blockUserRefs[0]->countsAsUsed(), true);
+
+// The one that already worked, re-asserted here so the shared parser is proven
+// to still answer its original caller after being moved out of it.
+$GLOBALS['wpdb']->rows = [
+    (object) ['ID' => '71', 'post_parent' => '0', 'post_type' => 'page', 'post_status' => 'publish', 'post_content' => $blockCarrier, 'post_excerpt' => ''],
+    (object) ['ID' => '72', 'post_parent' => '0', 'post_type' => 'page', 'post_status' => 'publish', 'post_content' => $blockDecoy, 'post_excerpt' => ''],
+];
+$blockContentRefs = (new PostContentDetector())->find($ctx);
+$GLOBALS['wpdb']->rows = [];
+
+check('post content still resolves the same delimiter', array_map(static fn($r) => $r->objectId, $blockContentRefs), [71]);
+check('and still labels it a block field', $blockContentRefs[0]->match, 'acf-block');
+
 // ------------------------------------------------------------------ report
 
 foreach ($failures as $failure) {

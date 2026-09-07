@@ -158,6 +158,17 @@ final class OptionsDetector implements DetectorInterface
             return $make('option', 'exact', Reference::POSSIBLE);
         }
 
+        // A plain option value holding block markup — a stored template, a
+        // page-builder fragment, a reusable-block payload parked in an option.
+        // The decode above never sees it (the value is not itself JSON or
+        // serialized, so the structure walk is not entered), and the bare
+        // integer inside the delimiter's attribute JSON satisfies none of the
+        // fall-throughs below. Every other carrier reaches the same parser
+        // through the walk; this branch is the one that does not have a walk.
+        if (LikePatterns::hasBlockAttribute($value, $ctx->id, $ctx->basenames)) {
+            return $make('option', 'acf-block', Reference::POSSIBLE);
+        }
+
         // After every decode-based branch above: a link to the attachment's own
         // page, which is markup and so is invisible to the walk — an option
         // holding a rendered block of HTML, a stored notice, a page-builder

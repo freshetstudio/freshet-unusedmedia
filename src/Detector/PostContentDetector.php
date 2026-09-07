@@ -149,7 +149,7 @@ final class PostContentDetector implements DetectorInterface
             return 'gallery';
         }
 
-        if (self::blockAttributesContain($content, $id, $ctx->basenames)) {
+        if (LikePatterns::hasBlockAttribute($content, $id, $ctx->basenames)) {
             return 'acf-block';
         }
 
@@ -179,53 +179,6 @@ final class PostContentDetector implements DetectorInterface
         }
 
         return null;
-    }
-
-    /**
-     * Namespaced blocks — field-framework blocks (ACF and the plugins built on
-     * the same model) and any other vendor block — keep their values in the
-     * block delimiter: IDs only, no URL, and for a dynamic block no rendered
-     * HTML is ever saved. So the delimiter is the only record of the reference,
-     * and the *whole* attribute object is searched: "data" is one framework's
-     * convention, not a property of block delimiters. The JSON may span lines.
-     *
-     * Core blocks are deliberately not searched here. Their attribute schemas
-     * are core-defined and finite, every one that carries an attachment names
-     * it "id"/"ids" — already verified above, with digit boundaries — and each
-     * also saves the URL or a wp-image-N class into its markup. There is no
-     * unknown key space to miss, while core's numeric attributes (height,
-     * width, columns) are everywhere, so widening to them buys no coverage.
-     *
-     * @param string[] $basenames
-     */
-    private static function blockAttributesContain(string $content, int $id, array $basenames): bool
-    {
-        if (!preg_match_all('/<!--\s+wp:[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*\s+(\{[\s\S]+?\})\s+\/?-->/', $content, $matches)) {
-            return false;
-        }
-
-        foreach ($matches[1] as $json) {
-            $attrs = json_decode($json, true);
-
-            if (!is_array($attrs)) {
-                // Undecodable delimiter: a digit-bounded ID is enough to keep the file.
-                if (preg_match('/(?<![\d.])' . $id . '(?![\d.])/', $json)) {
-                    return true;
-                }
-
-                continue;
-            }
-
-            // Every attribute, at any depth. An id under a key we do not
-            // recognise still keeps the file; a dimension that happens to equal
-            // the id keeps one file too many, which is the recoverable half of
-            // the trade.
-            if (LikePatterns::structureContains($attrs, $id, $basenames)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /**

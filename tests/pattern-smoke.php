@@ -1257,6 +1257,73 @@ check('the shared verdict is the parent post, possible, and used', $verdict($aut
 // the field it sits in is still the useful half of the detail line.
 check('the postmeta autosave reference still names its field', $autosaveMetaRefs[0]->detail, 'hero_image');
 
+// --- an attachment row's own description and caption (148)
+//
+// WordPress stores an attachment's description in post_content and its caption
+// in post_excerpt. Both are ordinary rich text that can name another file, and
+// on a real library two documents were referenced from nowhere else: sibling
+// import-log uploads whose description is the URL of the file. The query
+// excluded post_type 'attachment' outright, so neither column was ever read
+// for anybody, and both documents scanned unused.
+//
+// The guard that has to come with admitting them is in the SQL rather than in
+// the loop: an attachment's own description very often carries its own
+// filename, so a row able to reference itself would be used for ever and could
+// never be cleaned up. "p.ID <> %d" is what stops that, and it is asserted
+// twice below — once as the value bound to it, and once by filtering the
+// candidate rows through the id the detector actually bound, so a fix that
+// dropped the clause could not pass on the positive cases alone.
+
+$attachmentDescription = 'http://example.test/wp-content/uploads/2026/07/hero-scaled.jpg';
+
+$ownRow = (object) [
+    'ID' => (string) FIXTURE_ID, 'post_parent' => '0', 'post_type' => 'attachment', 'post_status' => 'inherit',
+    'post_content' => $attachmentDescription, 'post_excerpt' => '',
+];
+$siblingRow = (object) [
+    'ID' => '820', 'post_parent' => '0', 'post_type' => 'attachment', 'post_status' => 'private',
+    'post_content' => $attachmentDescription, 'post_excerpt' => '',
+];
+$captionRow = (object) [
+    'ID' => '821', 'post_parent' => '0', 'post_type' => 'attachment', 'post_status' => 'inherit',
+    'post_content' => '', 'post_excerpt' => 'Cover shot: hero-300x200.jpg',
+];
+$menuRow = (object) [
+    'ID' => '822', 'post_parent' => '0', 'post_type' => 'nav_menu_item', 'post_status' => 'publish',
+    'post_content' => $attachmentDescription, 'post_excerpt' => '',
+];
+
+$GLOBALS['wpdb']->rows = [$ownRow, $siblingRow, $captionRow];
+$detector->find($ctx);
+$attachmentBound = $GLOBALS['wpdb']->lastParams;
+$attachmentSql = $GLOBALS['wpdb']->lastSql;
+$GLOBALS['wpdb']->rows = [];
+
+check('the post-content query no longer excludes attachment rows', str_contains($attachmentSql, "'attachment'"), false);
+check('and still excludes menu items, whose content is not a reference', str_contains($attachmentSql, "p.post_type <> 'nav_menu_item'"), true);
+check('the scanned row is excluded in the statement', str_contains($attachmentSql, 'p.ID <> %d'), true);
+// The autosave needle is bound first, then the id, then the needles.
+check('and the id it excludes is the attachment being scanned', $attachmentBound[1], FIXTURE_ID);
+
+// The rows that WHERE leaves behind — filtered by the id the detector bound
+// rather than by a list repeated here, so this cannot pass a fix it did not
+// get.
+$GLOBALS['wpdb']->rows = array_values(array_filter(
+    [$ownRow, $siblingRow, $captionRow, $menuRow],
+    static fn(object $row): bool => (int) $row->ID !== (int) $attachmentBound[1] && $row->post_type !== 'nav_menu_item'
+));
+$attachmentRefs = $detector->find($ctx);
+$GLOBALS['wpdb']->rows = [];
+
+check('an attachment does not reference itself', array_map(static fn($r): int => $r->objectId, $attachmentRefs), [820, 821]);
+check("a sibling upload's description is a reference", $attachmentRefs[0]->match, 'url');
+check('and it counts as used', $attachmentRefs[0]->countsAsUsed(), true);
+check('the reference points at the attachment row carrying it', [$attachmentRefs[0]->objectType, $attachmentRefs[0]->objectId], ['post', 820]);
+check('a private import row is confirmed like any other post', $attachmentRefs[0]->confidence, Reference::CONFIRMED);
+check('a caption naming a size is a reference too', [$attachmentRefs[1]->objectId, $attachmentRefs[1]->match], [821, 'url']);
+check('the query admits a description carrying the file URL', $admits($attachmentBound, $attachmentDescription), true);
+check('and a caption carrying a size name', $admits($attachmentBound, (string) $captionRow->post_excerpt), true);
+
 // --- options: all three branches, because all three are behind one query
 
 $widgetValue = serialize([2 => ['title' => '', 'text' => $quotedShortcode]]);

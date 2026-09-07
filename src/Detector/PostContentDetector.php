@@ -94,9 +94,18 @@ final class PostContentDetector implements DetectorInterface
         // autosave is; see LikePatterns::revisionCondition().
         [$revisionCondition, $revisionParams] = LikePatterns::revisionCondition('p');
 
+        // Attachment rows are searched like any other post. WordPress stores an
+        // attachment's description in post_content and its caption in
+        // post_excerpt, and both are ordinary rich text that can name another
+        // file — a document linked from a sibling's description was invisible
+        // while post_type excluded 'attachment' here (freshet-148). The row
+        // being scanned is kept out by "p.ID <> %d" below, which is what stops
+        // an attachment whose own description carries its own filename from
+        // making itself used for ever. nav_menu_item stays excluded: a menu
+        // item's content is empty and its meta is the postmeta detector's.
         $sql = "SELECT p.ID, p.post_parent, p.post_type, p.post_status, p.post_content, p.post_excerpt
                 FROM {$wpdb->posts} p
-                WHERE p.post_type NOT IN ('attachment', 'nav_menu_item')
+                WHERE p.post_type <> 'nav_menu_item'
                   AND {$revisionCondition}
                   AND p.post_status <> 'auto-draft'
                   AND p.ID <> %d

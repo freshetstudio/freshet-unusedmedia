@@ -4,7 +4,7 @@ Tags: media, unused media, media library, clean up, attachments
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.0.3
+Stable tag: 1.0.4
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -101,6 +101,19 @@ Per site, yes. Cross-site references (another site embedding this site's file UR
 Never. Scanning only reads and caches results. Deletion happens exclusively when you click a delete action, after re-verification. The licensed WP-CLI command scans and reports; there is deliberately no delete verb on the command line, so nothing can be deleted non-interactively. The licensed evidence report only writes a file to your own browser — it has no delete action either, and exporting changes nothing on the site. The licensed space totals only add up sizes; opening the page deletes nothing.
 
 == Changelog ==
+
+= 1.0.4 =
+* **A reference written in a different case now counts.** Rows naming a file or an ID are fetched case-insensitively by the database and were then thrown away by a case-sensitive check — so a link written `HERO.JPG` against a file stored `hero.jpg`, or markup carrying `DATA-ID="123"`, kept nothing in use and the file was offered for deletion. Both halves agree now, accented filenames included.
+* **Two spellings of one filename are no longer counted as one library entry.** The database folds case where the plugin did not, so `Hero-Banner.jpg` and `HERO-BANNER.jpg` were one group in the count and two in the list. Each is its own file now, and where the server's filesystem would treat them as the same file a deletion refuses it rather than removing a file the other entry still stands on.
+* **A count that could not be read now says so instead of reading zero.** Where a query failed, the Scan tab reported "Unused: 0" for a library it had not managed to look at. The figures now stand at a dash under an error notice, a listing that could not be read is not drawn at all — so there is no empty table and no Delete all button naming a set nobody counted — and `wp freshet-unusedmedia scan` ends on an error instead of a success line, leaving `--resume` to carry on from the last completed batch.
+* **Delete all now reports as much as the checkbox form.** Its progress bar sat at 0% for the whole run and rendered below the table, out of sight of the button that started it, so a long deletion looked like a screen that had stopped responding. The bar now sits under the button and shows real progress, and the completion message names what was deleted, skipped and failed, and how many files the run did not reach.
+* **A file another library entry stands on is now held back at the scan, not only at the delete.** Where one entry's resized copy or pre-scale original was itself uploaded separately, the file read as unused, was listed, and was then quietly skipped when you tried to delete it. It now comes back used, with the reason on its own row and the entry that would lose a file named in the evidence panel.
+* **An attachment's own description and caption are searched.** WordPress keeps both on the attachment itself, and the scan excluded those rows outright — so a file referenced only from another upload's description or caption was reported unused.
+* A file named only by an unsaved draft's custom fields now counts as in use, the way one named in that draft's text already did. Old revisions still do not count.
+* An image pasted into a comment out of the block editor is recognised by the ID the editor writes (`class="wp-image-123"`), where only a plain file URL or an attachment-page link was read before.
+* **The Scan tab leads with its figures.** The three numbers the tab exists for sat at body size between two paragraphs of helper text; they now open the section, with the scan's timestamp and everything that qualifies them underneath. The explanatory copy on both tabs is shorter and reads as points rather than paragraphs, with nothing it said dropped.
+* Deleting from a library where several entries share one file is substantially faster: each file's checks now run once for the whole group instead of once per entry. On a large library a five-file request fell from about 102 seconds to 70.
+* A scan whose attachments hop between upload folders no longer re-reads a folder for every attachment, so scanning a library whose uploads are not in folder order is faster.
 
 = 1.0.3 =
 * **A failed database read no longer counts as "nothing references this file".** A query that errored used to be indistinguishable from one that honestly found nothing, so a file could be recorded unused because the check never actually ran. A file whose check failed is now left unscanned instead of judged, the scan reports how many checks failed, and a deletion refuses any file it could not re-check.

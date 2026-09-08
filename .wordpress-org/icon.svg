@@ -1,13 +1,12 @@
-<!-- Canvas is declared at 512 with a 256 viewBox: qlmanage renders an SVG
-     at most ~1.17x its declared size, so the 128/256 PNG fallbacks are
-     DOWNSCALED from 512 and fill their frame exactly. -->
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 256 256" role="img" aria-label="Freshet Unused Media">
-  <rect width="256" height="256" rx="52" fill="#0A1499"/>
-  <g transform="translate(56,56) scale(6.0)" fill="none" stroke="#ffffff" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M3 6h18"/>
-    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
-    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-    <path d="M10 11v6"/>
-    <path d="M14 11v6"/>
-  </g>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="640px" height="640px" viewBox="0 0 640 640" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>unused-media/icon</title>
+    <defs>
+        <path d="M0,0 L640,0 L640,640 L0,640 Z" id="path-1"></path>
+    </defs>
+    <g id="unused-media/icon" stroke="none" fill="none" xlink:href="#path-1" fill-rule="evenodd">
+        <use fill="#FFFFFF" xlink:href="#path-1"></use>
+        <rect id="Rectangle-2" fill="#1122FF" x="0" y="0" width="640" height="640" rx="120"></rect>
+        <path d="M400,240 C422.09139,240 440,257.90861 440,280 C440,302.09139 422.09139,320 400,320 C377.90861,320 360,302.09139 360,280 C360,257.90861 377.90861,240 400,240 Z M80.432,519.999 L80,520 L80,160.110255 L80,160 C80,137.90861 97.90861,120 120,120 L440,120 L440.661473,120.005359 C462.447771,120.35859 480,138.129524 480,160 C480,182.09139 462.09139,200 440,200 L160,200 L160,360.43 L240,280.431458 L399.568,440 L480,440 L480,360.431458 L600,480.431458 L480,600.431458 L480,520 L399.568,519.999 L240,360.431458 L80.432,519.999 Z" id="Shape" fill="#FFFFFF"></path>
+    </g>
 </svg>

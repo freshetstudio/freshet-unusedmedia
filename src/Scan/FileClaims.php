@@ -298,6 +298,14 @@ final class FileClaims
      * filesystem folds at minimum and what all 14 measured pairs are. A twin
      * differing only outside ASCII is not covered, and is not claimed to be.
      *
+     * **Both halves of the path fold, not just the filename** (freshet-166).
+     * The index this reads is scoped to the folded directory rather than the
+     * byte-exact one, so a twin whose *folder* is the half spelled differently
+     * is inside the scope and is found here. Measured before the change at 0
+     * such pairs — and 0 mixed-case directories at all — in 1,760 directories
+     * across 29 local libraries, so this closes a class rather than a victim;
+     * it is fixed anyway because the direction of the miss is an unlink.
+     *
      * @param array{attached: array<string, int[]>, named: array<string, int[]>, folded: array<string, string[]>} $index
      * @param array<string, true> $paths
      * @return array<string, true>
@@ -509,6 +517,32 @@ final class FileClaims
      * whole afterwards — the same correction OrphanSizes makes, and for the
      * same reason: a same-named file one level down is a different file.
      *
+     * **And the comparison folds case, because two spellings of one folder are
+     * one folder to the volume** (freshet-166). The fetch above is answered by
+     * the column's own collation, which is `_ci` on every WordPress there is,
+     * so `Uploads/2019/` and `uploads/2019/` both come back; a byte-exact
+     * comparison then dropped everything the fetch had folded in, leaving a
+     * library that holds both spellings with **two index scopes that never see
+     * each other** — and a caseTwins() pair living across that boundary
+     * invisible to the guard that exists to catch it. That is a false negative
+     * in the one direction this class may not err in, so the scope is the
+     * folded directory and the fold is the same byte-wise ASCII one caseTwins()
+     * uses (freshet-D138: case is the only fold all four live collations agree
+     * on). It is not a loosening of the whole-directory comparison: a
+     * subdirectory still does not fold onto its parent and an unrelated folder
+     * still does not fold onto this one.
+     *
+     * **What that does NOT do is merge anything.** The index stays keyed on the
+     * real stored path — bytes, per freshet-D136 — so a folded row is reachable
+     * only through caseTwins(), which is the one place a path is looked up by
+     * its folded spelling. Every other read here asks `isset($paths[$file])`
+     * against the byte-exact list unlinks() derived from the rows being
+     * deleted, and no path in that list can differ from this directory in
+     * anything but case. The cost is the fold itself, and it is charged only
+     * where byte-equality already failed: measured at **+0.001 to +0.003 ms per
+     * thousand rows** on the three benchmark libraries, against the ~75 ms the
+     * directory read itself costs.
+     *
      * @return array<int, string>
      * @throws QueryFailed
      */
@@ -541,7 +575,7 @@ final class FileClaims
 
             $path = self::normalise((string) ($row['meta_value'] ?? ''));
 
-            if ($path !== '' && self::directoryOf($path) === $dir) {
+            if ($path !== '' && self::sameDirectory($dir, $path)) {
                 $found[(int) ($row['post_id'] ?? 0)] = $path;
             }
         }
@@ -567,6 +601,11 @@ final class FileClaims
      * A row's two keys may land in different pages, and that needs no handling:
      * $fold is given one key at a time and every path it yields goes into the
      * same index, so the union is the same however the pages fall.
+     *
+     * The directory is compared through sameDirectory(), so this half of the
+     * index carries the same folded scope the attached half does — a twin whose
+     * only claimant *names* the file rather than standing on it is the same
+     * missed refusal.
      *
      * @param callable(int, string, string, mixed): void $fold rowId, its own
      *        path, the meta key, the unserialized value.
@@ -613,7 +652,7 @@ final class FileClaims
                 $after = max($after, (int) ($row['meta_id'] ?? 0));
                 $path = self::normalise((string) ($row['fc_file'] ?? ''));
 
-                if ($path === '' || self::directoryOf($path) !== $dir) {
+                if ($path === '' || !self::sameDirectory($dir, $path)) {
                     continue;
                 }
 
@@ -645,6 +684,21 @@ final class FileClaims
     private static function normalise(string $path): string
     {
         return trim(str_replace('\\', '/', trim($path)), '/');
+    }
+
+    /**
+     * Is this path's own directory the one the index is being built for?
+     *
+     * Byte-equality first, and it answers on every library measured; the fold
+     * behind it is what makes two spellings of one folder one index scope
+     * rather than two that never meet. See attachedIn() for why that is the
+     * right scope and why it merges nothing.
+     */
+    private static function sameDirectory(string $dir, string $path): bool
+    {
+        $found = self::directoryOf($path);
+
+        return $found === $dir || strtolower($found) === strtolower($dir);
     }
 
     /** The directory of a stored path, '' for a library not foldered by date. */

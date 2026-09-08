@@ -565,7 +565,11 @@ $GLOBALS['wpdb'] = new class {
      * by date" switched off. The `LIKE` deliberately matches subdirectories
      * here, exactly as it does in MySQL, so the caller's own whole-directory
      * comparison is the thing under test rather than something the fixture
-     * quietly did for it.
+     * quietly did for it. **And it folds case, for the same reason:** the
+     * column's collation is `_ci` on every WordPress there is, so MySQL answers
+     * `LIKE 'Uploads/2019/%'` with the `uploads/2019/` rows too. A
+     * byte-exact prefix here would have hidden freshet-166 — the fixture would
+     * never have fetched the row the caller was failing to keep.
      *
      * @param array{sql: string, params: array<int, mixed>} $query
      * @param callable(int, array<string, mixed>): array<int, array<string, string>> $shape
@@ -582,7 +586,7 @@ $GLOBALS['wpdb'] = new class {
                 continue;
             }
 
-            if ($root ? str_contains($row['file'], '/') : !str_starts_with($row['file'], $prefix)) {
+            if ($root ? str_contains($row['file'], '/') : !str_starts_with(strtolower($row['file']), strtolower($prefix))) {
                 continue;
             }
 
@@ -691,8 +695,14 @@ function check(string $label, mixed $actual, mixed $expected): void
  */
 function library(array $rows): void
 {
-    foreach (glob(UPLOADS . '/*/*/*') ?: [] as $stale) {
-        unlink($stale);
+    // Deepest first, and a directory is stepped over rather than unlinked: the
+    // folded-folder cases (freshet-166) put a file one level past the dated
+    // shape every other fixture uses, so a directory now turns up at a depth
+    // that used to hold only files.
+    foreach (array_merge(glob(UPLOADS . '/*/*/*/*') ?: [], glob(UPLOADS . '/*/*/*') ?: []) as $stale) {
+        if (!is_dir($stale)) {
+            unlink($stale);
+        }
     }
 
     // A stored value carrying no directory at all — the whitespace fixture the
@@ -1265,6 +1275,65 @@ $result = $deleter()->deleteVerified([100]);
 
 check('so an unused file with no twin still deletes', $result, ['deleted' => 1, 'skipped' => 0, 'failed' => 0, 'remaining' => []]);
 check('and the same spelling in another directory kept its file', onDisk('2028/03/CANON.jpg'), true);
+
+// --- and the same fold in the *other* half of the path (freshet-166). The
+// claims index is read with a `LIKE` the column's collation answers, so both
+// spellings of one folder come back; keeping only the byte-exact ones made two
+// spellings of one folder two index scopes that never saw each other, and a
+// twin living across that boundary was invisible to the guard. On a volume
+// that folds case the two folders are one folder, so that is a refusal not
+// made — the direction this class may not err in. Nothing on disk is asserted
+// for the pair: on a folding volume the two paths are one file and on a
+// case-sensitive one they are two, and the claim is what is under test either
+// way. WordPress writes lower-case date folders, so the mixed-case shape comes
+// from a plugin's own folder, a migration or a manual upload.
+
+library([
+    100 => ['file' => 'forms/Uploads/canon.jpg'],
+    200 => ['file' => 'forms/uploads/canon.jpg', 'used' => true],
+]);
+
+check('two spellings of one folder are two keys', FileGroups::keyFor(100) === FileGroups::keyFor(200), false);
+check('but the folded folder is one index scope, so the twin is claimed', FileClaims::claimants([100]), ['forms/uploads/canon.jpg' => 200]);
+check('and the mirror holds across the folder boundary too', FileClaims::claimants([200]), ['forms/Uploads/canon.jpg' => 100]);
+
+$result = $deleter()->deleteVerified([100]);
+
+check('so a twin across the folder boundary is refused as well', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0, 'remaining' => []]);
+
+// The mirror half of the index has to reach across it as well: a claimant that
+// merely *names* the file is the same missed refusal as one standing on it.
+
+library([
+    100 => ['file' => 'forms/Uploads/hero-scaled.jpg', 'original' => 'hero.jpg'],
+    200 => ['file' => 'forms/uploads/hero.jpg', 'used' => true],
+]);
+
+check('a neighbour that names the file claims it across the folder boundary', FileClaims::claimants([200]), ['forms/Uploads/hero.jpg' => 100]);
+
+$result = $deleter()->deleteVerified([200]);
+
+check('and that deletion is refused too', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0, 'remaining' => []]);
+
+// And the boundary the fold must not cross, which is the whole reason the
+// directory is compared at all: the `LIKE` matches subdirectories, and a
+// folder one level down is not a spelling of this one. Nor is a folder whose
+// name differs by more than case.
+
+library([
+    100 => ['file' => 'forms/Uploads/donner.jpg'],
+    200 => ['file' => 'forms/Uploads/old/donner.jpg', 'used' => true],
+    300 => ['file' => 'forms/archive/donner.jpg', 'used' => true],
+]);
+
+check('a subdirectory is still not this directory', FileClaims::claimants([100]), []);
+
+$result = $deleter()->deleteVerified([100]);
+
+check('so an unused file in a mixed-case folder still deletes', $result, ['deleted' => 1, 'skipped' => 0, 'failed' => 0, 'remaining' => []]);
+check('its own file goes', onDisk('forms/Uploads/donner.jpg'), false);
+check('the copy one level down kept its file', onDisk('forms/Uploads/old/donner.jpg'), true);
+check('and so did the one in a folder that is not a spelling of this one', onDisk('forms/archive/donner.jpg'), true);
 
 // A read that did not answer is not an answer of "nobody else needs this file".
 // Same reading as the sibling lookup and the re-scan: the file is not deleted,
@@ -2169,12 +2238,18 @@ check('the group is the only thing narrowing it', substr_count($rowsSql, 'IN (SE
 
 // ------------------------------------------------------------------ tidy
 
-foreach (glob(UPLOADS . '/*/*/*') ?: [] as $file) {
-    unlink($file);
+// Deepest first, and a directory is a directory at either depth: the
+// folded-folder cases put a file one level past the dated shape.
+foreach (array_merge(glob(UPLOADS . '/*/*/*/*') ?: [], glob(UPLOADS . '/*/*/*') ?: []) as $file) {
+    if (!is_dir($file)) {
+        unlink($file);
+    }
 }
 
-foreach (glob(UPLOADS . '/*/*') ?: [] as $dir) {
-    rmdir($dir);
+foreach (array_merge(glob(UPLOADS . '/*/*/*') ?: [], glob(UPLOADS . '/*/*') ?: []) as $dir) {
+    if (is_dir($dir)) {
+        rmdir($dir);
+    }
 }
 
 foreach (glob(UPLOADS . '/*') ?: [] as $entry) {

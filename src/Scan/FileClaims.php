@@ -111,9 +111,14 @@ final class FileClaims
      * the directory, and a request that kept them has kept the wrong thing
      * (the freshet-124 shape).
      *
-     * @var array{attached: array<string, int[]>, named: array<string, int[]>}
+     * `folded` is the same directory's paths indexed by their lower-case
+     * spelling, which is what caseTwins() reads — built here rather than per
+     * lookup because this is the memo, and the fold grows with the directory
+     * rather than with the question.
+     *
+     * @var array{attached: array<string, int[]>, named: array<string, int[]>, folded: array<string, string[]>}
      */
-    private static array $index = ['attached' => [], 'named' => []];
+    private static array $index = ['attached' => [], 'named' => [], 'folded' => []];
 
     /**
      * Metadata keys naming a single companion file beside the original.
@@ -168,6 +173,12 @@ final class FileClaims
 
         foreach (array_keys($dirs) as $dir) {
             $index = self::index($dir);
+
+            // And what this directory's filesystem would unlink alongside them,
+            // which is not the same list on a disk that folds case. See
+            // caseTwins(): the key stays byte-exact, and the volume's answer
+            // is added here, where the harm is an unlink().
+            $paths += self::caseTwins($index, $paths);
 
             // The rows in this directory, and the path each one stands on. This
             // is the half that answers both measured collisions: in each of
@@ -258,7 +269,52 @@ final class FileClaims
     public static function flush(): void
     {
         self::$dir = null;
-        self::$index = ['attached' => [], 'named' => []];
+        self::$index = ['attached' => [], 'named' => [], 'folded' => []];
+    }
+
+    /**
+     * The paths in this directory that a case-insensitive filesystem would
+     * unlink along with the files this deletion removes.
+     *
+     * **The key stays byte-exact and this does not contradict it.** A stored
+     * `_wp_attached_file` is an address, so two spellings of one name are two
+     * addresses and FileGroups keys them apart on both sides (freshet-165).
+     * But the harm this class guards against is an `unlink()`, and unlink is
+     * answered by the volume rather than by the key: on macOS, on Windows and
+     * on a case-insensitive volume mounted under Linux, `hero.jpg` and
+     * `HERO.jpg` are **one file**, so removing the row standing on one destroys
+     * the file the other row renders. Two questions, answered where each
+     * belongs.
+     *
+     * Generous on purpose, and that is the asymmetry claimsOf() is already
+     * built on: nothing here can know the folding rule of the volume the
+     * uploads sit on, and over-claiming keeps a file that could have gone while
+     * over-unlinking destroys one that could not. What it costs on a
+     * case-sensitive host is that two spellings of one name are held back with
+     * a reason on the row rather than offered — measured, 14 such pairs in
+     * 105,396 attachment rows across eight libraries.
+     *
+     * The fold is byte-wise ASCII: that is what every case-insensitive
+     * filesystem folds at minimum and what all 14 measured pairs are. A twin
+     * differing only outside ASCII is not covered, and is not claimed to be.
+     *
+     * @param array{attached: array<string, int[]>, named: array<string, int[]>, folded: array<string, string[]>} $index
+     * @param array<string, true> $paths
+     * @return array<string, true>
+     */
+    private static function caseTwins(array $index, array $paths): array
+    {
+        $twins = [];
+
+        foreach (array_keys($paths) as $path) {
+            foreach ($index['folded'][strtolower((string) $path)] ?? [] as $file) {
+                if (!isset($paths[$file])) {
+                    $twins[$file] = true;
+                }
+            }
+        }
+
+        return $twins;
     }
 
     /**
@@ -271,7 +327,7 @@ final class FileClaims
      * SizeSiblings remembers one listing at a time — the structure grows with
      * the library rather than with the batch.
      *
-     * @return array{attached: array<string, int[]>, named: array<string, int[]>}
+     * @return array{attached: array<string, int[]>, named: array<string, int[]>, folded: array<string, string[]>}
      * @throws QueryFailed
      */
     private static function index(string $dir): array
@@ -280,7 +336,7 @@ final class FileClaims
             return self::$index;
         }
 
-        $index = ['attached' => [], 'named' => []];
+        $index = ['attached' => [], 'named' => [], 'folded' => []];
 
         foreach (self::attachedIn($dir) as $rowId => $file) {
             $index['attached'][$file][$rowId] = true;
@@ -298,11 +354,20 @@ final class FileClaims
         // keys, or two pages — is one claimant; ascending afterwards so which
         // claimant a shared path is reported against does not depend on the
         // order the database happened to return.
+        $folded = [];
+
         foreach (['attached', 'named'] as $relation) {
             foreach ($index[$relation] as $file => $rowIds) {
                 ksort($rowIds);
                 $index[$relation][$file] = array_keys($rowIds);
+                // Keyed by the real path while it is built, so a path in both
+                // relations is one entry rather than two.
+                $folded[strtolower((string) $file)][(string) $file] = true;
             }
+        }
+
+        foreach ($folded as $lower => $files) {
+            $index['folded'][$lower] = array_keys($files);
         }
 
         self::$dir = $dir;

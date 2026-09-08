@@ -369,7 +369,7 @@ $GLOBALS['wpdb'] = new class {
 
         // Every attachment row standing on any of these paths — the sibling
         // lookup, and it takes a whole page of paths at a time.
-        if (str_contains($query['sql'], 'pm.meta_value IN')) {
+        if (str_contains($query['sql'], 'CAST(pm.meta_value AS BINARY) IN')) {
             $paths = array_slice($query['params'], 1);
             $found = [];
 

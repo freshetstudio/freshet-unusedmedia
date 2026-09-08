@@ -510,7 +510,7 @@ $GLOBALS['wpdb'] = new class {
 
         // Every attachment row standing on any of these paths — the sibling
         // lookup, and it takes a whole page of paths at a time.
-        if (str_contains($query['sql'], 'pm.meta_value IN')) {
+        if (str_contains($query['sql'], 'CAST(pm.meta_value AS BINARY) IN')) {
             $paths = array_slice($query['params'], 1);
             $found = [];
 
@@ -954,9 +954,14 @@ check('a single unused row is unused', FileGroups::verdict(1, 0, 0, 1), ResultSt
 
 $groups = FileGroups::subquery(ResultStore::STATUS_UNUSED, ResultFilters::none());
 
-check('the subquery groups on the key', str_contains($groups['sql'], 'GROUP BY fg_key'), true);
+check('the subquery groups on the key', str_contains($groups['sql'], 'GROUP BY ' . FileGroups::keySql()), true);
 check('the key comes from _wp_attached_file', str_contains($groups['sql'], "fgf.meta_key = '_wp_attached_file'"), true);
-check('the key is the whole meta value', str_contains($groups['sql'], "COALESCE(NULLIF(fgf.meta_value, '')"), true);
+check('the key is the whole meta value', str_contains($groups['sql'], "COALESCE(NULLIF(CAST(fgf.meta_value AS BINARY), '')"), true);
+// fg_key is the same value in the column's own collation, so the filename
+// filter and the File sort go on folding case — neither is an identity
+// question, and a binary column would have made both byte-exact (freshet-165).
+check('the selected key is not the binary one', str_contains($groups['sql'], 'CAST(fgf.meta_value AS BINARY) AS fg_key'), false);
+check('it is aggregated, because the grouping is on the key', str_contains($groups['sql'], 'MIN(CASE WHEN CHAR_LENGTH(fgf.meta_value) > 0 THEN fgf.meta_value END)'), true);
 check('nothing cuts a basename out of the path', preg_match('/SUBSTRING|RIGHT\(|LOCATE\(/i', $groups['sql']), 0);
 check('the status filter is the file verdict', str_contains($groups['sql'], "fg_status = 'unused'"), true);
 check('filters are HAVING, never WHERE', substr_count($groups['sql'], 'WHERE'), 1);
@@ -1223,6 +1228,44 @@ $result = $deleter()->deleteVerified([100]);
 check('so an ordinary duplicate group still deletes', $result, ['deleted' => 1, 'skipped' => 0, 'failed' => 0, 'remaining' => []]);
 check('and the file goes', onDisk('2027/02/logo.png'), false);
 
+// --- and a third way in, which is not a metadata relation at all: two rows
+// whose stored paths differ only in case. The key is byte-exact on both sides
+// (freshet-165), so to this plugin they are two files — and on a filesystem
+// that folds case they are one, so deleting either unlinks the file the other
+// stands on. The key answers what a path is; the guard answers what an unlink
+// removes, and only the second one is the filesystem's question.
+
+library([
+    100 => ['file' => '2028/01/canon.jpg'],
+    200 => ['file' => '2028/01/CANON.jpg', 'used' => true],
+]);
+
+check('two spellings of one name are two keys', FileGroups::keyFor(100) === FileGroups::keyFor(200), false);
+check('so neither is the other\'s sibling', FileGroups::siblings(100), [100]);
+check('but a folding filesystem unlinks the twin too, so it is claimed', FileClaims::claimants([100]), ['2028/01/CANON.jpg' => 200]);
+check('and the mirror holds, whichever spelling is offered', FileClaims::claimants([200]), ['2028/01/canon.jpg' => 100]);
+
+$result = $deleter()->deleteVerified([100]);
+
+check('so the deletion is refused rather than taken on trust', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0, 'remaining' => []]);
+
+// And the boundary, because a fold that claimed the neighbourhood would make
+// every library undeletable: it is the whole path that folds, so a longer name
+// is not a twin and neither is the same name in another directory.
+
+library([
+    100 => ['file' => '2028/02/canon.jpg'],
+    200 => ['file' => '2028/02/canonical.jpg', 'used' => true],
+    300 => ['file' => '2028/03/CANON.jpg', 'used' => true],
+]);
+
+check('a longer name sharing a stem is not a twin', FileClaims::claimants([100]), []);
+
+$result = $deleter()->deleteVerified([100]);
+
+check('so an unused file with no twin still deletes', $result, ['deleted' => 1, 'skipped' => 0, 'failed' => 0, 'remaining' => []]);
+check('and the same spelling in another directory kept its file', onDisk('2028/03/CANON.jpg'), true);
+
 // A read that did not answer is not an answer of "nobody else needs this file".
 // Same reading as the sibling lookup and the re-scan: the file is not deleted,
 // and it leaves the unused pool so the batch loop still terminates.
@@ -1248,28 +1291,52 @@ $GLOBALS['dbError'] = false;
 // matched and then evaluated against the same fixture rows keyFor() is given.
 
 /**
- * keySql(), executed. The expression is COALESCE(NULLIF(<value>, ''), CONCAT(
- * '<prefix>', <id>)) and nothing else, so it can be run in PHP against a row's
- * stored value — and if it ever stops being that expression this stops
- * pretending it can, rather than silently asserting something weaker.
+ * keySql(), executed — and executed the way the **database** would run it,
+ * which is the half a string comparison of the two keys could not reach.
+ *
+ * The expression is COALESCE(NULLIF(<value>, ''), CONCAT('<prefix>', <id>))
+ * with the value either bare or cast, and it is matched out of keySql() rather
+ * than restated, so a key that stops being that expression stops pretending
+ * this can evaluate it instead of silently asserting something weaker.
+ *
+ * Two things are modelled, because the key is both of them:
+ *
+ * - the **value** the expression yields, and
+ * - how MySQL **compares** two of those values, which is the column's
+ *   collation's business and not the expression's. On the bare column that is
+ *   `_ci` and PAD SPACE — case folded, trailing spaces ignored, and `NULLIF(…,
+ *   '')` therefore reading `'   '` as empty. Cast to BINARY it is the bytes,
+ *   which is what keyFor() has always been (freshet-165).
+ *
+ * Modelling MySQL is not MySQL and this does not pretend to be: the empirical
+ * half is the group count measured against real libraries, recorded on
+ * freshet-165. What it catches is the twins drifting apart again — and they can
+ * do that while returning identical strings, which is exactly how this went
+ * unnoticed.
  */
 function evaluateKeySql(string $storedValue, int $id): string
 {
     $sql = FileGroups::keySql();
 
-    if (preg_match("/^COALESCE\(NULLIF\(fgf\.meta_value, ''\), CONCAT\('(.+)', p\.ID\)\)$/", $sql, $matches) !== 1) {
+    if (preg_match("/^COALESCE\(NULLIF\((CAST\(fgf\.meta_value AS BINARY\)|fgf\.meta_value), ''\), CONCAT\('(.+)', p\.ID\)\)$/", $sql, $matches) !== 1) {
         return 'keySql() is no longer an expression this test can evaluate: ' . $sql;
     }
 
-    return $storedValue !== '' ? $storedValue : $matches[1] . $id;
+    // The fold the collation applies before anything is compared. The key *is*
+    // the comparison, so a value that survives here as something else is a
+    // group this side has and the other side does not.
+    $compared = str_contains($matches[1], 'BINARY') ? $storedValue : strtolower(rtrim($storedValue, ' '));
+
+    return $compared !== '' ? $compared : $matches[2] . $id;
 }
 
-// The last three rows are the whitespace fixtures (freshet-154). keyFor() used
-// to trim the stored value and keySql() never has, so a `_wp_attached_file`
-// carrying a stray space keyed one way in PHP and another in SQL — the same
-// file counted in one group and listed from another. The trim is gone, and the
-// proof is the twins loop below rather than a restated expectation: the same
-// stored value goes to both sides and the answers are compared.
+// Rows 400-600 are the whitespace fixtures (freshet-154) and rows 700-800 the
+// collation ones (freshet-165). keyFor() used to trim the stored value and
+// keySql() never has; then keySql() went on being read by a `_ci`, PAD SPACE
+// column while keyFor() compared bytes. Both are the same defect — one file
+// counted in one group and listed from another — and the proof is the twins
+// loop below rather than a restated expectation: the same stored value goes to
+// both sides, and the comparison each side would make is run.
 library([
     100 => ['file' => '2024/01/logo.png'],
     200 => ['file' => '2024/01/logo.png'],
@@ -1278,6 +1345,8 @@ library([
     400 => ['file' => ' 2024/01/logo.png'],
     500 => ['file' => "2024/01/logo.png\t"],
     600 => ['file' => '   '],
+    700 => ['file' => '2024/01/LOGO.png'],
+    800 => ['file' => '2024/01/logo.png '],
 ]);
 
 $twins = [];
@@ -1294,7 +1363,27 @@ check('the PHP key and the SQL key agree on every fixture row', $twins, [
     400 => true,
     500 => true,
     600 => true,
+    700 => true,
+    800 => true,
 ]);
+
+// The same agreement stated as the thing that actually matters: not that the
+// two sides return equal strings, but that they cut the library into the same
+// groups. A `_ci` PAD SPACE key returns the same string for row 700 and puts it
+// in row 100's group anyway, which is the failure this loop is here to see.
+$phpGroups = [];
+$sqlGroups = [];
+
+foreach ($GLOBALS['rows'] as $id => $row) {
+    $phpGroups[FileGroups::keyFor($id)][] = $id;
+    $sqlGroups[evaluateKeySql($row['file'], $id)][] = $id;
+}
+
+ksort($phpGroups);
+ksort($sqlGroups);
+
+check('and they cut the same nine rows into the same groups', $sqlGroups, $phpGroups);
+check('which is eight groups, because only 100 and 200 are one file', count($phpGroups), 8);
 
 // What that agreement is made of, named so a regression says which half moved.
 // The key is the stored value verbatim: a leading space is part of the path
@@ -1311,6 +1400,20 @@ check('and a value that is only whitespace is a value, not a missing one', FileG
 // sides and nothing merges.
 check('a whitespace path does not join the group of the path it would trim to', FileGroups::siblings(400), [400]);
 check('and the rows that do share that path are untouched by it', FileGroups::siblings(100), [100, 200]);
+
+// The collation half, named the same way. Every one of these is a value the
+// column's own comparison folds into another row's key, and the cast is what
+// stops it: case, a padded trailing space, and the whitespace-only value
+// `NULLIF` reads as empty.
+check('a differently-cased spelling is its own key on the SQL side too', evaluateKeySql('2024/01/LOGO.png', 700), '2024/01/LOGO.png');
+check('so it is its own group rather than the lower-case one\'s', FileGroups::siblings(700), [700]);
+check('a trailing space is not padded away either', evaluateKeySql('2024/01/logo.png ', 800), '2024/01/logo.png ');
+check('and a whitespace-only value is a value, not an empty one', evaluateKeySql('   ', 600), '   ');
+check('the key compares bytes rather than the column collation', str_contains(FileGroups::keySql(), 'CAST(fgf.meta_value AS BINARY)'), true);
+// Placement, not decoration: NULLIF is itself a comparison the collation
+// answers, so a cast wrapped around the finished expression would leave that
+// half folded and row 600 disagreeing on its own.
+check('and the cast is inside the emptiness test, not around the result', str_contains(FileGroups::keySql(), "NULLIF(CAST(fgf.meta_value AS BINARY), '')"), true);
 check('the SQL key still reads the attached file and nothing else', substr_count(FileGroups::keySql(), 'meta_value'), 1);
 check('the guard added no column to the grouped subquery', str_contains(FileGroups::subquery()['sql'], 'fc_file'), false);
 check('and no second join to it', substr_count(FileGroups::subquery()['sql'], 'LEFT JOIN'), 2);

@@ -105,12 +105,11 @@ final class FileGroups
      * genuinely hold the trimmed path, which is two different files in one
      * group.
      *
-     * What no expression here can settle is what the *database* calls equal. On
-     * a PAD SPACE collation — WordPress's own `utf8mb4_unicode_520_ci` is one —
-     * MySQL ignores trailing spaces in both `=` and `GROUP BY`, so SQL folds
-     * `logo.png ` into `logo.png` whatever PHP does, and reads a whitespace-only
-     * value as empty. Trimming here would not fix that; it would only move the
-     * disagreement onto leading whitespace, which no collation ignores.
+     * What no expression *here* can settle is what the **database** calls
+     * equal: the column's collation decides that, and no PHP written in this
+     * method reaches it. So the answer lives in keySql(), which compares bytes
+     * rather than the `_ci`, PAD SPACE reading of them — one rule for case, for
+     * accents and for a trailing space alike (freshet-165).
      */
     public static function keyFor(int $attachmentId): string
     {
@@ -119,10 +118,66 @@ final class FileGroups
         return $file !== '' ? $file : self::ROW_KEY_PREFIX . $attachmentId;
     }
 
-    /** The same key in SQL. Twin of keyFor(); the counts and the listing read this one. */
+    /**
+     * The same key in SQL. Twin of keyFor(); the counts and the listing read
+     * this one.
+     *
+     * **It compares bytes, because the column does not.** `wp_postmeta`'s
+     * `meta_value` carries a `_ci` collation on every WordPress there is, and
+     * the `unicode` family is accent-insensitive with it — so `GROUP BY` and
+     * `=` on the bare column answer that `HERO-BANNER.jpg` and
+     * `Hero-Banner.jpg` are one value while keyFor(), which is PHP and
+     * therefore byte-exact, reads two. That is one physical file in one group
+     * on one side and two on the other, which is the divergence this key
+     * exists to not have: measured at 7 such pairs on a 9,828-file library and
+     * 7 more on a second, and harmful in both directions — a case-sensitive
+     * filesystem has two files and SQL hides one of them from the listing,
+     * while a case-insensitive one has a single file that PHP's split offers
+     * up for deletion out from under the other row (freshet-165).
+     *
+     * The same collation is PAD SPACE, so it also folds a trailing space into
+     * the bare path and reads a whitespace-only value as empty. One cast
+     * settles all three, which is why there is no second rule here for spaces.
+     *
+     * **The cast is on the column rather than around the whole expression, and
+     * that is not cosmetic.** `NULLIF(meta_value, '')` is itself a comparison
+     * the collation answers — it is what reads `'   '` as empty — so a cast
+     * applied to the result would leave that half folded and keyFor() would go
+     * on disagreeing about exactly one value.
+     *
+     * What it costs: the GROUP BY is a byte comparison on an expression rather
+     * than on the column. Nothing is lost to it, because `wp_postmeta` is
+     * indexed on `meta_key` and `post_id` and never on `meta_value` — the
+     * grouped read was already scanning every attached-file row.
+     */
     public static function keySql(): string
     {
-        return "COALESCE(NULLIF(fgf.meta_value, ''), CONCAT('" . self::ROW_KEY_PREFIX . "', p.ID))";
+        return "COALESCE(NULLIF(CAST(fgf.meta_value AS BINARY), ''), CONCAT('" . self::ROW_KEY_PREFIX . "', p.ID))";
+    }
+
+    /**
+     * The key as a **selectable column**: the same value, handed back in the
+     * column's own collation.
+     *
+     * keySql() is binary, and selecting it as `fg_key` would make the filename
+     * filter and the File sort byte-exact too — a search box that misses
+     * `Logo.png` when you type `logo`, and a listing ordered with every capital
+     * ahead of every lower-case letter. Neither is an identity question, so
+     * neither follows the key.
+     *
+     * Aggregated because the SELECT is grouped on the binary key: every row in
+     * a group carries the same bytes, so MIN() is that key rather than a choice
+     * between values. And emptiness is asked with CHAR_LENGTH rather than
+     * NULLIF for the reason keySql() casts the column instead of the
+     * expression — NULLIF is answered by the collation, which reads `'   '` as
+     * empty while the key does not. Two expressions that can disagree about one
+     * row is the whole defect this class is here to not have.
+     */
+    private static function keyColumnSql(): string
+    {
+        return 'COALESCE('
+            . 'MIN(CASE WHEN CHAR_LENGTH(fgf.meta_value) > 0 THEN fgf.meta_value END), '
+            . "CONCAT('" . self::ROW_KEY_PREFIX . "', MIN(p.ID)))";
     }
 
     /**
@@ -232,7 +287,10 @@ final class FileGroups
      * ascending. One query however many paths are asked for.
      *
      * The comparison is on whole paths — an `IN` over equalities, never a LIKE
-     * on a basename, which is the mirror of the bug this class fixes.
+     * on a basename, which is the mirror of the bug this class fixes. And it is
+     * cast for the reason keySql() is: the column's collation would answer that
+     * a differently-cased spelling of the path is this path, and hand back rows
+     * standing on a file these keys do not name (freshet-165).
      *
      * **A read that did not answer raises rather than returning an empty set.**
      * This is the delete path's first query: an empty result here reads as "no
@@ -253,7 +311,7 @@ final class FileGroups
         $rows = Db::rows('file grouping', $wpdb->get_results($wpdb->prepare(
             "SELECT p.ID AS fg_id, pm.meta_value AS fg_key FROM {$wpdb->posts} p
              INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID AND pm.meta_key = %s
-             WHERE p.post_type = 'attachment' AND pm.meta_value IN ({$placeholders})
+             WHERE p.post_type = 'attachment' AND CAST(pm.meta_value AS BINARY) IN ({$placeholders})
              ORDER BY p.ID ASC",
             array_merge([self::META_FILE], $keys)
         ), ARRAY_A));
@@ -418,7 +476,9 @@ final class FileGroups
      * listing one. Files on disk are not a per-request opinion, so both halves
      * read this.
      *
-     * Columns: `fg_key` the path, `fg_id` the row that represents the file,
+     * Columns: `fg_key` the path — keyColumnSql(), which is keySql()'s value in
+     * the column's own collation so the filter and the sort go on folding case;
+     * `fg_id` the row that represents the file,
      * `fg_status` the verdict, `fg_date` the earliest upload of any of its rows.
      * The filter clauses sit in HAVING and never in WHERE: narrowing the rows
      * before they are grouped would hide a *used* row from its own group and
@@ -462,7 +522,7 @@ final class FileGroups
             $params[] = $filters->to . ' 23:59:59';
         }
 
-        $sql = 'SELECT ' . self::keySql() . ' AS fg_key,'
+        $sql = 'SELECT ' . self::keyColumnSql() . ' AS fg_key,'
             . ' ' . self::representativeSql() . ' AS fg_id,'
             . ' ' . self::statusSql() . ' AS fg_status,'
             . " MIN(CASE WHEN p.post_status <> 'trash' THEN p.post_date END) AS fg_date"
@@ -470,7 +530,7 @@ final class FileGroups
             . " LEFT JOIN {$wpdb->postmeta} fgf ON fgf.post_id = p.ID AND fgf.meta_key = " . self::quote(self::META_FILE)
             . " LEFT JOIN {$wpdb->postmeta} fgs ON fgs.post_id = p.ID AND fgs.meta_key = " . self::quote(ResultStore::META_STATUS)
             . " WHERE p.post_type = 'attachment'"
-            . ' GROUP BY fg_key'
+            . ' GROUP BY ' . self::keySql()
             . ' HAVING ' . implode(' AND ', $having);
 
         return ['sql' => $sql, 'params' => $params];

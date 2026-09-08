@@ -9,7 +9,7 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2026-09-08T08:38:32+00:00\n"
+"POT-Creation-Date: 2026-09-08T13:44:23+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.12.0\n"
 "X-Domain: freshet-unused-media\n"
@@ -45,8 +45,8 @@ msgstr ""
 #: src/Admin/Ajax.php:51
 #: src/Admin/Ajax.php:83
 #: src/Admin/Ajax.php:104
-#: src/Admin/Ajax.php:217
-#: src/Admin/Ajax.php:243
+#: src/Admin/Ajax.php:244
+#: src/Admin/Ajax.php:270
 #: src/Admin/DeleteController.php:47
 msgid "Not allowed."
 msgstr ""
@@ -665,8 +665,7 @@ msgstr ""
 msgid "Used: %s"
 msgstr ""
 
-#. translators: %s: number of unused attachments
-#. translators: %s: an em dash standing in for a number that could not be counted
+#. translators: %s: the number of unused attachments, or an em dash when the count could not be read
 #: src/Admin/ToolsPage.php:569
 #: src/Admin/ToolsPage.php:584
 #, php-format
@@ -962,11 +961,11 @@ msgstr ""
 msgid "Held back — deleting it would remove a file another library entry uses"
 msgstr ""
 
-#: src/Scan/FileGroups.php:460
+#: src/Scan/FileGroups.php:509
 msgid "Held back — another library entry uses this file"
 msgstr ""
 
-#: src/Scan/FileGroups.php:461
+#: src/Scan/FileGroups.php:510
 msgid "Held back — a copy of this file is in the trash"
 msgstr ""
 

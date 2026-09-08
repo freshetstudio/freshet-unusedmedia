@@ -565,7 +565,7 @@ final class ToolsPage
                 // rather than escaped whole. The label is still escaped; only the
                 // span around the count is markup.
                 sprintf(
-                    /* translators: %s: number of unused attachments */
+                    /* translators: %s: the number of unused attachments, or an em dash when the count could not be read */
                     esc_html__('Unused: %s', 'freshet-unused-media'),
                     $this->countFigure(ResultStore::STATUS_UNUSED, $counts['unused']) // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in countFigure().
                 ),
@@ -580,7 +580,7 @@ final class ToolsPage
             // finishing on a working query still writes the figure back into a
             // screen that was rendered without one.
             printf(
-                /* translators: %s: an em dash standing in for a number that could not be counted */
+                /* translators: %s: the number of unused attachments, or an em dash when the count could not be read */
                 esc_html__('Unused: %s', 'freshet-unused-media'),
                 $this->countFigure(ResultStore::STATUS_UNUSED, null) // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in countFigure().
             );

@@ -93,10 +93,28 @@ final class FileGroups
     /**
      * The grouping key for one attachment — the full stored path, never a
      * basename. Twin of keySql(); the delete loop reads this one.
+     *
+     * **The stored value is taken exactly as it stands, whitespace and all.**
+     * This used to trim it and keySql() never has, so a `_wp_attached_file`
+     * carrying a stray space keyed one way in PHP and another in SQL — one file
+     * counted in one group and listed from another. Twins have to move
+     * together, and it is this side that moved, because the stored value *is*
+     * the file's address: core resolves it untrimmed (`get_attached_file()`),
+     * fetch() looks rows up by equality against it, and a trimmed key therefore
+     * names a path this row does not stand on — merging it with whichever rows
+     * genuinely hold the trimmed path, which is two different files in one
+     * group.
+     *
+     * What no expression here can settle is what the *database* calls equal. On
+     * a PAD SPACE collation — WordPress's own `utf8mb4_unicode_520_ci` is one —
+     * MySQL ignores trailing spaces in both `=` and `GROUP BY`, so SQL folds
+     * `logo.png ` into `logo.png` whatever PHP does, and reads a whitespace-only
+     * value as empty. Trimming here would not fix that; it would only move the
+     * disagreement onto leading whitespace, which no collation ignores.
      */
     public static function keyFor(int $attachmentId): string
     {
-        $file = trim((string) get_post_meta($attachmentId, self::META_FILE, true));
+        $file = (string) get_post_meta($attachmentId, self::META_FILE, true);
 
         return $file !== '' ? $file : self::ROW_KEY_PREFIX . $attachmentId;
     }

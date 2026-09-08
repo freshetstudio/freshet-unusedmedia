@@ -695,6 +695,15 @@ function library(array $rows): void
         unlink($stale);
     }
 
+    // A stored value carrying no directory at all — the whitespace fixture the
+    // key section uses, and what "organize by date" off looks like — writes its
+    // file at the root, where the dated sweep above cannot see it.
+    foreach (glob(UPLOADS . '/*') ?: [] as $stale) {
+        if (!is_dir($stale)) {
+            unlink($stale);
+        }
+    }
+
     $GLOBALS['rows'] = [];
     $GLOBALS['meta'] = [];
     $GLOBALS['options'] = [];
@@ -1255,11 +1264,20 @@ function evaluateKeySql(string $storedValue, int $id): string
     return $storedValue !== '' ? $storedValue : $matches[1] . $id;
 }
 
+// The last three rows are the whitespace fixtures (freshet-154). keyFor() used
+// to trim the stored value and keySql() never has, so a `_wp_attached_file`
+// carrying a stray space keyed one way in PHP and another in SQL — the same
+// file counted in one group and listed from another. The trim is gone, and the
+// proof is the twins loop below rather than a restated expectation: the same
+// stored value goes to both sides and the answers are compared.
 library([
     100 => ['file' => '2024/01/logo.png'],
     200 => ['file' => '2024/01/logo.png'],
     300 => ['file' => '2025/06/logo.png'],
     900 => ['file' => ''],
+    400 => ['file' => ' 2024/01/logo.png'],
+    500 => ['file' => "2024/01/logo.png\t"],
+    600 => ['file' => '   '],
 ]);
 
 $twins = [];
@@ -1268,7 +1286,31 @@ foreach (array_keys($GLOBALS['rows']) as $id) {
     $twins[$id] = FileGroups::keyFor($id) === evaluateKeySql($GLOBALS['rows'][$id]['file'], $id);
 }
 
-check('the PHP key and the SQL key agree on every fixture row', $twins, [100 => true, 200 => true, 300 => true, 900 => true]);
+check('the PHP key and the SQL key agree on every fixture row', $twins, [
+    100 => true,
+    200 => true,
+    300 => true,
+    900 => true,
+    400 => true,
+    500 => true,
+    600 => true,
+]);
+
+// What that agreement is made of, named so a regression says which half moved.
+// The key is the stored value verbatim: a leading space is part of the path
+// core resolves (`get_attached_file()` does not trim either), so a key without
+// it names a path this row does not stand on.
+check('a leading space is part of the key, not noise stripped off it', FileGroups::keyFor(400), ' 2024/01/logo.png');
+check('a trailing tab likewise', FileGroups::keyFor(500), "2024/01/logo.png\t");
+check('and a value that is only whitespace is a value, not a missing one', FileGroups::keyFor(600), '   ');
+
+// The consequence that made this worth fixing, and it is the direction this
+// plugin exists to refuse: trimmed, row 400 keys as `2024/01/logo.png` and
+// joins the group of two rows standing on a *different* file, while the SQL
+// side goes on listing it as its own. Untrimmed, it is its own group on both
+// sides and nothing merges.
+check('a whitespace path does not join the group of the path it would trim to', FileGroups::siblings(400), [400]);
+check('and the rows that do share that path are untouched by it', FileGroups::siblings(100), [100, 200]);
 check('the SQL key still reads the attached file and nothing else', substr_count(FileGroups::keySql(), 'meta_value'), 1);
 check('the guard added no column to the grouped subquery', str_contains(FileGroups::subquery()['sql'], 'fc_file'), false);
 check('and no second join to it', substr_count(FileGroups::subquery()['sql'], 'LEFT JOIN'), 2);
@@ -2032,8 +2074,14 @@ foreach (glob(UPLOADS . '/*/*') ?: [] as $dir) {
     rmdir($dir);
 }
 
-foreach (glob(UPLOADS . '/*') ?: [] as $dir) {
-    rmdir($dir);
+foreach (glob(UPLOADS . '/*') ?: [] as $entry) {
+    if (is_dir($entry)) {
+        rmdir($entry);
+
+        continue;
+    }
+
+    unlink($entry);
 }
 
 rmdir(UPLOADS);

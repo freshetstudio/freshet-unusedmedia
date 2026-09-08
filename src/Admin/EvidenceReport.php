@@ -6,6 +6,7 @@ namespace FreshetUnusedMedia\Admin;
 
 use FreshetUnusedMedia\License\LicenseInterface;
 use FreshetUnusedMedia\Scan\FileSize;
+use FreshetUnusedMedia\Scan\QueryFailed;
 use FreshetUnusedMedia\Scan\Reference;
 use FreshetUnusedMedia\Scan\ResultStore;
 
@@ -84,20 +85,29 @@ final class EvidenceReport
             return;
         }
 
-        $counts = $this->store->counts();
+        // freshet-152: the sentence below is three counts, and a tally that did
+        // not run makes it read "0 unused and 0 used, 0 never scanned" — an
+        // export offered as evidence, described by figures nothing produced.
+        try {
+            $counts = $this->store->counts();
+        } catch (QueryFailed) {
+            $counts = null;
+        }
 
         echo '<div class="freshet-unusedmedia-section">';
         echo '<h2>' . esc_html__('Evidence report', 'freshet-unused-media') . '</h2>';
 
         echo '<p class="description">' . esc_html__('Export what the last scan found: every file with its status, its size, and the places it was found referenced — the same evidence the attachment screen shows, for the whole library at once. It is the file to send before anything is deleted, so the reasoning can be checked by somebody who does not have access here.', 'freshet-unused-media') . '</p>';
 
-        echo '<p class="description">' . esc_html(sprintf(
-            /* translators: 1: number of unused files, 2: number of used files, 3: number of files never scanned */
-            __('The report covers files that have been scanned — %1$s unused and %2$s used. %3$s file(s) have never been scanned and are not in it; run a scan first if that number should be zero.', 'freshet-unused-media'),
-            number_format_i18n($counts['unused']),
-            number_format_i18n($counts['used']),
-            number_format_i18n($counts['unscanned'])
-        )) . '</p>';
+        echo '<p class="description">' . esc_html($counts === null
+            ? QueryFailed::userMessage() . ' ' . __('What the report would cover cannot be said right now, so no figures are given. The export itself still works, and it says on its own last line if it could not be finished.', 'freshet-unused-media')
+            : sprintf(
+                /* translators: 1: number of unused files, 2: number of used files, 3: number of files never scanned */
+                __('The report covers files that have been scanned — %1$s unused and %2$s used. %3$s file(s) have never been scanned and are not in it; run a scan first if that number should be zero.', 'freshet-unused-media'),
+                number_format_i18n($counts['unused']),
+                number_format_i18n($counts['used']),
+                number_format_i18n($counts['unscanned'])
+            )) . '</p>';
 
         echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="freshet-unusedmedia-report">';
         wp_nonce_field(self::ACTION);
@@ -158,12 +168,26 @@ final class EvidenceReport
             ? [ResultStore::STATUS_UNUSED]
             : [ResultStore::STATUS_UNUSED, ResultStore::STATUS_USED];
 
+        // The JSON envelope's totals are read here rather than inside the
+        // stream, because past the headers below there is no way left to answer
+        // with an error page — the reader would get a download whose summary is
+        // three zeroes nothing counted (freshet-152).
+        $counts = null;
+
+        if ($format === 'json') {
+            try {
+                $counts = $this->store->counts();
+            } catch (QueryFailed) {
+                wp_die(esc_html(QueryFailed::userMessage()));
+            }
+        }
+
         nocache_headers();
         header('Content-Type: ' . ($format === 'json' ? 'application/json' : 'text/csv') . '; charset=utf-8');
         header('Content-Disposition: attachment; filename="' . $this->filename($format) . '"');
 
         if ($format === 'json') {
-            $this->streamJson($statuses, $scope);
+            $this->streamJson($statuses, $scope, (array) $counts);
         } else {
             $this->streamCsv($statuses);
         }
@@ -188,12 +212,25 @@ final class EvidenceReport
 
         fputcsv($out, self::COLUMNS, ',', '"', '');
 
-        $this->eachRow($statuses, static function (array $row) use ($out): void {
-            fputcsv($out, array_map(
-                static fn(string $key): string => (string) ($row[$key] ?? ''),
-                self::COLUMNS
+        // The rows are paged, and paging stops on an empty page — so a read
+        // that failed halfway used to end the file exactly where a complete
+        // export ends, and the two are indistinguishable to whoever opens it
+        // (freshet-152). The headers and half the body are already sent by
+        // then, so this cannot become an error page; what it can do is refuse
+        // to look complete. The last line says so, in the first column.
+        try {
+            $this->eachRow($statuses, static function (array $row) use ($out): void {
+                fputcsv($out, array_map(
+                    static fn(string $key): string => (string) ($row[$key] ?? ''),
+                    self::COLUMNS
+                ), ',', '"', '');
+            });
+        } catch (QueryFailed) {
+            fputcsv($out, array_merge(
+                [QueryFailed::userMessage() . ' ' . __('This export stopped early and is incomplete — do not read it as the whole library.', 'freshet-unused-media')],
+                array_fill(0, count(self::COLUMNS) - 1, '')
             ), ',', '"', '');
-        });
+        }
 
         // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- response body.
         fclose($out);
@@ -205,11 +242,11 @@ final class EvidenceReport
      * — when it was made, which library, and the totals it was made from.
      *
      * @param string[] $statuses
+     * @param array{used?: int, unused?: int, unscanned?: int, total?: int} $counts Read before the
+     *        headers went out, so this method never has to answer for it.
      */
-    private function streamJson(array $statuses, string $scope): void
+    private function streamJson(array $statuses, string $scope, array $counts): void
     {
-        $counts = $this->store->counts();
-
         echo '{"generated_at":' . wp_json_encode(gmdate('c'))
             . ',"site":' . wp_json_encode(home_url())
             . ',"plugin":' . wp_json_encode('freshet-unused-media ' . FRESHET_UNUSEDMEDIA_VERSION)
@@ -218,16 +255,31 @@ final class EvidenceReport
             . ',"files":[';
 
         $first = true;
+        $complete = true;
 
-        $this->eachRow($statuses, static function (array $row, array $refs) use (&$first): void {
-            unset($row['evidence']);
-            $row['references_listed'] = $refs;
+        // As in the CSV, and for the same reason: past the headers a failed
+        // page can only be reported inside the document. `complete` is written
+        // on every export rather than only on a broken one, so a consumer has
+        // one key to check instead of an absence to notice (freshet-152).
+        try {
+            $this->eachRow($statuses, static function (array $row, array $refs) use (&$first): void {
+                unset($row['evidence']);
+                $row['references_listed'] = $refs;
 
-            echo ($first ? '' : ',') . wp_json_encode($row);
-            $first = false;
-        });
+                echo ($first ? '' : ',') . wp_json_encode($row);
+                $first = false;
+            });
+        } catch (QueryFailed) {
+            $complete = false;
+        }
 
-        echo ']}';
+        echo '],"complete":' . ($complete ? 'true' : 'false');
+
+        if (!$complete) {
+            echo ',"error":' . wp_json_encode(QueryFailed::userMessage());
+        }
+
+        echo '}';
     }
 
     /**
@@ -242,6 +294,8 @@ final class EvidenceReport
      *
      * @param string[] $statuses
      * @param callable(array<string, string|int>, array<int, array<string, string|int>>): void $write
+     * @throws QueryFailed A page that did not answer ends the walk early, which
+     *                     is byte-identical to reaching the end of the library.
      */
     private function eachRow(array $statuses, callable $write): void
     {

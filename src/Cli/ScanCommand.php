@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace FreshetUnusedMedia\Cli;
 
 use FreshetUnusedMedia\License\LicenseInterface;
+use FreshetUnusedMedia\Scan\Db;
 use FreshetUnusedMedia\Scan\FileClaims;
 use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\FileSize;
 use FreshetUnusedMedia\Scan\OrphanSizes;
+use FreshetUnusedMedia\Scan\QueryFailed;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\Scanner;
 use FreshetUnusedMedia\Scan\ScanState;
@@ -105,63 +107,86 @@ final class ScanCommand
         }
 
         $state = $this->state->current();
+        $progress = null;
 
-        if ($state === null) {
-            // Same count the browser scan sizes itself with, trash included.
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- simple count to size the scan.
-            $total = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'attachment'");
-            $state = $this->state->start($total);
-        }
-
-        $progress = $quiet
-            ? null
-            : Utils\make_progress_bar('Scanning media', max(0, $state['total'] - $state['done']));
-
-        $batchSize = max(1, (int) apply_filters('freshet_unusedmedia_batch_size', 100));
-
-        while (true) {
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- ID-ascending cursor batch; picks up mid-scan uploads.
-            $ids = array_map('intval', $wpdb->get_col($wpdb->prepare(
-                "SELECT ID FROM {$wpdb->posts} WHERE post_type = 'attachment' AND ID > %d ORDER BY ID ASC LIMIT %d",
-                $state['cursor'],
-                $batchSize
-            )));
-
-            if ($ids === []) {
-                break;
+        // The CLI twins of the two reads Ajax::scanBatch() guards, and the
+        // argument is the same one (freshet-141, boarded here as freshet-152):
+        // a failed count sizes the run at zero, and a failed cursor read comes
+        // back as an empty batch — which the loop below reads as "there is
+        // nothing left", the only way it is ever told a scan has finished. The
+        // closing counts() is in here too: a run that could not tally what it
+        // found has not finished either. So a read that did not answer ends the
+        // command, and the success line further down is never printed on one.
+        try {
+            if ($state === null) {
+                // Same count the browser scan sizes itself with, trash included.
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- simple count to size the scan.
+                $total = (int) Db::value('library size', $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'attachment'"));
+                $state = $this->state->start($total);
             }
 
-            // One query for the whole chunk's sibling groups instead of one
-            // per file: FileClaimDetector asks for them, and the lookup is a
-            // scan of every attached-file row when it is not primed.
-            FileGroups::prime($ids);
+            $progress = $quiet
+                ? null
+                : Utils\make_progress_bar('Scanning media', max(0, $state['total'] - $state['done']));
 
-            $processed = 0;
-            $errors = 0;
-            $last = $state['cursor'];
+            $batchSize = max(1, (int) apply_filters('freshet_unusedmedia_batch_size', 100));
 
-            foreach ($ids as $id) {
-                if ($this->scanner->scan($id)['status'] === Scanner::STATUS_ERROR) {
-                    // No status was written for it, so it reads as unscanned
-                    // rather than as unused. Counted here so the run can say so
-                    // instead of finishing on a short answer (freshet-141).
-                    ++$errors;
+            while (true) {
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- ID-ascending cursor batch; picks up mid-scan uploads.
+                $ids = array_map('intval', Db::rows('scan batch', $wpdb->get_col($wpdb->prepare(
+                    "SELECT ID FROM {$wpdb->posts} WHERE post_type = 'attachment' AND ID > %d ORDER BY ID ASC LIMIT %d",
+                    $state['cursor'],
+                    $batchSize
+                ))));
+
+                if ($ids === []) {
+                    break;
                 }
 
-                OrphanSizes::observeAttachment($id);
-                ++$processed;
-                $last = $id;
-                $progress?->tick();
+                // One query for the whole chunk's sibling groups instead of one
+                // per file: FileClaimDetector asks for them, and the lookup is a
+                // scan of every attached-file row when it is not primed.
+                FileGroups::prime($ids);
+
+                $processed = 0;
+                $errors = 0;
+                $last = $state['cursor'];
+
+                foreach ($ids as $id) {
+                    if ($this->scanner->scan($id)['status'] === Scanner::STATUS_ERROR) {
+                        // No status was written for it, so it reads as unscanned
+                        // rather than as unused. Counted here so the run can say so
+                        // instead of finishing on a short answer (freshet-141).
+                        ++$errors;
+                    }
+
+                    OrphanSizes::observeAttachment($id);
+                    ++$processed;
+                    $last = $id;
+                    $progress?->tick();
+                }
+
+                $state = $this->state->advance($last, $processed, $errors, SizeSiblings::takeDirectoryReads());
+
+                $this->releaseBatchMemory();
             }
 
-            $state = $this->state->advance($last, $processed, $errors, SizeSiblings::takeDirectoryReads());
+            $progress?->finish();
 
-            $this->releaseBatchMemory();
+            $counts = $this->store->counts();
+        } catch (QueryFailed) {
+            $progress?->finish();
+
+            // The cursor is wherever the last completed batch left it, and the
+            // results already written stay written — so `--resume` picks the
+            // run up rather than starting it again. Nothing is marked finished:
+            // state->finish() is below this, past the point the exception left.
+            WP_CLI::error(
+                'The database stopped answering, so the scan was cut short and the library was not fully read. '
+                . 'Nothing was deleted and no result was thrown away — re-run with --resume to carry on from where it stopped.'
+            );
         }
 
-        $progress?->finish();
-
-        $counts = $this->store->counts();
         $this->state->finish($counts['unused']);
 
         $summary = [
@@ -269,19 +294,29 @@ final class ScanCommand
         $rows = [];
         $page = 1;
 
-        do {
-            $batch = $this->store->unused($page, 200);
+        // Paging stops on an empty page, so a page that failed to run ends the
+        // list early — and a short list of files to delete is indistinguishable
+        // from the whole of a tidier library (freshet-152). It refuses instead.
+        try {
+            do {
+                $batch = $this->store->unused($page, 200);
 
-            foreach ($batch['ids'] as $id) {
-                $rows[] = $this->row($id);
+                foreach ($batch['ids'] as $id) {
+                    $rows[] = $this->row($id);
 
-                if ($limit > 0 && count($rows) >= $limit) {
-                    break 2;
+                    if ($limit > 0 && count($rows) >= $limit) {
+                        break 2;
+                    }
                 }
-            }
 
-            ++$page;
-        } while ($batch['ids'] !== []);
+                ++$page;
+            } while ($batch['ids'] !== []);
+        } catch (QueryFailed) {
+            WP_CLI::error(
+                'The database stopped answering, so this list would have been shorter than the library. '
+                . 'Nothing is shown rather than part of it — try again.'
+            );
+        }
 
         // Formatter::display_items() expects flat values for these two, so they
         // are answered here rather than handed to it as rows.

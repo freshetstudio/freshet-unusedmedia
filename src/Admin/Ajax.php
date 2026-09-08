@@ -137,7 +137,17 @@ final class Ajax
         }
 
         if ($ids === []) {
-            $unused = $this->store->counts()['unused'];
+            try {
+                $unused = $this->store->counts()['unused'];
+            } catch (QueryFailed) {
+                // The scan itself did finish — the cursor read past the end of
+                // the library — but the tally it would be reported with did not
+                // run. Marking it finished on a zero nobody counted is what
+                // freshet-152 is about, so the state is left running and the
+                // browser is told to ask again.
+                wp_send_json_error(['message' => QueryFailed::userMessage()], 500);
+            }
+
             $this->state->finish($unused);
 
             wp_send_json_success([
@@ -294,11 +304,22 @@ final class Ajax
      * The formatted twin travels with the integer because the DOM needs the
      * number in the site's locale and number_format_i18n() has no JS half.
      *
-     * @return array{unused: int, unused_display: string}
+     * A count that did not run sends neither key rather than a zero (freshet-152).
+     * The reply is about a deletion that did happen and must still be delivered
+     * — what it removed is not in doubt — so this is the one caller that
+     * degrades instead of refusing. Absent, updateCount() in admin.js returns
+     * without touching the DOM, so the heading keeps the last number a database
+     * actually produced rather than being rewritten to one it did not.
+     *
+     * @return array{unused?: int, unused_display?: string}
      */
     private function unusedFigure(): array
     {
-        $unused = $this->store->counts()['unused'];
+        try {
+            $unused = $this->store->counts()['unused'];
+        } catch (QueryFailed) {
+            return [];
+        }
 
         return ['unused' => $unused, 'unused_display' => number_format_i18n($unused)];
     }

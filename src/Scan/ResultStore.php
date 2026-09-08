@@ -84,7 +84,15 @@ final class ResultStore
      * Files, not attachment rows: several rows can point at one path, and the
      * saving this plugin is sold on is claimed against disk. See FileGroups.
      *
+     * It raises rather than answering zero. An aggregate that did not run comes
+     * back as no rows, which reads here as "every tally is 0" — a library the
+     * screen then calls clean when it does not know (freshet-152). Nothing is
+     * deleted on the strength of this figure, so the risk is not a lost file;
+     * it is a number nobody gave us being printed as if somebody had. Every
+     * caller catches and says the counting failed instead.
+     *
      * @return array{used: int, unused: int, unscanned: int, total: int}
+     * @throws QueryFailed
      */
     public function counts(): array
     {
@@ -93,10 +101,10 @@ final class ResultStore
         $counts = [self::STATUS_USED => 0, self::STATUS_UNUSED => 0, FileGroups::STATUS_UNSCANNED => 0];
 
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- aggregate over the grouped subquery; no WP API groups on _wp_attached_file.
-        $rows = (array) $wpdb->get_results($this->prepared(
+        $rows = Db::rows('library counts', $wpdb->get_results($this->prepared(
             FileGroups::subquery(),
             'SELECT fg.fg_status AS status, COUNT(*) AS files FROM ({{groups}}) fg GROUP BY fg.fg_status'
-        ), ARRAY_A);
+        ), ARRAY_A));
 
         foreach ($rows as $row) {
             $status = (string) ($row['status'] ?? '');
@@ -118,6 +126,7 @@ final class ResultStore
      * Paginated list of the files currently unused.
      *
      * @return array{ids: int[], total: int}
+     * @throws QueryFailed
      */
     public function unused(int $page, int $perPage, ?ResultFilters $filters = null, ?ResultSort $sort = null): array
     {
@@ -152,7 +161,14 @@ final class ResultStore
      * figure whichever way the screen is sorted, which is what keeps the
      * delete-all button naming the set the filter chose.
      *
+     * Both reads raise rather than answering short (freshet-152). A page that
+     * did not run is an empty listing — the same shape as a library with
+     * nothing in it — and a total that did not run is 0, which is the figure
+     * the heading prints and the delete-all button is sized from. Neither is a
+     * number the database gave us, so neither is offered to a caller.
+     *
      * @return array{ids: int[], total: int}
+     * @throws QueryFailed
      */
     public function byStatus(string $status, int $page, int $perPage, ?ResultFilters $filters = null, ?ResultSort $sort = null): array
     {
@@ -177,18 +193,18 @@ final class ResultStore
         $groups = FileGroups::subquery($status, $filters);
 
         // phpcs:disable WordPress.DB.DirectDatabaseQuery -- the grouped subquery; no WP API groups on _wp_attached_file.
-        $ids = array_map('intval', (array) $wpdb->get_col($this->prepared(
+        $ids = array_map('intval', Db::rows('listing page', $wpdb->get_col($this->prepared(
             $groups,
             // orderBySql() is a literal from ResultSort's own column map; a
             // request value that is not one of its keys is not a sort at all.
             'SELECT fg.fg_id FROM ({{groups}}) fg ORDER BY ' . $sort->orderBySql() . ' LIMIT %d OFFSET %d',
             [$perPage, ($page - 1) * $perPage]
-        )));
+        ))));
 
-        $total = (int) $wpdb->get_var($this->prepared(
+        $total = (int) Db::value('listing total', $wpdb->get_var($this->prepared(
             $groups,
             'SELECT COUNT(*) FROM ({{groups}}) fg'
-        ));
+        )));
         // phpcs:enable WordPress.DB.DirectDatabaseQuery
 
         return ['ids' => $ids, 'total' => $total];
@@ -319,17 +335,24 @@ final class ResultStore
      * the PHP pass only narrows. A size sort leaves it at id ascending here and
      * orders afterwards, which is what makes that ordering stable on ties.
      *
+     * It raises for the same reason the paged read does, and with more at stake:
+     * this set is not a page but the whole filtered library, and its size is
+     * both the 'total' the heading prints and the count the delete-all button
+     * carries. A short read here understates a filtered set rather than
+     * emptying it, which is the failure that looks most like an answer.
+     *
      * @return array<int, int|null>
+     * @throws QueryFailed
      */
     private function sizedIds(string $status, ResultFilters $filters, ResultSort $sort): array
     {
         global $wpdb;
 
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- the grouped subquery; no WP API groups on _wp_attached_file.
-        $ids = array_map('intval', (array) $wpdb->get_col($this->prepared(
+        $ids = array_map('intval', Db::rows('listing measured set', $wpdb->get_col($this->prepared(
             FileGroups::subquery($status, $filters),
             'SELECT fg.fg_id FROM ({{groups}}) fg ORDER BY ' . $sort->orderBySql()
-        )));
+        ))));
 
         $matched = [];
 

@@ -233,6 +233,42 @@ function wp_send_json_error(array $data = [], int $status = 0): never
  * re-verification test: a detector whose query fails is the only way to reach
  * the branch where a scan has no answer at all.
  */
+function get_the_title(int $id): string
+{
+    return 'Attachment ' . $id;
+}
+
+function get_post_mime_type(int $id): string|false
+{
+    return 'image/png';
+}
+
+function get_the_date(string $format, int $id): string|false
+{
+    return '2024-01-01';
+}
+
+/**
+ * The three the WP-CLI scan calls between batches. A CLI process keeps its
+ * object cache for the whole run, which is why the command empties it at all;
+ * nothing here caches, so they only have to exist and to send it down the
+ * branch a site with no external cache takes.
+ */
+function wp_cache_supports(string $feature): bool
+{
+    return false;
+}
+
+function wp_using_ext_object_cache(): bool
+{
+    return false;
+}
+
+function wp_cache_flush(): bool
+{
+    return true;
+}
+
 function apply_filters(string $hook, mixed $value, mixed ...$rest): mixed
 {
     if ($hook === 'freshet_unusedmedia_detectors') {
@@ -248,6 +284,12 @@ function apply_filters(string $hook, mixed $value, mixed ...$rest): mixed
     // enough to spend twenty seconds on five files.
     if ($hook === 'freshet_unusedmedia_delete_seconds' && isset($GLOBALS['delete_seconds'])) {
         return $GLOBALS['delete_seconds'];
+    }
+
+    // The CLI scan's chunk, so a run can be made to take more than one cursor
+    // read over a fixture of five files.
+    if ($hook === 'freshet_unusedmedia_batch_size' && isset($GLOBALS['batch_size'])) {
+        return $GLOBALS['batch_size'];
     }
 
     return $value;
@@ -266,7 +308,18 @@ $GLOBALS['wpdb'] = new class {
     public string $posts = 'wp_posts';
     public string $postmeta = 'wp_postmeta';
 
-    /** @var array<int, array{sql: string, params: array<int, mixed>}> */
+    /**
+     * The prepared statements this stub is standing in for, keyed by the
+     * handle prepare() hands back. Deliberately NOT called $queries: that is
+     * wpdb's SAVEQUERIES log, and ScanCommand::releaseBatchMemory() empties it
+     * between batches — which would throw this registry away mid-scan and leave
+     * resolve() unable to answer the next handle.
+     *
+     * @var array<int, array{sql: string, params: array<int, mixed>}>
+     */
+    public array $prepared = [];
+
+    /** @var array<int, mixed> wpdb's own query log, which the CLI scan clears per batch. */
     public array $queries = [];
 
     /**
@@ -302,16 +355,16 @@ $GLOBALS['wpdb'] = new class {
             $params = $params[0];
         }
 
-        $this->queries[] = ['sql' => $sql, 'params' => array_values($params)];
+        $this->prepared[] = ['sql' => $sql, 'params' => array_values($params)];
 
-        return '#q' . (count($this->queries) - 1);
+        return '#q' . (count($this->prepared) - 1);
     }
 
     /** @return array{sql: string, params: array<int, mixed>} */
     public function resolve(string $sql): array
     {
         if (str_starts_with($sql, '#q')) {
-            return $this->queries[(int) substr($sql, 2)];
+            return $this->prepared[(int) substr($sql, 2)];
         }
 
         return ['sql' => $sql, 'params' => []];
@@ -323,6 +376,23 @@ $GLOBALS['wpdb'] = new class {
 
         if ($this->fails($query['sql'])) {
             return [];
+        }
+
+        // The CLI scan's own cursor: attachment ids ascending, after the one
+        // the last batch stopped on, capped by the batch size. Not the grouped
+        // query below it — the scan walks rows, and only the listing groups.
+        if (str_contains($query['sql'], "post_type = 'attachment' AND ID >")) {
+            $after = (int) ($query['params'][0] ?? 0);
+            $limit = (int) ($query['params'][1] ?? 0);
+
+            $ids = array_values(array_filter(
+                array_keys($GLOBALS['rows']),
+                static fn(int $id): bool => $id > $after
+            ));
+
+            sort($ids);
+
+            return array_map('strval', array_slice($ids, 0, $limit));
         }
 
         // The representatives, after the cursor and capped by the limit.
@@ -339,6 +409,16 @@ $GLOBALS['wpdb'] = new class {
                 $after = (int) ($query['params'][count($query['params']) - 2] ?? 0);
                 $limit = (int) ($query['params'][count($query['params']) - 1] ?? 0);
                 $ids = array_slice(array_values(array_filter($ids, static fn(int $id): bool => $id > $after)), 0, $limit);
+            }
+
+            // The paged listing, which is how everything that reads a whole
+            // library in pages terminates — the CLI list, the evidence report,
+            // the space total. Without the LIMIT honoured here every page is
+            // page one and none of those loops ever ends.
+            if (str_contains($query['sql'], 'LIMIT %d OFFSET %d')) {
+                $limit = (int) ($query['params'][count($query['params']) - 2] ?? 0);
+                $offset = (int) ($query['params'][count($query['params']) - 1] ?? 0);
+                $ids = array_slice($ids, $offset, $limit);
             }
 
             return array_map('strval', $ids);
@@ -420,7 +500,19 @@ $GLOBALS['wpdb'] = new class {
 
     public function get_var(string $sql): ?string
     {
-        return $this->fails($this->resolve($sql)['sql']) ? null : '0';
+        $query = $this->resolve($sql);
+
+        if ($this->fails($query['sql'])) {
+            return null;
+        }
+
+        // The count the CLI scan sizes itself with — attachment rows, trash
+        // included, which is every row this fixture has.
+        if (str_contains($query['sql'], 'COUNT(*) FROM ' . $this->posts)) {
+            return (string) count($GLOBALS['rows']);
+        }
+
+        return '0';
     }
 };
 
@@ -441,6 +533,7 @@ foreach ([
     'src/Scan/DeleteBudget.php',
     'src/Scan/ScanState.php',
     'src/Scan/SizeSiblings.php',
+    'src/Scan/OrphanSizes.php',
     'src/Scan/Scanner.php',
     'src/Detector/DetectorInterface.php',
     'src/Detector/FileClaimDetector.php',
@@ -457,14 +550,23 @@ foreach ([
     'src/Admin/DeleteController.php',
     'src/Admin/AttachmentMetaBox.php',
     'src/Admin/Ajax.php',
+    'src/License/LicenseInterface.php',
 ] as $file) {
     require_once ABSPATH . $file;
 }
 
+// WP-CLI itself, recorded rather than printed. Required before ScanCommand,
+// which type-hints neither but calls both.
+require_once __DIR__ . '/wp-cli-stub.php';
+require_once ABSPATH . 'src/Cli/ScanCommand.php';
+
 use FreshetUnusedMedia\Admin\Ajax;
 use FreshetUnusedMedia\Admin\AttachmentMetaBox;
 use FreshetUnusedMedia\Admin\DeleteController;
+use FreshetUnusedMedia\Cli\ScanCommand;
+use FreshetUnusedMedia\License\LicenseInterface;
 use FreshetUnusedMedia\Scan\FileGroups;
+use FreshetUnusedMedia\Scan\OrphanSizes;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\Scanner;
 use FreshetUnusedMedia\Scan\ScanState;
@@ -923,6 +1025,176 @@ check('a budget with room in it deletes the whole batch', $full['deleted'], 5);
 check('and leaves nothing unreached', $full['remaining'], 0);
 
 unset($GLOBALS['delete_seconds']);
+
+// ------------------------- the CLI's own reads: a stopped run is not a finished one
+//
+// freshet-152. The browser scan's two reads — the library count that sizes the
+// run, and the ID cursor that walks it — were guarded in freshet-141; their
+// WP-CLI twins were not. The cursor is the one that matters: an empty batch is
+// the only way the loop is ever told the library has been read to the end, so a
+// cursor read that *failed* ended `wp media unused scan` on a success line
+// claiming a completed scan of a library it had stopped reading.
+//
+// Every case below is asserted in the same two places, because either alone can
+// be satisfied by a command that is simply broken: what the command *said*
+// ($GLOBALS['cli']), and whether the run was recorded as finished
+// (ScanState::lastScan(), written by the finish() call the exception jumps past).
+
+/** A licensed site — the CLI is the paid tier's second surface and checks first. */
+final class ProLicense implements LicenseInterface
+{
+    public function isPro(): bool
+    {
+        return true;
+    }
+}
+
+/**
+ * One `wp freshet-unusedmedia scan`, and what it said.
+ *
+ * @param array<string, mixed> $assocArgs
+ * @return array{halted: bool, cli: array<string, array<int, mixed>>}
+ */
+function cliScan(array $assocArgs = []): array
+{
+    $GLOBALS['cli'] = [];
+
+    $store = new ResultStore();
+    $command = new ScanCommand(new Scanner($store), $store, new ScanState(), new ProLicense());
+
+    $halted = false;
+
+    try {
+        $command->scan([], $assocArgs);
+    } catch (CliHalt) {
+        $halted = true;
+    }
+
+    return ['halted' => $halted, 'cli' => $GLOBALS['cli']];
+}
+
+/**
+ * One `wp freshet-unusedmedia list`, and what it said.
+ *
+ * @param array<string, mixed> $assocArgs
+ * @return array{halted: bool, cli: array<string, array<int, mixed>>}
+ */
+function cliList(array $assocArgs = []): array
+{
+    $GLOBALS['cli'] = [];
+
+    $store = new ResultStore();
+    $command = new ScanCommand(new Scanner($store), $store, new ScanState(), new ProLicense());
+
+    $halted = false;
+
+    try {
+        $command->list_([], $assocArgs);
+    } catch (CliHalt) {
+        $halted = true;
+    }
+
+    return ['halted' => $halted, 'cli' => $GLOBALS['cli']];
+}
+
+$cliFixture = [];
+
+foreach (range(1, 5) as $n) {
+    $cliFixture[300 + $n] = ['file' => '2024/03/cli-' . $n . '.png'];
+}
+
+// A whole run, with nothing wrong. The pair to every refusal below and not a
+// formality: a guard that had simply broken the loop would pass the error cases
+// on its own, and this is the assertion it would fail.
+library($cliFixture);
+(new ScanState())->reset();
+OrphanSizes::reset();
+
+$clean = cliScan();
+
+check('a whole run reports itself finished', $clean['halted'], false);
+check('and says so once, in the success line', count($clean['cli']['success'] ?? []), 1);
+check('having scanned every attachment', (new ScanState())->lastScan()['scanned'] ?? null, 5);
+check('and printed its summary', count($clean['cli']['items'] ?? []), 1);
+
+// The library count. It sizes the run, so a failed one starts a scan of nothing
+// — and a scan of nothing ends immediately, on a success line.
+library($cliFixture);
+(new ScanState())->reset();
+
+$GLOBALS['wpdb']->failOn = 'COUNT(*) FROM wp_posts';
+$countFailed = cliScan();
+$GLOBALS['wpdb']->failOn = '';
+
+check('a failed library count ends the run', $countFailed['halted'], true);
+check('with an error rather than a success line', [count($countFailed['cli']['errors'] ?? []), count($countFailed['cli']['success'] ?? [])], [1, 0]);
+check('and nothing is printed as a summary either', count($countFailed['cli']['items'] ?? []), 0);
+check('and no scan is recorded as having finished', (new ScanState())->lastScan(), null);
+
+// The cursor, mid-run — the case the whole task is about. Two of the five
+// attachments have been scanned and the cursor is written past them; the read
+// that would have fetched the other three fails.
+library($cliFixture);
+
+$state = new ScanState();
+$state->reset();
+$state->start(5);
+$state->advance(302, 2);
+
+$GLOBALS['wpdb']->failOn = 'ORDER BY ID ASC';
+$cursorFailed = cliScan(['resume' => true]);
+$GLOBALS['wpdb']->failOn = '';
+
+check('a failed cursor read ends the run', $cursorFailed['halted'], true);
+check('rather than reading three unread attachments as the end of the library', count($cursorFailed['cli']['success'] ?? []), 0);
+check('it says why, once', count($cursorFailed['cli']['errors'] ?? []), 1);
+check('nothing is reported as a finished scan', $state->lastScan(), null);
+
+// And the run is resumable, which is the reason for refusing rather than
+// finishing: the cursor is still where the last completed batch left it, so
+// --resume picks up the three that were never read.
+check('the cursor is left where the last completed batch put it', $state->current()['cursor'] ?? null, 302);
+
+$resumed = cliScan(['resume' => true]);
+
+check('so a resumed run finishes what the failed one could not', $resumed['halted'], false);
+check('and it accounts for the whole library', $state->lastScan()['scanned'] ?? null, 5);
+
+// The closing tally is the third read in the same command, and a run that could
+// not count what it found has not finished either.
+library($cliFixture);
+(new ScanState())->reset();
+
+$GLOBALS['wpdb']->failOn = 'fg.fg_status AS status';
+$tallyFailed = cliScan();
+$GLOBALS['wpdb']->failOn = '';
+
+check('a failed closing tally ends the run too', $tallyFailed['halted'], true);
+check('without a success line quoting a figure nothing counted', count($tallyFailed['cli']['success'] ?? []), 0);
+check('and without recording the scan as finished', (new ScanState())->lastScan(), null);
+
+// `wp media unused list` is the same shape one command over: it pages until a
+// page comes back empty, so a page that failed is a short list of files to
+// delete wearing the look of a complete one.
+library($cliFixture);
+
+$listed = cliList();
+
+check('a working list prints every unused file', count($listed['cli']['items'][0]['items'] ?? []), 5);
+
+// --limit stops the walk mid-page, and the paging loop it breaks out of now
+// sits inside a try. `break 2` counts loops and not try blocks, which is only
+// worth asserting because getting it wrong would silently list everything.
+$limited = cliList(['limit' => 2]);
+
+check('and --limit still stops where it says', count($limited['cli']['items'][0]['items'] ?? []), 2);
+
+$GLOBALS['wpdb']->failOn = 'SELECT fg.fg_id';
+$listFailed = cliList();
+$GLOBALS['wpdb']->failOn = '';
+
+check('a failed listing read ends the command', $listFailed['halted'], true);
+check('and prints no list at all rather than part of one', count($listFailed['cli']['items'] ?? []), 0);
 
 // ------------------------------------------------------------------ result
 

@@ -8,6 +8,7 @@ use FreshetUnusedMedia\License\LicenseInterface;
 use FreshetUnusedMedia\Scan\FileClaims;
 use FreshetUnusedMedia\Scan\FileSize;
 use FreshetUnusedMedia\Scan\OrphanSizes;
+use FreshetUnusedMedia\Scan\QueryFailed;
 use FreshetUnusedMedia\Scan\ResultFilters;
 use FreshetUnusedMedia\Scan\ResultSort;
 use FreshetUnusedMedia\Scan\ResultStore;
@@ -355,13 +356,23 @@ final class ToolsPage
             return sprintf(esc_html($singular), $this->countFigure($status, $shown));
         }
 
+        // The library-wide half of "37 of 400" is its own read, and it can fail
+        // while the filtered listing above it succeeded (freshet-152). A dash
+        // there says the total was not counted; "37 of 0" would say something
+        // the database never said, and something arithmetically impossible.
+        try {
+            $total = $this->store->counts()[$status];
+        } catch (QueryFailed) {
+            $total = null;
+        }
+
         return sprintf(
             esc_html($singular),
             sprintf(
                 /* translators: 1: number of matching files, 2: number of files in total */
                 esc_html__('%1$s of %2$s', 'freshet-unused-media'),
                 esc_html(number_format_i18n($shown)),
-                $this->countFigure($status, $this->store->counts()[$status])
+                $this->countFigure($status, $total)
             )
         );
     }
@@ -371,14 +382,41 @@ final class ToolsPage
      * replies with the unused figure as it stands after it (Ajax::deleteBatch),
      * and admin.js writes it into whichever of these carry that status —
      * nothing is stored on either side, the number is read fresh per reply.
+     *
+     * Null is "not counted", not zero: the span is still emitted so a later
+     * reply can write a real number into it, and what it holds until then is an
+     * em dash rather than a figure nothing produced (freshet-152).
      */
-    private function countFigure(string $status, int $count): string
+    private function countFigure(string $status, ?int $count): string
     {
         return sprintf(
             '<span data-freshet-unusedmedia-count="%s">%s</span>',
             esc_attr($status),
-            esc_html(number_format_i18n($count))
+            esc_html($count === null ? '—' : number_format_i18n($count))
         );
+    }
+
+    /**
+     * A listing whose query did not answer, in place of the listing.
+     *
+     * Deliberately not an empty table with a "nothing here" line under it:
+     * those two look identical to a reader and mean opposite things, which is
+     * the whole of freshet-152. The heading keeps the section recognisable, and
+     * neither a count nor a Delete all button is drawn — there is no set to
+     * name, so there is nothing to offer an action on.
+     */
+    private function renderListingFailure(string $heading): void
+    {
+        echo '<div class="freshet-unusedmedia-section">';
+        echo '<h2>' . esc_html($heading) . '</h2>';
+        printf(
+            '<div class="notice notice-error inline"><p>%s</p></div>',
+            esc_html(
+                QueryFailed::userMessage() . ' '
+                . __('The list is not shown at all rather than shown short: a list cut off by a failed query looks exactly like a complete one. Reload the page to try again.', 'freshet-unused-media')
+            )
+        );
+        echo '</div>';
     }
 
     /**
@@ -479,7 +517,16 @@ final class ToolsPage
 
     private function renderScanSection(): void
     {
-        $counts = $this->store->counts();
+        // freshet-152: a tally that did not run comes back as three zeroes, and
+        // "Unused: 0" is this screen telling someone their library is clean on
+        // the strength of a query that never answered. Null is carried through
+        // to the figures below, which then say that instead of printing it.
+        try {
+            $counts = $this->store->counts();
+        } catch (QueryFailed) {
+            $counts = null;
+        }
+
         $running = $this->state->current();
         $last = $this->state->lastScan();
 
@@ -494,28 +541,51 @@ final class ToolsPage
         // is not on this server — immediately after. Order and weight only:
         // nothing is boxed and nothing is capped, so freshet-D81's unboxing
         // and freshet-D89 (3) are untouched.
+        if ($counts === null) {
+            printf(
+                '<div class="notice notice-error inline"><p>%s</p></div>',
+                esc_html(
+                    QueryFailed::userMessage() . ' '
+                    . __('The used, unused and not-scanned figures below stand at a dash rather than at zero — nothing has been counted, so nothing here says your library is clean. Reload the page; if it keeps happening, the queries are being cut short.', 'freshet-unused-media')
+                )
+            );
+        }
+
         echo '<p class="freshet-unusedmedia-counts">';
-        printf(
-            '%s &nbsp;•&nbsp; %s &nbsp;•&nbsp; %s',
-            esc_html(sprintf(
-                /* translators: %s: number of used attachments */
-                __('Used: %s', 'freshet-unused-media'),
-                number_format_i18n($counts['used'])
-            )),
-            // The one figure a running loop rewrites, so the number is wrapped
-            // rather than escaped whole. The label is still escaped; only the
-            // span around the count is markup.
-            sprintf(
-                /* translators: %s: number of unused attachments */
+
+        if ($counts !== null) {
+            printf(
+                '%s &nbsp;•&nbsp; %s &nbsp;•&nbsp; %s',
+                esc_html(sprintf(
+                    /* translators: %s: number of used attachments */
+                    __('Used: %s', 'freshet-unused-media'),
+                    number_format_i18n($counts['used'])
+                )),
+                // The one figure a running loop rewrites, so the number is wrapped
+                // rather than escaped whole. The label is still escaped; only the
+                // span around the count is markup.
+                sprintf(
+                    /* translators: %s: number of unused attachments */
+                    esc_html__('Unused: %s', 'freshet-unused-media'),
+                    $this->countFigure(ResultStore::STATUS_UNUSED, $counts['unused']) // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in countFigure().
+                ),
+                esc_html(sprintf(
+                    /* translators: %s: number of unscanned attachments */
+                    __('Not scanned: %s', 'freshet-unused-media'),
+                    number_format_i18n($counts['unscanned'])
+                ))
+            );
+        } else {
+            // The label without a number. The span stays, so a delete loop
+            // finishing on a working query still writes the figure back into a
+            // screen that was rendered without one.
+            printf(
+                /* translators: %s: an em dash standing in for a number that could not be counted */
                 esc_html__('Unused: %s', 'freshet-unused-media'),
-                $this->countFigure(ResultStore::STATUS_UNUSED, $counts['unused']) // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in countFigure().
-            ),
-            esc_html(sprintf(
-                /* translators: %s: number of unscanned attachments */
-                __('Not scanned: %s', 'freshet-unused-media'),
-                number_format_i18n($counts['unscanned'])
-            ))
-        );
+                $this->countFigure(ResultStore::STATUS_UNUSED, null) // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in countFigure().
+            );
+        }
+
         echo '</p>';
 
         if ($last !== null) {
@@ -755,7 +825,14 @@ final class ToolsPage
 
         $page = max(1, absint($_GET['used_page'] ?? 1)); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only pagination.
         $filters = $this->filters();
-        $list = $this->store->byStatus(ResultStore::STATUS_USED, $page, self::PER_PAGE, $filters, $this->sort());
+
+        try {
+            $list = $this->store->byStatus(ResultStore::STATUS_USED, $page, self::PER_PAGE, $filters, $this->sort());
+        } catch (QueryFailed) {
+            $this->renderListingFailure(__('Used files', 'freshet-unused-media'));
+
+            return;
+        }
 
         echo '<div class="freshet-unusedmedia-section">';
         echo '<h2>' . $this->listHeading( // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in listHeading().
@@ -823,7 +900,18 @@ final class ToolsPage
     {
         $page = max(1, absint($_GET['unused_page'] ?? 1)); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only pagination.
         $filters = $this->filters();
-        $list = $this->store->unused($page, self::PER_PAGE, $filters, $this->sort());
+
+        // The one listing with a destructive control attached to it, so this is
+        // the catch that matters most: a short read renders an empty table, and
+        // an empty unused table is the screen saying there is nothing to delete
+        // (freshet-152). Nothing is listed and no Delete all button is drawn.
+        try {
+            $list = $this->store->unused($page, self::PER_PAGE, $filters, $this->sort());
+        } catch (QueryFailed) {
+            $this->renderListingFailure(__('Unused files', 'freshet-unused-media'));
+
+            return;
+        }
 
         echo '<div class="freshet-unusedmedia-section">';
 

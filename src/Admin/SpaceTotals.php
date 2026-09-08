@@ -6,6 +6,7 @@ namespace FreshetUnusedMedia\Admin;
 
 use FreshetUnusedMedia\License\LicenseInterface;
 use FreshetUnusedMedia\Scan\FileSize;
+use FreshetUnusedMedia\Scan\QueryFailed;
 use FreshetUnusedMedia\Scan\ReclaimedLedger;
 use FreshetUnusedMedia\Scan\ResultStore;
 
@@ -56,23 +57,46 @@ final class SpaceTotals
             return;
         }
 
-        $reclaimable = $this->reclaimable();
+        // freshet-152: the reclaimable figure is summed over a paged listing,
+        // and paging stops on an empty page — so a read that failed halfway
+        // gives a total that is simply too small, with nothing on the screen
+        // saying so. That is the shape this figure can least afford: it is the
+        // number a licence is argued from. The reclaimed half is a stored
+        // ledger and is unaffected, so it is still shown.
+        try {
+            $reclaimable = $this->reclaimable();
+        } catch (QueryFailed) {
+            $reclaimable = null;
+        }
+
         $reclaimed = ReclaimedLedger::read();
 
         echo '<div class="freshet-unusedmedia-section">';
         echo '<h2>' . esc_html__('Space', 'freshet-unused-media') . '</h2>';
+
+        if ($reclaimable === null) {
+            printf(
+                '<div class="notice notice-error inline"><p>%s</p></div>',
+                esc_html(
+                    QueryFailed::userMessage() . ' '
+                    . __('What the unused files are holding is left out rather than shown as a smaller number — a total added up from a list that stopped early is not a smaller saving, it is no answer. Reload the page to try again.', 'freshet-unused-media')
+                )
+            );
+        }
 
         echo '<p class="description">' . esc_html__('Two figures, kept apart on purpose: what the unused files are holding now, and what deleting them has actually freed so far. Both are measured from the files themselves — the same size shown against each file in the table above — and count the original file only, so the disk a deletion really frees is larger than the number here, never smaller.', 'freshet-unused-media') . '</p>';
 
         echo '<p class="freshet-unusedmedia-counts">';
         printf(
             '<strong>%s</strong> &nbsp;•&nbsp; <strong>%s</strong>',
-            esc_html(sprintf(
-                /* translators: 1: formatted file size, 2: number of files */
-                __('Reclaimable now: %1$s across %2$s file(s)', 'freshet-unused-media'),
-                self::format($reclaimable['bytes']),
-                number_format_i18n($reclaimable['files'])
-            )),
+            esc_html($reclaimable === null
+                ? __('Reclaimable now: not counted', 'freshet-unused-media')
+                : sprintf(
+                    /* translators: 1: formatted file size, 2: number of files */
+                    __('Reclaimable now: %1$s across %2$s file(s)', 'freshet-unused-media'),
+                    self::format($reclaimable['bytes']),
+                    number_format_i18n($reclaimable['files'])
+                )),
             esc_html(sprintf(
                 /* translators: 1: formatted file size, 2: number of files */
                 __('Reclaimed so far: %1$s across %2$s file(s)', 'freshet-unused-media'),
@@ -104,12 +128,12 @@ final class SpaceTotals
      * appears only when it applies, so a straightforward library shows two
      * figures and no small print.
      *
-     * @param array{bytes: int, files: int, unsized: int} $reclaimable
+     * @param array{bytes: int, files: int, unsized: int}|null $reclaimable Null when it could not be counted.
      * @param array{bytes: int, files: int, unsized: int, trashed: int, last_at: int} $reclaimed
      */
-    private function renderCaveats(array $reclaimable, array $reclaimed): void
+    private function renderCaveats(?array $reclaimable, array $reclaimed): void
     {
-        if ($reclaimable['unsized'] > 0) {
+        if ($reclaimable !== null && $reclaimable['unsized'] > 0) {
             echo '<p class="description">' . esc_html(sprintf(
                 /* translators: %s: number of files */
                 __('%s unused file(s) could not be sized — no local file and no recorded size, which is what an offloaded library looks like. They are left out of the reclaimable figure rather than counted as zero, so the real saving is higher than shown.', 'freshet-unused-media'),
@@ -158,6 +182,9 @@ final class SpaceTotals
      * less than the second it takes to be right.
      *
      * @return array{bytes: int, files: int, unsized: int}
+     * @throws QueryFailed A page that did not answer stops the walk, and a
+     *                     total short by however much it stopped early is a
+     *                     wrong number rather than a missing one.
      */
     private function reclaimable(): array
     {

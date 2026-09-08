@@ -292,6 +292,12 @@ function apply_filters(string $hook, mixed $value, mixed ...$rest): mixed
         return $GLOBALS['batch_size'];
     }
 
+    // The browser scan's own time budget, the twin of the delete one above:
+    // it is how a batch that ran out of it mid-way is reached from here.
+    if ($hook === 'freshet_unusedmedia_batch_seconds' && isset($GLOBALS['batch_seconds'])) {
+        return $GLOBALS['batch_seconds'];
+    }
+
     return $value;
 }
 
@@ -570,6 +576,7 @@ use FreshetUnusedMedia\Scan\OrphanSizes;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\Scanner;
 use FreshetUnusedMedia\Scan\ScanState;
+use FreshetUnusedMedia\Scan\SharedReads;
 
 // ------------------------------------------------------------ the grouping
 
@@ -1195,6 +1202,292 @@ $GLOBALS['wpdb']->failOn = '';
 
 check('a failed listing read ends the command', $listFailed['halted'], true);
 check('and prints no list at all rather than part of one', count($listFailed['cli']['items'] ?? []), 0);
+
+// --------------------------- the scan batch: one broad pass per file in it
+//
+// freshet-161. The delete path asks a file's question once for the whole group
+// standing on it (freshet-155); the library scan, which is far the longer job,
+// went on asking it once per row. It now cuts each batch into the sibling
+// groups the batch itself holds and scans them together.
+//
+// The batch is where this has to be got right, because a group is not an ID
+// range: it can straddle the cursor, and inside one batch its rows need not be
+// adjacent. So what is asserted here is the accounting rather than the speed —
+// every row scanned, none counted twice, and the cursor never written past a
+// row nobody looked at.
+
+/**
+ * A detector that records what it was asked and how often the broad read behind
+ * it was actually issued.
+ *
+ * `$passes` is the number this task is about: the shared read is one query for
+ * a whole group, so a batch holding three rows of one file must issue it once
+ * and not three times. `$scans` is the other half — which rows were visited,
+ * and how many times each.
+ */
+final class SharingSpy implements \FreshetUnusedMedia\Detector\DetectorInterface
+{
+    /** @var array<int, int> Row id => times a scan asked this detector about it. */
+    public static array $scans = [];
+
+    /** How many times the broad read was actually issued. */
+    public static int $passes = 0;
+
+    public static function reset(): void
+    {
+        self::$scans = [];
+        self::$passes = 0;
+    }
+
+    public function id(): string
+    {
+        return 'sharing-spy';
+    }
+
+    public function find(\FreshetUnusedMedia\Scan\AttachmentContext $ctx): array
+    {
+        self::$scans[$ctx->id] = (self::$scans[$ctx->id] ?? 0) + 1;
+
+        SharedReads::candidates('spy', $ctx, static function (array $ids, array $names): array {
+            ++self::$passes;
+
+            return [];
+        });
+
+        return [];
+    }
+}
+
+/**
+ * The same shape with the read arranged to fail — a *shared* refusal, which is
+ * the one freshet-141's semantics have to survive at batch level: it is raised
+ * once for the group and re-thrown for every row behind it.
+ */
+final class FailingSharedRead implements \FreshetUnusedMedia\Detector\DetectorInterface
+{
+    /** How many times the failing read was issued rather than re-thrown. */
+    public static int $attempts = 0;
+
+    public function id(): string
+    {
+        return 'failing-shared';
+    }
+
+    public function find(\FreshetUnusedMedia\Scan\AttachmentContext $ctx): array
+    {
+        return SharedReads::candidates('failing-shared', $ctx, static function (array $ids, array $names): array {
+            global $wpdb;
+
+            ++self::$attempts;
+
+            return \FreshetUnusedMedia\Scan\Db::rows('failing-shared', $wpdb->get_results(FailingDetector::NEEDLE));
+        });
+    }
+}
+
+/**
+ * One scan batch, and the reply it would have sent to the browser.
+ *
+ * FileGroups is flushed first because each batch is its own request: the memo
+ * one of them builds does not travel to the next.
+ *
+ * @return array<string, mixed>
+ */
+function scanBatch(): array
+{
+    FileGroups::flush();
+
+    $store = new ResultStore();
+    $ajax = new Ajax(
+        new Scanner($store),
+        $store,
+        new ScanState(),
+        new DeleteController(new Scanner($store), $store),
+        new AttachmentMetaBox($store),
+    );
+
+    $_POST = [];
+
+    try {
+        $ajax->scanBatch();
+    } catch (JsonReply $reply) {
+        return $reply->data;
+    }
+
+    return [];
+}
+
+/**
+ * The browser's own loop: batch after batch until one says it finished.
+ *
+ * @return array<string, mixed> The reply that ended it.
+ */
+function scanToEnd(int $limit = 40): array
+{
+    $reply = [];
+
+    for ($n = 0; $n < $limit; ++$n) {
+        $reply = scanBatch();
+
+        if (($reply['finished'] ?? false) === true || ($reply['error'] ?? false) === true) {
+            break;
+        }
+    }
+
+    return $reply;
+}
+
+/** Start a scan over, so a batch is read against a cursor of nothing. */
+function freshScan(): void
+{
+    (new ScanState())->reset();
+    OrphanSizes::reset();
+    SharingSpy::reset();
+    FailingSharedRead::$attempts = 0;
+}
+
+// One batch, four rows, three of them standing on one file. The question is
+// asked twice — once per file — and every row is still visited.
+library([
+    701 => ['file' => '2024/03/shared-scan.png'],
+    702 => ['file' => '2024/03/shared-scan.png'],
+    703 => ['file' => '2024/03/shared-scan.png'],
+    704 => ['file' => '2024/03/alone.png'],
+]);
+
+$GLOBALS['detectors'] = [new SharingSpy()];
+
+freshScan();
+
+$oneBatch = scanBatch();
+
+check('a batch visits every row it fetched', count(SharingSpy::$scans), 4);
+check('each of them exactly once', array_values(array_unique(array_values(SharingSpy::$scans))), [1]);
+check('and asks the broad question once per file, not once per row', SharingSpy::$passes, 2);
+check('the batch accounts for all four rows', $oneBatch['done'], 4);
+check('with no errors', $oneBatch['errors'], 0);
+
+// A group straddling the batch boundary. Three rows on one file, cut by a batch
+// of two: the first batch shares what it holds, the next scans the rest of the
+// group as a group of its own. What must not happen is either half being
+// scanned twice or not at all.
+$straddle = [
+    711 => ['file' => '2024/04/straddle.png'],
+    712 => ['file' => '2024/04/straddle.png'],
+    713 => ['file' => '2024/04/straddle.png'],
+    714 => ['file' => '2024/04/second.png'],
+    715 => ['file' => '2024/04/second.png'],
+    716 => ['file' => '2024/04/third.png'],
+];
+
+library($straddle);
+
+$GLOBALS['batch_size'] = 2;
+
+freshScan();
+
+$walked = scanToEnd();
+
+check('a scan cut into batches of two finishes', $walked['finished'], true);
+check('and counts every row of the library once', $walked['done'], 6);
+check('having visited every row', count(SharingSpy::$scans), 6);
+check('each exactly once, straddling group included', array_values(array_unique(array_values(SharingSpy::$scans))), [1]);
+check('and asked the broad question fewer times than there are rows', SharingSpy::$passes < 6, true);
+
+// The directory-read tally the Scan tab's offload notice reads. Grouping a
+// batch means the rows of one file are scanned together, so its directory is
+// read fewer times — which is fine, because the surface depends on whether
+// each count is zero and on nothing else (freshet-144). What must not happen
+// is a library whose folders are all readable starting to claim they are not.
+$readable = (new ScanState())->lastScan();
+
+check('a library whose folders can be read still reports reading them', ($readable['dirs_read'] ?? 0) > 0, true);
+check('and reports none it could not', $readable['dirs_unread'] ?? null, 0);
+
+// The cursor, when a batch runs out of time part-way through it. The rows of a
+// group need not be adjacent, so the set a cut-short batch scanned is not
+// always a leading run of the batch — and the cursor must stop at the first row
+// it did not reach, not at the last one it did.
+library([
+    721 => ['file' => '2024/05/apart.png'],
+    722 => ['file' => '2024/05/between.png'],
+    723 => ['file' => '2024/05/apart.png'],
+]);
+
+$GLOBALS['batch_size'] = 3;
+$GLOBALS['batch_seconds'] = 0.0;
+
+freshScan();
+
+$cut = scanBatch();
+$state = (new ScanState())->current();
+
+check('the batch scanned the whole of the first group', [SharingSpy::$scans[721] ?? 0, SharingSpy::$scans[723] ?? 0], [1, 1]);
+check('and stopped before the row between them', SharingSpy::$scans[722] ?? 0, 0);
+check('so the cursor stops at that gap rather than past it', $state['cursor'], 721);
+check('and counts only the rows behind it', $cut['done'], 1);
+
+// Walked to the end from there: the row in the gap is reached, and the row
+// scanned past it is counted once however many times it was scanned.
+$cutWalk = scanToEnd();
+
+check('the rest of the library is still reached', $cutWalk['finished'], true);
+check('and every row is counted exactly once', $cutWalk['done'], 3);
+check('the row in the gap was scanned', SharingSpy::$scans[722] ?? 0, 1);
+
+unset($GLOBALS['batch_seconds']);
+
+// A shared read that did not answer. It is raised once for the group and
+// re-thrown for the rows behind it, so all three rows are errors — and the
+// batch still advances, or the scan would ask the same three ids forever.
+library([
+    731 => ['file' => '2024/06/refused.png'],
+    732 => ['file' => '2024/06/refused.png'],
+    733 => ['file' => '2024/06/refused.png'],
+]);
+
+$GLOBALS['detectors'] = [new FailingSharedRead()];
+$GLOBALS['wpdb']->failOn = FailingDetector::NEEDLE;
+$GLOBALS['batch_size'] = 10;
+
+freshScan();
+
+$refused = scanBatch();
+
+check('every row behind a failed shared read is counted as an error', $refused['errors'], 3);
+check('and the batch still accounts for them', $refused['done'], 3);
+check('the failed read was issued once for the group, not once per row', FailingSharedRead::$attempts, 1);
+
+$refusedWalk = scanToEnd();
+
+check('and the scan advances past them rather than retrying forever', $refusedWalk['finished'], true);
+check('with the errors carried into the finished run', $refusedWalk['errors'], 3);
+check('and none of the three left with a verdict', array_map(
+    static fn(int $id): mixed => (new ResultStore())->status($id),
+    [731, 732, 733]
+), [null, null, null]);
+
+$GLOBALS['wpdb']->failOn = '';
+
+// The CLI runs the same loop, and shares the same reads — a scan that behaved
+// differently under WP-CLI than in the browser would be a support problem
+// rather than an optimisation.
+library($straddle);
+
+$GLOBALS['detectors'] = [new SharingSpy()];
+$GLOBALS['batch_size'] = 2;
+
+freshScan();
+
+$cliShared = cliScan();
+
+check('the CLI scan finishes too', $cliShared['halted'], false);
+check('and reads the whole library', (new ScanState())->lastScan()['scanned'] ?? null, 6);
+check('visiting every row exactly once', array_values(array_unique(array_values(SharingSpy::$scans))), [1]);
+check('and sharing its broad reads the way the browser scan does', SharingSpy::$passes < 6, true);
+
+unset($GLOBALS['batch_size']);
+$GLOBALS['detectors'] = [];
 
 // ------------------------------------------------------------------ result
 

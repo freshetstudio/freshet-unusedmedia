@@ -56,7 +56,18 @@ final class Scanner
      * own basenames, so two rows of a group still reach different statuses —
      * which they must, because FileGroups::verdict() counts them individually.
      *
-     * @param int[] $rowIds Every attachment row standing on one file.
+     * **The caller decides how much of the group it holds.** The delete path
+     * holds all of it, because it is about to remove the file; the library scan
+     * holds the rows of it inside the batch it is on, and the rest of the group
+     * is scanned as its own group in the batch that reaches it
+     * (FileGroups::groupsWithin(), freshet-161). Sharing part of a group is as
+     * safe as sharing the whole of one — the union of a subset is narrower, and
+     * every row still verifies against its own id and its own basenames — but it
+     * is never *more* than a group: rows of two different files would widen the
+     * pass with needles neither of them asked about.
+     *
+     * @param int[] $rowIds Attachment rows standing on one file — every one of
+     *                      them, or the ones this caller holds.
      * @return array<int, array{status: string, refs: Reference[], error?: string}>
      *         Keyed by row id, in the order given.
      */

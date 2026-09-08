@@ -103,7 +103,9 @@ final class SharedReads
      * the behaviour this class replaces rather than a fallback that needs its
      * own reading.
      *
-     * @param int[] $rowIds Every attachment row standing on one file.
+     * @param int[] $rowIds Attachment rows standing on one file — every one of
+     *                      them on the delete path, the ones inside the current
+     *                      batch on the scan path (Scanner::scanGroup()).
      */
     public static function open(array $rowIds): void
     {

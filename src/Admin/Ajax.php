@@ -174,21 +174,48 @@ final class Ajax
         $errors = 0;
         $last = $state['cursor'];
 
+        // The batch's own sibling groups, so the detectors' whole-table passes
+        // are issued once per file in it rather than once per row standing on
+        // that file (freshet-161). Each row still gets its own verdict.
+        $scanned = [];
+
+        foreach (FileGroups::groupsWithin($ids) as $group) {
+            foreach ($this->scanner->scanGroup($group) as $rowId => $result) {
+                $scanned[$rowId] = $result['status'];
+                OrphanSizes::observeAttachment($rowId);
+            }
+
+            // The budget is spent between groups rather than between rows, which
+            // is what makes a group's shared reads worth issuing at all: cutting
+            // one in half would leave its remaining rows to ask the whole
+            // question again next time. A group is a subset of the batch, so the
+            // overrun is still bounded by one batch's work.
+            if (microtime(true) - $started > $budget) {
+                break;
+            }
+        }
+
+        // The cursor advances over the rows this batch scanned *without a gap*.
+        // A group can hold a row from further down the batch, so what a
+        // cut-short batch scanned is not always a leading run of it — and a
+        // cursor written past a row nobody scanned is a row skipped for the
+        // whole run. Rows scanned past the gap keep their verdicts and are
+        // simply scanned again in the next batch, which is also what stops
+        // `done` counting them twice.
         foreach ($ids as $id) {
-            if ($this->scanner->scan($id)['status'] === Scanner::STATUS_ERROR) {
+            if (!isset($scanned[$id])) {
+                break;
+            }
+
+            if ($scanned[$id] === Scanner::STATUS_ERROR) {
                 // Counted, and the cursor still advances: the attachment now
                 // has no stored status at all, so it reads as unscanned and is
                 // in neither list. The figure is what makes the run say so.
                 ++$errors;
             }
 
-            OrphanSizes::observeAttachment($id);
             ++$processed;
             $last = $id;
-
-            if (microtime(true) - $started > $budget) {
-                break;
-            }
         }
 
         // Nothing that was read from disk survives the batch: the directory

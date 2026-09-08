@@ -150,21 +150,31 @@ final class ScanCommand
 
                 $processed = 0;
                 $errors = 0;
-                $last = $state['cursor'];
 
-                foreach ($ids as $id) {
-                    if ($this->scanner->scan($id)['status'] === Scanner::STATUS_ERROR) {
-                        // No status was written for it, so it reads as unscanned
-                        // rather than as unused. Counted here so the run can say so
-                        // instead of finishing on a short answer (freshet-141).
-                        ++$errors;
+                // The chunk's own sibling groups, so the detectors' whole-table
+                // passes are issued once per file in it rather than once per row
+                // standing on that file — the browser scan does the same and for
+                // the same reason (freshet-161).
+                foreach (FileGroups::groupsWithin($ids) as $group) {
+                    foreach ($this->scanner->scanGroup($group) as $rowId => $result) {
+                        if ($result['status'] === Scanner::STATUS_ERROR) {
+                            // No status was written for it, so it reads as unscanned
+                            // rather than as unused. Counted here so the run can say so
+                            // instead of finishing on a short answer (freshet-141).
+                            ++$errors;
+                        }
+
+                        OrphanSizes::observeAttachment($rowId);
+                        ++$processed;
+                        $progress?->tick();
                     }
-
-                    OrphanSizes::observeAttachment($id);
-                    ++$processed;
-                    $last = $id;
-                    $progress?->tick();
                 }
+
+                // Nothing breaks out of a chunk here — the CLI has no time
+                // budget, so every row of it was scanned — and the cursor is
+                // therefore the chunk's own last id rather than the last row a
+                // group happened to end on.
+                $last = (int) end($ids);
 
                 $state = $this->state->advance($last, $processed, $errors, SizeSiblings::takeDirectoryReads());
 

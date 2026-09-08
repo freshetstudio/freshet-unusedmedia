@@ -25,6 +25,15 @@ final class LikePatterns
     private const CYCLE_MARK = "\0freshet_unusedmedia_path\0";
 
     /**
+     * Whether this runtime can fold case outside ASCII. Resolved once.
+     *
+     * mbstring is not a requirement of the plugin, so containsBasename() asks
+     * before it reaches for it rather than assuming; false leaves the fold
+     * exactly as byte-wise as it was.
+     */
+    private static ?bool $foldsUnicodeCase = null;
+
+    /**
      * The suffix core gives an autosave's post_name: "<parent id>-autosave-v1".
      *
      * @see wp_create_post_autosave()
@@ -318,11 +327,41 @@ final class LikePatterns
      * folder is full of names beginning i, a and s. A predictable fraction of
      * a millisecond beats a good average with a bad case.
      *
+     * The fold is Unicode for case, and it deliberately stops there
+     * (freshet-156). strtolower() is byte-wise, so it never touched the case
+     * of an accented letter: HERO.JPG folded onto hero.jpg and HÉRO.JPG did
+     * not fold onto héro.jpg, while basenameConditions() fetched that row on
+     * every collation WordPress ships (measured: general_ci, unicode_ci,
+     * unicode_520_ci and 0900_ai_ci all answer 1). That variant is the one
+     * that can be a live reference — a volume that folds case folds É onto é
+     * exactly as it folds E onto e, so the URL resolves — so it is closed,
+     * with mb_strtolower(), gated on the file's own name carrying the accent.
+     * Where mbstring is absent the branch never runs and the old behaviour
+     * stands; the plugin does not require the extension for this.
+     *
+     * What is NOT followed is the collation's accent-insensitivity: those same
+     * LIKEs also fetch hero.jpg for a stored héro.jpg, and this goes on
+     * rejecting it. Three reasons, each measured rather than reasoned. No
+     * filesystem folds accents, so such a URL 404s on every host — the row is
+     * over-fetch, not a dropped reference. The collations disagree with each
+     * other about what an accent even is: on ø, ł and ß the four above give
+     * four different answers, so no single fold agrees with the host. And it
+     * costs — a transliterating fold measured +422 / +115 / +310 ms per
+     * thousand rows on the three libraries above, against the +0.15 / +0.15 /
+     * +0.17 the gated case fold costs where no filename is accented, and
+     * +22.1 / +5.4 / +16.1 while scanning one that is. Exposure was swept
+     * before deciding: 29 local libraries carrying 118 accented filenames
+     * between them, and no row anywhere naming one of them in a spelling this
+     * rejects. Normalisation is not followed either, and needs no argument —
+     * no collation folds NFD onto NFC, so the SQL half does not fetch it.
+     *
      * @param string[] $basenames
      */
     public static function containsBasename(string $text, array $basenames): bool
     {
         $folded = null;
+        $unicodeFolded = null;
+        self::$foldsUnicodeCase ??= function_exists('mb_strtolower') && function_exists('mb_check_encoding');
 
         foreach ($basenames as $name) {
             if ($name === '') {
@@ -333,6 +372,14 @@ final class LikePatterns
 
             if (str_contains($folded, strtolower($name))) {
                 return true;
+            }
+
+            if (self::$foldsUnicodeCase && !mb_check_encoding($name, 'ASCII')) {
+                $unicodeFolded ??= mb_strtolower($text, 'UTF-8');
+
+                if (str_contains($unicodeFolded, mb_strtolower($name, 'UTF-8'))) {
+                    return true;
+                }
             }
         }
 

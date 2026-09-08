@@ -471,6 +471,24 @@ check('folding does not blur a digit boundary', LikePatterns::containsBasename('
 check('folding does not make a longer stem match', LikePatterns::containsBasename('/uploads/2026/07/HERO-2-300X200.JPG', $names), false);
 check('uppercase unicode variant, unrelated file', LikePatterns::containsBasename('/uploads/%E5%86%99%E7%9C%9F-2.JPG', $unicode), false);
 
+// Accents (freshet-156). strtolower() is byte-wise, so it folded HERO onto
+// hero and left HÉRO alone — while basenameConditions() fetched that row under
+// every collation WordPress ships. The case of an accented letter is folded,
+// because a volume that folds case folds É onto é and the URL resolves. The
+// collation's accent-insensitivity is deliberately NOT followed: no filesystem
+// serves hero.jpg for a stored héro.jpg, so that row is over-fetch. Both halves
+// are asserted here, and so are the two invariants the fold must not blur.
+$accented = ['héro.jpg', 'héro-300x200.jpg'];
+
+check('uppercase accented URL resolves to the file', LikePatterns::containsBasename('<img src="/uploads/2026/07/HÉRO.JPG">', $accented), true);
+check('mixed-case accented URL resolves to the file', LikePatterns::containsBasename('<a href="/uploads/2026/07/HÉro-300X200.JPG">x</a>', $accented), true);
+check('accented fold does not blur a digit boundary', LikePatterns::containsBasename('/uploads/2026/07/HÉRO-300X201.JPG', $accented), false);
+check('accented fold does not make a longer stem match', LikePatterns::containsBasename('/uploads/2026/07/HÉRO-2-300X200.JPG', ['héro-300x200.jpg']), false);
+check('a different accented filename still does not match', LikePatterns::containsBasename('<img src="/uploads/2026/07/HÉROS.JPG">', ['héro.jpg']), false);
+check('an accent is not folded away: unaccented spelling stays unmatched', LikePatterns::containsBasename('<img src="/uploads/2026/07/hero.jpg">', ['héro.jpg']), false);
+check('an accent is not folded away: accented spelling of an ascii file stays unmatched', LikePatterns::containsBasename('<img src="/uploads/2026/07/héro.jpg">', ['hero.jpg']), false);
+check('an ascii basename is unaffected by an accented value', LikePatterns::containsBasename('<p>café</p><img src="/uploads/2026/07/HERO-300X200.JPG">', $names), true);
+
 // -------------------------------------------------- isExactId
 
 check('exact id', LikePatterns::isExactId('123', $id), true);

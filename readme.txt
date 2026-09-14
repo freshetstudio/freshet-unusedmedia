@@ -4,7 +4,7 @@ Tags: media, unused media, media library, clean up, attachments
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.0.4
+Stable tag: 1.0.5
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -101,6 +101,11 @@ Per site, yes. Cross-site references (another site embedding this site's file UR
 Never. Scanning only reads and caches results. Deletion happens exclusively when you click a delete action, after re-verification. The licensed WP-CLI command scans and reports; there is deliberately no delete verb on the command line, so nothing can be deleted non-interactively. The licensed evidence report only writes a file to your own browser — it has no delete action either, and exporting changes nothing on the site. The licensed space totals only add up sizes; opening the page deletes nothing.
 
 == Changelog ==
+
+= 1.0.5 =
+* **A folder whose name is written in a different case is now read once.** The claims index looked a directory up case-sensitively while the database folded case, so on a server that treats `2026/09` and `2026/09` as one folder the same files could be read under two scopes — and a file's own claim could be missed. One scope per folder now, however it is spelled.
+* **A file's question is asked once per batch rather than once per row standing on it.** Where several library entries share one file on disk, the scan repeated the same reads for each of them. The answer is shared across the batch now: the same verdict, measurably less work on libraries where copies are common.
+* **Housekeeping.** A translator note on the Unused label's placeholder, and the wordpress.org listing artwork.
 
 = 1.0.4 =
 * **A reference written in a different case now counts.** Rows naming a file or an ID are fetched case-insensitively by the database and were then thrown away by a case-sensitive check — so a link written `HERO.JPG` against a file stored `hero.jpg`, or markup carrying `DATA-ID="123"`, kept nothing in use and the file was offered for deletion. Both halves agree now, accented filenames included.

@@ -54,6 +54,18 @@ final class FileGroups
     /** A file nothing has decided about yet — some rows scanned, some not. */
     public const STATUS_UNSCANNED = 'unscanned';
 
+    /**
+     * The two sets the grouped read can answer for, and a group is in exactly
+     * one of them. The library is every file with a live row; the trash set is
+     * every file whose rows are all in the trash — the mirror HAVING, so
+     * nothing is in both and nothing is in neither. fileStatus() names the
+     * set a row's file is in under `set`.
+     */
+    public const SET_LIBRARY = 'library';
+
+    /** See SET_LIBRARY. */
+    public const SET_TRASH = 'trash';
+
     /** A row reaching its group's verdict on its own terms. */
     public const HELD_NONE = '';
 
@@ -415,6 +427,44 @@ final class FileGroups
     }
 
     /**
+     * One wholly-trashed file's status from its rows — the trash set's
+     * verdict, over the trashed rows the library verdict deliberately ignores.
+     *
+     * Trashing an attachment removes no file: a page that references it still
+     * renders it. So a binned file is judged on the same stored verdicts as a
+     * live one and in the same direction — one row scanned used keeps it, it
+     * is unused only when every row was scanned unused, and anything else has
+     * not been decided. The In-trash section offers only the unused ones.
+     *
+     * trashStatusSql() is this sentence in SQL; the pair live side by side for
+     * the reason verdict() and statusSql() do.
+     */
+    public static function trashVerdict(int $trash, int $used, int $unused): string
+    {
+        if ($used > 0) {
+            return ResultStore::STATUS_USED;
+        }
+
+        if ($trash > 0 && $unused === $trash) {
+            return ResultStore::STATUS_UNUSED;
+        }
+
+        return self::STATUS_UNSCANNED;
+    }
+
+    /** trashVerdict(), transcribed. Read it against the method above, not on its own. */
+    public static function trashStatusSql(): string
+    {
+        return 'CASE'
+            . ' WHEN ' . self::trashScannedSql(ResultStore::STATUS_USED) . ' > 0 THEN ' . self::quote(ResultStore::STATUS_USED)
+            . ' WHEN ' . self::trashSql() . ' > 0'
+            . ' AND ' . self::trashScannedSql(ResultStore::STATUS_UNUSED) . ' = ' . self::trashSql()
+            . ' THEN ' . self::quote(ResultStore::STATUS_UNUSED)
+            . ' ELSE ' . self::quote(self::STATUS_UNSCANNED)
+            . ' END';
+    }
+
+    /**
      * One row's file, judged as a file — the verdict a per-row screen has to
      * show, and the rows that decided it.
      *
@@ -424,6 +474,12 @@ final class FileGroups
      * rule lives. A screen reading the row's own `_freshet_unusedmedia_status`
      * instead draws **Unused** against a file this plugin is deliberately
      * keeping, and offers a deletion the delete loop would refuse.
+     *
+     * `set` says which of the two sets the file is in. A row whose every
+     * sibling is in the trash with it is SET_TRASH, and its `status` is then
+     * trashVerdict() over those rows — the same figure the In-trash section
+     * lists it under — rather than the library verdict, which would call a
+     * file the library no longer holds unscanned.
      *
      * `held` names why a row is not the verdict it would have reached alone, for
      * the surface that has to say so in words: HELD_SIBLING when another entry
@@ -437,7 +493,7 @@ final class FileGroups
      * of them in one query. The postmeta cache for the siblings is primed here
      * so the status reads that follow cost nothing.
      *
-     * @return array{status: string, siblings: int[], used: int[], trashed: int[], unscanned: int, held: string}
+     * @return array{status: string, set: string, siblings: int[], used: int[], trashed: int[], unscanned: int, held: string}
      */
     public static function fileStatus(int $attachmentId): array
     {
@@ -453,15 +509,27 @@ final class FileGroups
         $used = [];
         $trashed = [];
 
+        // The trashed rows' own verdicts, which the library verdict ignores
+        // and the trash set's is made of.
+        $trashUsed = 0;
+        $trashUnused = 0;
+
         foreach ($siblings as $rowId) {
+            $status = (string) get_post_meta($rowId, ResultStore::META_STATUS, true);
+
             if (get_post_status($rowId) === 'trash') {
                 $trashed[] = $rowId;
+
+                if ($status === ResultStore::STATUS_USED) {
+                    ++$trashUsed;
+                } elseif ($status === ResultStore::STATUS_UNUSED) {
+                    ++$trashUnused;
+                }
 
                 continue;
             }
 
             ++$live;
-            $status = (string) get_post_meta($rowId, ResultStore::META_STATUS, true);
 
             if ($status === ResultStore::STATUS_USED) {
                 $used[] = $rowId;
@@ -470,6 +538,20 @@ final class FileGroups
             } else {
                 ++$unscanned;
             }
+        }
+
+        if ($live === 0) {
+            // Every row is in the trash, this one included: the file is in the
+            // other set, judged by the other rule, and nothing holds it.
+            return [
+                'status' => self::trashVerdict(count($trashed), $trashUsed, $trashUnused),
+                'set' => self::SET_TRASH,
+                'siblings' => $siblings,
+                'used' => [],
+                'trashed' => $trashed,
+                'unscanned' => 0,
+                'held' => self::HELD_NONE,
+            ];
         }
 
         $status = self::verdict($live, count($trashed), count($used), $unused);
@@ -485,6 +567,7 @@ final class FileGroups
 
         return [
             'status' => $status,
+            'set' => self::SET_LIBRARY,
             'siblings' => $siblings,
             'used' => $used,
             'trashed' => $trashed,
@@ -533,17 +616,28 @@ final class FileGroups
      * before they are grouped would hide a *used* row from its own group and
      * hand back a file marked unused on half its evidence.
      *
+     * **Two sets, one builder.** The library — every file with a live row — is
+     * what every count, listing, total and delete loop has always read, and
+     * `$set` defaults to it. SET_TRASH is the mirror: `live = 0` in place of
+     * `live > 0`, so a file whose every row is in the trash is in exactly one
+     * of the two, and the library's own SQL is byte for byte what it was. The
+     * trash set's `fg_status` is trashVerdict() over the trashed rows, and its
+     * `fg_date` is the earliest upload of any row — the library's reads live
+     * rows only, which is none of these.
+     *
      * @param string|null $status  Keep only files with this verdict; null keeps all.
+     * @param string      $set     SET_LIBRARY or SET_TRASH.
      * @return array{sql: string, params: array<int, string>}
      */
-    public static function subquery(?string $status = null, ?ResultFilters $filters = null): array
+    public static function subquery(?string $status = null, ?ResultFilters $filters = null, string $set = self::SET_LIBRARY): array
     {
         global $wpdb;
 
         $filters ??= ResultFilters::none();
+        $trashSet = $set === self::SET_TRASH;
 
         // Files whose every row is in the trash are not in the library any more.
-        $having = [self::liveSql() . ' > 0'];
+        $having = [self::liveSql() . ($trashSet ? ' = 0' : ' > 0')];
         $params = [];
 
         if ($status !== null) {
@@ -573,8 +667,10 @@ final class FileGroups
 
         $sql = 'SELECT ' . self::keyColumnSql() . ' AS fg_key,'
             . ' ' . self::representativeSql() . ' AS fg_id,'
-            . ' ' . self::statusSql() . ' AS fg_status,'
-            . " MIN(CASE WHEN p.post_status <> 'trash' THEN p.post_date END) AS fg_date"
+            . ' ' . ($trashSet ? self::trashStatusSql() : self::statusSql()) . ' AS fg_status,'
+            . ($trashSet
+                ? ' MIN(p.post_date) AS fg_date'
+                : " MIN(CASE WHEN p.post_status <> 'trash' THEN p.post_date END) AS fg_date")
             . " FROM {$wpdb->posts} p"
             . " LEFT JOIN {$wpdb->postmeta} fgf ON fgf.post_id = p.ID AND fgf.meta_key = " . self::quote(self::META_FILE)
             . " LEFT JOIN {$wpdb->postmeta} fgs ON fgs.post_id = p.ID AND fgs.meta_key = " . self::quote(ResultStore::META_STATUS)
@@ -620,7 +716,8 @@ final class FileGroups
      * The row that stands for the file on screen: the first row that carries
      * the verdict, so a used file is represented by a row whose references are
      * the reason it was kept. Falls back to the first live row, then to any row
-     * at all, so a group always has one.
+     * at all, so a group always has one — the last step is what represents a
+     * file in the trash set, whose rows are all trashed.
      */
     private static function representativeSql(): string
     {
@@ -643,6 +740,12 @@ final class FileGroups
     private static function scannedSql(string $status): string
     {
         return "SUM(CASE WHEN p.post_status <> 'trash' AND fgs.meta_value = " . self::quote($status) . ' THEN 1 ELSE 0 END)';
+    }
+
+    /** scannedSql()'s twin over the trashed rows, for the trash set's verdict. */
+    private static function trashScannedSql(string $status): string
+    {
+        return "SUM(CASE WHEN p.post_status = 'trash' AND fgs.meta_value = " . self::quote($status) . ' THEN 1 ELSE 0 END)';
     }
 
     /**

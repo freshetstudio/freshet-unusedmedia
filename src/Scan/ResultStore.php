@@ -91,7 +91,13 @@ final class ResultStore
      * it is a number nobody gave us being printed as if somebody had. Every
      * caller catches and says the counting failed instead.
      *
-     * @return array{used: int, unused: int, unscanned: int, total: int}
+     * `trash` is the other set — files whose every row is in the trash — and
+     * it is its own figure rather than a fourth term of `total`: the library
+     * is used + unused + unscanned, as it always was, and the In-trash section
+     * counts what the library does not hold. A second read, over the mirror of
+     * the same grouped subquery, and it raises for the same reason.
+     *
+     * @return array{used: int, unused: int, unscanned: int, total: int, trash: int}
      * @throws QueryFailed
      */
     public function counts(): array
@@ -114,11 +120,18 @@ final class ResultStore
             }
         }
 
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- the same aggregate over the trash set.
+        $trash = (int) Db::value('trash count', $wpdb->get_var($this->prepared(
+            FileGroups::subquery(null, null, FileGroups::SET_TRASH),
+            'SELECT COUNT(*) FROM ({{groups}}) fg'
+        )));
+
         return [
             'used' => $counts[self::STATUS_USED],
             'unused' => $counts[self::STATUS_UNUSED],
             'unscanned' => $counts[FileGroups::STATUS_UNSCANNED],
             'total' => array_sum($counts),
+            'trash' => $trash,
         ];
     }
 
@@ -172,6 +185,33 @@ final class ResultStore
      */
     public function byStatus(string $status, int $page, int $perPage, ?ResultFilters $filters = null, ?ResultSort $sort = null): array
     {
+        return $this->page(FileGroups::SET_LIBRARY, $status, $page, $perPage, $filters, $sort);
+    }
+
+    /**
+     * Paginated list of the files whose every row is in the trash — the
+     * In-trash section beside the unused list. Every file in the set, whatever
+     * its verdict: the section shows a held or unscanned binned file and says
+     * so on the row, and offers only the unused ones.
+     *
+     * The same paging, filtering and sorting as byStatus(), over the mirror set
+     * — see FileGroups::subquery(). Nothing here can reach a file with a live
+     * row, and nothing in byStatus() can reach one of these.
+     *
+     * @return array{ids: int[], total: int}
+     * @throws QueryFailed
+     */
+    public function trash(int $page, int $perPage, ?ResultFilters $filters = null, ?ResultSort $sort = null): array
+    {
+        return $this->page(FileGroups::SET_TRASH, null, $page, $perPage, $filters, $sort);
+    }
+
+    /**
+     * @return array{ids: int[], total: int}
+     * @throws QueryFailed
+     */
+    private function page(string $set, ?string $status, int $page, int $perPage, ?ResultFilters $filters, ?ResultSort $sort): array
+    {
         global $wpdb;
 
         $filters ??= ResultFilters::none();
@@ -182,7 +222,7 @@ final class ResultStore
         // cut from it: a bound has to be applied to all of them, and an order
         // has to be decided across all of them.
         if ($filters->hasSizeFilter() || $sort->sortsInPhp()) {
-            $ids = $sort->orderBytes($this->sizedIds($status, $filters, $sort));
+            $ids = $sort->orderBytes($this->sizedIds($status, $filters, $sort, $set));
 
             return [
                 'ids' => array_slice($ids, ($page - 1) * $perPage, $perPage),
@@ -190,7 +230,7 @@ final class ResultStore
             ];
         }
 
-        $groups = FileGroups::subquery($status, $filters);
+        $groups = FileGroups::subquery($status, $filters, $set);
 
         // phpcs:disable WordPress.DB.DirectDatabaseQuery -- the grouped subquery; no WP API groups on _wp_attached_file.
         $ids = array_map('intval', Db::rows('listing page', $wpdb->get_col($this->prepared(
@@ -344,13 +384,13 @@ final class ResultStore
      * @return array<int, int|null>
      * @throws QueryFailed
      */
-    private function sizedIds(string $status, ResultFilters $filters, ResultSort $sort): array
+    private function sizedIds(?string $status, ResultFilters $filters, ResultSort $sort, string $set = FileGroups::SET_LIBRARY): array
     {
         global $wpdb;
 
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- the grouped subquery; no WP API groups on _wp_attached_file.
         $ids = array_map('intval', Db::rows('listing measured set', $wpdb->get_col($this->prepared(
-            FileGroups::subquery($status, $filters),
+            FileGroups::subquery($status, $filters, $set),
             'SELECT fg.fg_id FROM ({{groups}}) fg ORDER BY ' . $sort->orderBySql()
         ))));
 

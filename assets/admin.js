@@ -283,13 +283,19 @@
 
     // ------------------------------------------------------- select all
 
-    var selectAll = document.getElementById('freshet-unusedmedia-select-all');
+    // One per checkbox form — the unused list and the In-trash section each
+    // carry their own — and each ticks the boxes of its own form only.
+    document.querySelectorAll('.freshet-unusedmedia-select-all').forEach(function (selectAll) {
+        var form = selectAll.closest('form');
 
-    if (selectAll) {
+        if (!form) {
+            return;
+        }
+
         selectAll.addEventListener('change', function () {
-            document.querySelectorAll('#freshet-unusedmedia-delete-form input[name="attachments[]"]').forEach(function (box) {
+            form.querySelectorAll('input[name="attachments[]"]').forEach(function (box) {
                 box.checked = selectAll.checked;
             });
         });
-    }
+    });
 })();

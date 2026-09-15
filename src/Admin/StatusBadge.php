@@ -54,6 +54,14 @@ final class StatusBadge
             return self::unavailable();
         }
 
+        // Every row on the file is in the trash, this one with them: the file
+        // is in the In-trash set on Media → Usage, not the library, and the
+        // library's "Not scanned" would be a verdict about a set it is not in.
+        // Seen only in the library's own Trash view, where core lists the row.
+        if ($file['set'] === FileGroups::SET_TRASH) {
+            return self::inTrash();
+        }
+
         if ($file['held'] !== FileGroups::HELD_NONE) {
             return self::heldBack(FileGroups::heldBackReason($file['held']));
         }
@@ -89,6 +97,12 @@ final class StatusBadge
     public static function unavailable(): string
     {
         return '<span class="freshet-unusedmedia-badge freshet-unusedmedia-badge--unknown">' . esc_html__('Couldn’t check', 'freshet-unused-media') . '</span>';
+    }
+
+    /** A file whose every library entry is in the trash. Escaped HTML. */
+    public static function inTrash(): string
+    {
+        return '<span class="freshet-unusedmedia-badge freshet-unusedmedia-badge--unknown">' . esc_html__('In trash', 'freshet-unused-media') . '</span>';
     }
 
     /** A file the plugin is protecting rather than offering. Escaped HTML. */

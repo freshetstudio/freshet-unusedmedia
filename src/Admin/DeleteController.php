@@ -92,8 +92,21 @@ final class DeleteController
      * pool the same way they always did (re-scanned as used, or cleared), which
      * is what lets the delete-all loop terminate.
      *
+     * **A file whose every row is in the trash is the one exception to the
+     * trash rule, and it is the In-trash section's whole delete path.** There
+     * is no live entry left for a restore to sit beside, so the file is
+     * erased with all of its rows — but only when every row's stored verdict
+     * is unused, and then only after the same claims check and the same
+     * re-scan a library file gets. A group with a live row and a trashed one
+     * is still skipped: that trashed row can still be restored over the file.
+     * The batch loop never hands one of these in (unusedIds() reads the
+     * library set only); the checkbox form on the In-trash section does.
+     *
      * Trash vs permanent is core's call: with MEDIA_TRASH enabled
-     * wp_delete_attachment() trashes, otherwise it deletes permanently.
+     * wp_delete_attachment() trashes, otherwise it deletes permanently — and a
+     * row already in the trash is deleted permanently either way, so the
+     * trashed tally below cannot fire for the In-trash set and its bytes are
+     * really freed.
      *
      * The counts returned are files. So is the bookkeeping: each file is sized
      * once, before it goes, because afterwards there is nothing left to measure.
@@ -199,12 +212,41 @@ final class DeleteController
             }
 
             // A trashed row is a deletion someone started and can still undo.
-            // Erasing the file now would empty the trash out from under them.
+            // Erasing the file now would empty the trash out from under them —
+            // unless every row on the file is in the trash, which is the other
+            // set entirely: the In-trash section offers those, there is no live
+            // entry left to restore beside, and core erases a trashed row
+            // outright rather than trashing it again. Re-read here rather than
+            // trusted from the render: a restore between the two moves the
+            // file back into the library, and a mixed group is still a skip.
+            $trashedRows = 0;
+
             foreach ($rows as $rowId) {
                 if (get_post_status($rowId) === 'trash') {
-                    ++$skipped; // Already outside the unused pool; nothing to clear.
+                    ++$trashedRows;
+                }
+            }
 
-                    continue 2;
+            $inTrash = $trashedRows === count($rows);
+
+            if ($trashedRows > 0 && !$inTrash) {
+                ++$skipped; // Already outside the unused pool; nothing to clear.
+
+                continue;
+            }
+
+            if ($inTrash) {
+                // Trashing an attachment removes no file, so a binned file a
+                // page still renders is a file this must not erase, and one
+                // nobody has scanned is one nobody has judged. Only a file
+                // whose every row was scanned unused is offered from the
+                // In-trash section, and the offer is checked again here.
+                foreach ($rows as $rowId) {
+                    if ($this->store->status($rowId) !== ResultStore::STATUS_UNUSED) {
+                        ++$skipped; // Still listed there as held or unscanned; nothing to clear.
+
+                        continue 2;
+                    }
                 }
             }
 
@@ -271,7 +313,13 @@ final class DeleteController
                 continue;
             }
 
-            if (FileGroups::verdict(count($rows), 0, $used, count($rows) - $used) !== ResultStore::STATUS_UNUSED) {
+            // The same sentence for both sets — one row found used keeps the
+            // file — read from the set's own verdict rule.
+            $verdict = $inTrash
+                ? FileGroups::trashVerdict(count($rows), $used, count($rows) - $used)
+                : FileGroups::verdict(count($rows), 0, $used, count($rows) - $used);
+
+            if ($verdict !== ResultStore::STATUS_UNUSED) {
                 ++$skipped; // Cache already updated by the scans; the file leaves the unused pool.
                 continue;
             }

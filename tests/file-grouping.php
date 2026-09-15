@@ -956,6 +956,14 @@ check('a file with no live row is not unused', FileGroups::verdict(0, 1, 0, 0), 
 check('all rows used is used', FileGroups::verdict(3, 0, 3, 0), ResultStore::STATUS_USED);
 check('a single unused row is unused', FileGroups::verdict(1, 0, 0, 1), ResultStore::STATUS_UNUSED);
 
+// The other set's rule (freshet-190): a file whose every row is in the trash
+// is judged on those rows, in the same direction — one used row keeps it,
+// and only every row scanned unused offers it.
+check('a binned file with one used row is used', FileGroups::trashVerdict(2, 1, 1), ResultStore::STATUS_USED);
+check('a binned file with every row unused is unused', FileGroups::trashVerdict(2, 0, 2), ResultStore::STATUS_UNUSED);
+check('a binned file with an unscanned row is not a verdict', FileGroups::trashVerdict(2, 0, 1), FileGroups::STATUS_UNSCANNED);
+check('a binned file with no rows is not a verdict', FileGroups::trashVerdict(0, 0, 0), FileGroups::STATUS_UNSCANNED);
+
 // ---------------------------------------------------------- the subquery
 //
 // The count and the listing cannot disagree if they are the same query. A
@@ -987,8 +995,11 @@ check('the date bounds cover whole days', $filtered['params'], ['%logo%', '2024-
 
 $store = new ResultStore();
 
+// counts() is two reads since freshet-190 — the library, then the trash set
+// — so the library count is the one before last.
 $store->counts();
-$countSql = $GLOBALS['wpdb']->last()['sql'];
+$countSql = $GLOBALS['wpdb']->queries[count($GLOBALS['wpdb']->queries) - 2]['sql'];
+$trashCountSql = $GLOBALS['wpdb']->last()['sql'];
 
 $store->byStatus(ResultStore::STATUS_UNUSED, 1, 50);
 $listSql = $GLOBALS['wpdb']->queries[count($GLOBALS['wpdb']->queries) - 2]['sql'];
@@ -996,6 +1007,44 @@ $listSql = $GLOBALS['wpdb']->queries[count($GLOBALS['wpdb']->queries) - 2]['sql'
 check('the count wraps the grouped subquery', str_contains($countSql, FileGroups::subquery()['sql']), true);
 check('the listing wraps the grouped subquery', str_contains($listSql, FileGroups::subquery(ResultStore::STATUS_UNUSED)['sql']), true);
 check('the count counts files', str_contains($countSql, 'COUNT(*)') && str_contains($countSql, 'fg_status'), true);
+
+// The other set (freshet-190): the same builder, the mirror HAVING, so a
+// file is in exactly one of the two — and the library's own SQL is what it
+// was, byte for byte, because the default set is the library.
+$trashGroups = FileGroups::subquery(null, null, FileGroups::SET_TRASH);
+$librarySql = FileGroups::subquery()['sql'];
+
+check('the default set is the library', $librarySql, FileGroups::subquery(null, null, FileGroups::SET_LIBRARY)['sql']);
+check('the library keeps files with a live row', str_contains($librarySql, "HAVING SUM(CASE WHEN p.post_status <> 'trash' THEN 1 ELSE 0 END) > 0"), true);
+check('the trash set keeps files with none', str_contains($trashGroups['sql'], "HAVING SUM(CASE WHEN p.post_status <> 'trash' THEN 1 ELSE 0 END) = 0"), true);
+check('the library verdict never reaches the trash set', str_contains($trashGroups['sql'], FileGroups::statusSql()), false);
+check('the trash set carries its own verdict', str_contains($trashGroups['sql'], FileGroups::trashStatusSql() . ' AS fg_status'), true);
+check('the trash verdict reads trashed rows only', str_contains(FileGroups::trashStatusSql(), "p.post_status <> 'trash'"), false);
+check('the library verdict reads live rows only', str_contains(FileGroups::statusSql(), "p.post_status = 'trash' AND fgs"), false);
+// fg_date reads live rows only on the library — a trashed file has none, so
+// the trash set falls back to the earliest upload of any row, and a group in
+// it still has a date to filter and sort on.
+check('the library date reads live rows', str_contains($librarySql, "MIN(CASE WHEN p.post_status <> 'trash' THEN p.post_date END) AS fg_date"), true);
+check('the trash set dates a file from any row', str_contains($trashGroups['sql'], 'MIN(p.post_date) AS fg_date'), true);
+check('the trash set groups on the same key', str_contains($trashGroups['sql'], 'GROUP BY ' . FileGroups::keySql()), true);
+check('the trash set has exactly one WHERE too', substr_count($trashGroups['sql'], 'WHERE'), 1);
+check('the trash count wraps the trash set', str_contains($trashCountSql, $trashGroups['sql']) && str_contains($trashCountSql, 'COUNT(*)'), true);
+check('the trash count is not the library count', str_contains($trashCountSql, $librarySql), false);
+
+$trashFiltered = FileGroups::subquery(null, ResultFilters::fromRequest([
+    ResultFilters::ARG_FILE => 'logo',
+    ResultFilters::ARG_FROM => '2024-01-01',
+    ResultFilters::ARG_TO => '2024-06-30',
+]), FileGroups::SET_TRASH);
+
+check('the filters narrow the trash set the same way', str_contains($trashFiltered['sql'], 'HAVING') && str_contains($trashFiltered['sql'], 'fg_key LIKE %s'), true);
+check('with the same bounds', $trashFiltered['params'], ['%logo%', '2024-01-01 00:00:00', '2024-06-30 23:59:59']);
+
+$store->trash(1, 50);
+$trashListSql = $GLOBALS['wpdb']->queries[count($GLOBALS['wpdb']->queries) - 2]['sql'];
+
+check('the trash listing wraps the trash set', str_contains($trashListSql, $trashGroups['sql']), true);
+check('and never the library', str_contains($trashListSql, $librarySql), false);
 // Not a style rule: WP_Query is filterable, so a listing built on one can be
 // narrowed by another plugin while the aggregate count beside it is not. That
 // is the screen whose heading and list disagree.
@@ -1826,6 +1875,76 @@ $result = $deleter()->deleteVerified([600]);
 check('a trashed sibling holds the file', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0, 'remaining' => []]);
 check('the trashed row can still be restored to its file', onDisk('2026/02/poster.jpg'), true);
 
+// A file whose EVERY row is in the trash is the other set (freshet-190): no
+// live entry is left for a restore to sit beside, so the In-trash section
+// offers it — when every row was scanned unused, and not otherwise. The
+// stored verdicts are the ones the section listed it on.
+
+library([
+    600 => ['file' => '2026/02/poster.jpg', 'status' => 'trash'],
+    601 => ['file' => '2026/02/poster.jpg', 'status' => 'trash'],
+]);
+
+$store = new ResultStore();
+$store->save(600, ResultStore::STATUS_UNUSED, []);
+$store->save(601, ResultStore::STATUS_UNUSED, []);
+
+$result = $deleter()->deleteVerified([600]);
+
+check('a wholly-trashed unused file is deleted', $result, ['deleted' => 1, 'skipped' => 0, 'failed' => 0, 'remaining' => []]);
+check('and the file is gone from disk', onDisk('2026/02/poster.jpg'), false);
+check('with both of its rows', [get_post_type(600), get_post_type(601)], [false, false]);
+// Core erases a row already in the trash rather than trashing it again, so
+// the bytes are really freed and the trashed tally cannot fire.
+check('the bytes were freed, not moved to the trash', [ReclaimedLedger::read()['files'], ReclaimedLedger::read()['trashed']], [1, 0]);
+
+// Trashing an attachment removes no file: a page that references it still
+// renders it, so a binned file scanned used is held here as it would be
+// anywhere else.
+library([
+    600 => ['file' => '2026/02/poster.jpg', 'status' => 'trash'],
+    601 => ['file' => '2026/02/poster.jpg', 'status' => 'trash'],
+]);
+
+$store = new ResultStore();
+$store->save(600, ResultStore::STATUS_UNUSED, []);
+$store->save(601, ResultStore::STATUS_USED, []);
+
+$result = $deleter()->deleteVerified([600]);
+
+check('a wholly-trashed file with a used row is skipped', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0, 'remaining' => []]);
+check('and the file stays on disk', onDisk('2026/02/poster.jpg'), true);
+check('and its used verdict stands', $store->status(601), ResultStore::STATUS_USED);
+
+// And one nobody has scanned has not been judged at all.
+library([
+    600 => ['file' => '2026/02/poster.jpg', 'status' => 'trash'],
+    601 => ['file' => '2026/02/poster.jpg', 'status' => 'trash'],
+]);
+
+$store = new ResultStore();
+$store->save(600, ResultStore::STATUS_UNUSED, []);
+
+$result = $deleter()->deleteVerified([600]);
+
+check('a wholly-trashed file with an unscanned row is skipped', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0, 'remaining' => []]);
+check('and that file stays on disk too', onDisk('2026/02/poster.jpg'), true);
+
+// The stored verdict is the offer, not the deletion: the re-scan still runs,
+// and a reference that appeared since the scan keeps the file.
+library([
+    600 => ['file' => '2026/02/poster.jpg', 'status' => 'trash', 'used' => true],
+]);
+
+$store = new ResultStore();
+$store->save(600, ResultStore::STATUS_UNUSED, []);
+
+$result = $deleter()->deleteVerified([600]);
+
+check('a binned file found used on re-check is skipped', $result, ['deleted' => 0, 'skipped' => 1, 'failed' => 0, 'remaining' => []]);
+check('and the re-check wrote the verdict it found', $store->status(600), ResultStore::STATUS_USED);
+check('and the file is still there', onDisk('2026/02/poster.jpg'), true);
+
 // ------------------------------------------------- the request that ran out
 //
 // Re-verifying one file is one scan per attachment row standing on it, so on a
@@ -1989,6 +2108,38 @@ $badge600 = StatusBadge::forRow(600, new ResultStore());
 
 check('a trashed copy holds the row back', str_contains($badge600, 'Held back — a copy of this file is in the trash'), true);
 check('and the held row does not read unused', str_contains($badge600, 'Unused'), false);
+
+// Every row in the trash: the file is in the other set, and the badge says
+// that rather than "Not scanned" — the library's word for a file the library
+// no longer holds (freshet-190). Seen in the library's own Trash view.
+library([
+    600 => ['file' => '2026/02/poster.jpg', 'status' => 'trash', 'used' => false],
+    601 => ['file' => '2026/02/poster.jpg', 'status' => 'trash', 'used' => false],
+]);
+
+$scan(600);
+
+$file600 = FileGroups::fileStatus(600);
+$badge600 = StatusBadge::forRow(600, new ResultStore());
+
+check('a wholly-trashed file is in the trash set', $file600['set'], FileGroups::SET_TRASH);
+check('and is judged by the trash rule — one row scanned, so undecided', $file600['status'], FileGroups::STATUS_UNSCANNED);
+check('and is held by nothing', $file600['held'], FileGroups::HELD_NONE);
+check('its badge reads In trash', str_contains($badge600, 'In trash'), true);
+check('and neither Not scanned nor Unused', str_contains($badge600, 'Not scanned') || str_contains($badge600, 'Unused'), false);
+
+$scan(601);
+
+check('every row scanned unused makes the binned file unused', FileGroups::fileStatus(600)['status'], ResultStore::STATUS_UNUSED);
+check('and the badge still reads In trash', str_contains(StatusBadge::forRow(600, new ResultStore()), 'In trash'), true);
+
+// A file with a live row is the library's, whatever its trashed rows say.
+library([
+    600 => ['file' => '2026/02/poster.jpg', 'used' => false],
+    601 => ['file' => '2026/02/poster.jpg', 'status' => 'trash', 'used' => false],
+]);
+
+check('a file with a live row is in the library set', FileGroups::fileStatus(600)['set'], FileGroups::SET_LIBRARY);
 
 // One row scanned, one not: the file has no verdict yet, and the honest badge
 // is the one the Tools screen counts it under.

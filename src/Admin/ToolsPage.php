@@ -6,6 +6,7 @@ namespace FreshetUnusedMedia\Admin;
 
 use FreshetUnusedMedia\License\LicenseInterface;
 use FreshetUnusedMedia\Scan\FileClaims;
+use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\FileSize;
 use FreshetUnusedMedia\Scan\OrphanSizes;
 use FreshetUnusedMedia\Scan\QueryFailed;
@@ -165,6 +166,11 @@ final class ToolsPage
                 // an empty heading where a feature is not entitled reads as a
                 // broken screen. It follows the table because it totals it.
                 $this->totals?->render();
+
+                // The other set, under the unused list and its total rather
+                // than between them: the total describes the table above it,
+                // and these files are not in that table or that total.
+                $this->renderTrashTable();
 
                 break;
 
@@ -997,7 +1003,7 @@ final class ToolsPage
         $this->renderDeleteSelectedButton($filters);
 
         echo '<table class="widefat striped freshet-unusedmedia-table"><thead><tr>';
-        echo '<td class="check-column"><input type="checkbox" id="freshet-unusedmedia-select-all"></td>';
+        echo '<td class="check-column"><input type="checkbox" class="freshet-unusedmedia-select-all"></td>';
 
         $this->renderColumnHeaders([
             ResultSort::BY_FILE => __('File', 'freshet-unused-media'),
@@ -1103,13 +1109,18 @@ final class ToolsPage
      * control is in reach from either end of a fifty-row list (freshet-D75
      * clause 8). Both are submits on the same form and carry the same
      * confirmation; neither takes an id, so there is nothing to collide.
+     *
+     * The In-trash section passes its own permanence sentence: its rows are
+     * already in the trash, so there is no trash for them to go to and the
+     * MEDIA_TRASH reading of the default would promise a restore that cannot
+     * happen.
      */
-    private function renderDeleteSelectedButton(ResultFilters $filters): void
+    private function renderDeleteSelectedButton(ResultFilters $filters, ?string $permanence = null): void
     {
         $confirmSelected = __('Delete the selected attachments?', 'freshet-unused-media')
             . ' ' . $this->recheckNotice()
             . ($filters->isActive() ? ' ' . __('Only files matching the current filter are listed, so the selection comes from that list.', 'freshet-unused-media') : '')
-            . ' ' . $this->permanenceNotice();
+            . ' ' . ($permanence ?? $this->permanenceNotice());
 
         printf(
             '<p class="freshet-unusedmedia-actions">
@@ -1125,6 +1136,152 @@ final class ToolsPage
         echo '<tr>';
         printf('<th scope="row" class="check-column"><input type="checkbox" name="attachments[]" value="%d"></th>', (int) $id);
         $this->renderFileCells($id);
+        $this->renderScannedCell($id);
+        echo '</tr>';
+    }
+
+    // -------------------------------------------------------------- in trash
+
+    /**
+     * The other set: files whose every library entry is in the trash. They
+     * are not unused — the unused list, its count and its delete pool are the
+     * library's and do not move — and they are not hidden either, which is
+     * what they were. Their own section, their own count, their own checkbox
+     * form, and nothing else of the Unused section: no Delete all, because
+     * core's own Empty Trash is the bulk control for this set.
+     *
+     * Trashing an attachment removes no file, so a binned file a page still
+     * renders is shown held rather than offered, and one nobody has scanned is
+     * shown as that. Only a file whose every row was scanned unused gets a
+     * checkbox — and the delete path reads the same verdicts again before it
+     * touches anything.
+     *
+     * The same catch as the unused list (freshet-152): a read that did not
+     * answer renders the failure notice, never an empty table.
+     */
+    private function renderTrashTable(): void
+    {
+        $page = max(1, absint($_GET['trash_page'] ?? 1)); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only pagination.
+        $filters = $this->filters();
+
+        try {
+            $list = $this->store->trash($page, self::PER_PAGE, $filters, $this->sort());
+        } catch (QueryFailed) {
+            $this->renderListingFailure(__('In trash', 'freshet-unused-media'));
+
+            return;
+        }
+
+        echo '<div class="freshet-unusedmedia-section">';
+        echo '<h2>' . $this->listHeading( // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in listHeading().
+            /* translators: %s: number of files whose every library entry is in the trash */
+            __('In trash (%s)', 'freshet-unused-media'),
+            $list['total'],
+            'trash'
+        ) . '</h2>';
+
+        if ($list['ids'] === []) {
+            echo '<p>' . esc_html($filters->isActive()
+                ? __('No files in the trash match this filter. Clear it to see the rest.', 'freshet-unused-media')
+                : __('No file has every one of its library entries in the trash.', 'freshet-unused-media')) . '</p></div>';
+
+            return;
+        }
+
+        $this->renderNoteList(
+            __('Every file here is in the media trash with all of its library entries, so it is not in the lists above:', 'freshet-unused-media'),
+            array_values(array_filter([
+                __('Trashing an attachment does not remove its file — a page that still refers to it still shows it. A file scanned as still referenced is held back here rather than offered.', 'freshet-unused-media'),
+                __('A file the scan has not reached has no verdict yet and is not offered either. Run a scan to decide it.', 'freshet-unused-media'),
+                __('Erasing one here removes the file and its trashed entries for good — this is the permanent half of the media trash, the same as Delete Permanently there.', 'freshet-unused-media'),
+                trim($this->sizeFilterNote()),
+            ]))
+        );
+
+        // Primed once for the page rather than looked up per row: every row
+        // below asks for its file's verdict, which is a sibling lookup.
+        FileGroups::prime($list['ids']);
+
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" id="freshet-unusedmedia-trash-form">';
+        wp_nonce_field('freshet_unusedmedia_delete_selected');
+        echo '<input type="hidden" name="action" value="freshet_unusedmedia_delete_selected">';
+
+        $permanence = __('These files are already in the trash: deleting them here is permanent and cannot be undone.', 'freshet-unused-media');
+
+        $this->renderDeleteSelectedButton($filters, $permanence);
+
+        echo '<table class="widefat striped freshet-unusedmedia-table"><thead><tr>';
+        echo '<td class="check-column"><input type="checkbox" class="freshet-unusedmedia-select-all"></td>';
+
+        $this->renderColumnHeaders([
+            ResultSort::BY_FILE => __('File', 'freshet-unused-media'),
+            'type' => __('Type', 'freshet-unused-media'),
+            ResultSort::BY_DATE => __('Uploaded', 'freshet-unused-media'),
+            ResultSort::BY_SIZE => __('Size', 'freshet-unused-media'),
+            'status' => __('Status', 'freshet-unused-media'),
+            'scanned' => __('Scanned', 'freshet-unused-media'),
+        ], self::TAB_UNUSED);
+
+        echo '</tr></thead><tbody>';
+
+        foreach ($list['ids'] as $id) {
+            $this->renderTrashRow($id);
+        }
+
+        echo '</tbody></table>';
+
+        $this->renderPagination(self::TAB_UNUSED, 'trash_page', $page, $list['total']);
+
+        $this->renderDeleteSelectedButton($filters, $permanence);
+
+        echo '</form>';
+        echo '</div>';
+    }
+
+    /**
+     * One binned file: a checkbox only where every row was scanned unused,
+     * and the reason in words where not — the held sentence for a file
+     * something still refers to (freshet-D95), and "Not scanned" for one
+     * nobody has judged. The verdict is the file's, read through the same
+     * bridge the Media Library badge uses, never the representative row's own.
+     */
+    private function renderTrashRow(int $id): void
+    {
+        $unavailable = false;
+
+        try {
+            $file = FileGroups::fileStatus($id);
+        } catch (QueryFailed) {
+            // No verdict can be read, so nothing is offered: the row is drawn
+            // without a box and says the check did not run (freshet-141).
+            $file = ['status' => FileGroups::STATUS_UNSCANNED, 'set' => FileGroups::SET_LIBRARY];
+            $unavailable = true;
+        }
+
+        // A file restored to the library between the read and the render is
+        // not in this set any more, and is not offered from it.
+        $offered = $file['set'] === FileGroups::SET_TRASH && $file['status'] === ResultStore::STATUS_UNUSED;
+
+        echo '<tr>';
+
+        if ($offered) {
+            printf('<th scope="row" class="check-column"><input type="checkbox" name="attachments[]" value="%d"></th>', (int) $id);
+        } else {
+            echo '<th scope="row" class="check-column"></th>';
+        }
+
+        $this->renderFileCells($id);
+
+        if ($unavailable) {
+            echo '<td>' . StatusBadge::unavailable() . '</td>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- badge HTML escaped in StatusBadge.
+        } elseif ($file['status'] === ResultStore::STATUS_USED) {
+            echo '<td>' . esc_html__('Held back — still referenced', 'freshet-unused-media') . '</td>';
+        } elseif ($offered) {
+            echo '<td>' . esc_html__('Unused', 'freshet-unused-media') . '</td>';
+        } else {
+            echo '<td>' . esc_html__('Not scanned', 'freshet-unused-media') . '</td>';
+        }
+
         $this->renderScannedCell($id);
         echo '</tr>';
     }

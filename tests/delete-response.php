@@ -518,6 +518,12 @@ $GLOBALS['wpdb'] = new class {
             return (string) count($GLOBALS['rows']);
         }
 
+        // A count over the grouped set — the listing total, and the In-trash
+        // figure counts() reads over the mirror set.
+        if (str_contains($query['sql'], 'COUNT(*) FROM (SELECT')) {
+            return (string) count(files($query['sql']));
+        }
+
         return '0';
     }
 };
@@ -585,22 +591,34 @@ use FreshetUnusedMedia\Scan\SharedReads;
  *
  * Grouped on FileGroups::keyFor() and decided by FileGroups::verdict(), so this
  * agrees with the SQL by construction rather than by a second transcription.
- * `HAVING live > 0` drops files whose every row is in the trash, and the status
- * literal the subquery carries narrows what is left.
+ * `HAVING live > 0` drops files whose every row is in the trash — and its
+ * mirror, `live = 0`, keeps only those, which is the In-trash set — and the
+ * status literal the subquery carries narrows what is left.
  *
  * @return array<string, array{id: int, status: string}>
  */
 function files(string $sql): array
 {
+    // Which of the two sets the subquery was built for: the library, or its
+    // mirror — the files whose every row is in the trash (freshet-190).
+    $trashSet = str_contains($sql, "HAVING SUM(CASE WHEN p.post_status <> 'trash' THEN 1 ELSE 0 END) = 0");
+
     $groups = [];
 
     foreach ($GLOBALS['rows'] as $id => $row) {
         $key = FileGroups::keyFor($id);
-        $groups[$key] ??= ['live' => 0, 'trash' => 0, 'used' => 0, 'unused' => 0, 'usedIds' => [], 'liveIds' => [], 'ids' => []];
+        $groups[$key] ??= ['live' => 0, 'trash' => 0, 'used' => 0, 'unused' => 0, 'usedIds' => [], 'liveIds' => [], 'ids' => [], 'trashUsed' => 0, 'trashUnused' => 0];
         $groups[$key]['ids'][] = $id;
 
         if ($row['status'] === 'trash') {
             ++$groups[$key]['trash'];
+            $status = (string) ($GLOBALS['meta'][$id][ResultStore::META_STATUS] ?? '');
+
+            if ($status === ResultStore::STATUS_USED) {
+                ++$groups[$key]['trashUsed'];
+            } elseif ($status === ResultStore::STATUS_UNUSED) {
+                ++$groups[$key]['trashUnused'];
+            }
 
             continue;
         }
@@ -620,11 +638,13 @@ function files(string $sql): array
     $files = [];
 
     foreach ($groups as $key => $group) {
-        if ($group['live'] === 0) {
+        if (($group['live'] === 0) !== $trashSet) {
             continue;
         }
 
-        $status = FileGroups::verdict($group['live'], $group['trash'], $group['used'], $group['unused']);
+        $status = $trashSet
+            ? FileGroups::trashVerdict($group['trash'], $group['trashUsed'], $group['trashUnused'])
+            : FileGroups::verdict($group['live'], $group['trash'], $group['used'], $group['unused']);
 
         // The status literal the subquery embeds, read back the way the
         // database would apply it.
@@ -849,6 +869,42 @@ check(
     preg_match('/\b(static\s+\$|get_transient|set_transient|wp_cache_(get|set))\b/', $ajaxSource . $storeSource),
     0
 );
+
+// ----------------------------------- the batch loop never reaches the trash set
+//
+// freshet-190. A file whose every row is in the trash is listed in its own
+// section and erased from there by the checkbox form — never by this loop,
+// whose batches come from unusedIds() over the library set. The figure it
+// carries is the library's unused count, and the trash count is its own.
+
+library([
+    401 => ['file' => '2024/03/one.png'],
+    402 => ['file' => '2024/03/two.png'],
+    403 => ['file' => '2024/03/binned.png', 'status' => 'trash'],
+    404 => ['file' => '2024/03/binned.png', 'status' => 'trash'],
+    405 => ['file' => '2024/03/mixed.png'],
+    406 => ['file' => '2024/03/mixed.png', 'status' => 'trash'],
+]);
+
+$store = new ResultStore();
+$counts = $store->counts();
+
+check('the trash set is its own figure', $counts['trash'], 1);
+check('the unused count is the library\'s', $counts['unused'], 2);
+check('and total is the library\'s three, not four', $counts['total'], 3);
+check('the trash listing is the binned file', $store->trash(1, 50)['ids'], [403]);
+check('the unused listing is the two live ones', $store->unused(1, 50)['ids'], [401, 402]);
+check('the batch source reads the library set only', $store->unusedIds(5)['ids'], [401, 402]);
+
+$reply = deleteBatch();
+
+check('the loop deletes the two live files', $reply['deleted'], 2);
+check('and the binned file is not touched', onDisk('2024/03/binned.png'), true);
+check('nor the mixed one', onDisk('2024/03/mixed.png'), true);
+check('the reply\'s figure is the library\'s', $reply['unused'], 0);
+check('the trash figure did not move', $store->counts()['trash'], 1);
+check('the loop finishes with the binned file still there', deleteBatch()['finished'], true);
+check('and it is still in the trash set', $store->trash(1, 50)['total'], 1);
 
 // ------------------------------- a read that failed never confirms a deletion
 //

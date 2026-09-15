@@ -201,6 +201,9 @@ if [ ${#WPORG_STRIP[@]} -gt 0 ]; then
   for stripped in "${WPORG_STRIP[@]}"; do
     rm "$STAGE/$stripped"
   done
+  # A directory emptied by the strip would still be listed in the archive,
+  # and its name says what was taken out of it.
+  find "$STAGE" -type d -empty -delete
   if [ "$BUILD_COMPOSER" = "1" ]; then
     (cd "$STAGE" && composer dump-autoload --no-dev --optimize --quiet)
   fi

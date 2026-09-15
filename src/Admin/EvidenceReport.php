@@ -69,6 +69,9 @@ final class EvidenceReport
     public function hooks(): void
     {
         add_action('admin_post_' . self::ACTION, [$this, 'export']);
+        // With the scan, because it exports what the last scan found — used
+        // and unused alike, not just the delete list.
+        add_action('freshet_unusedmedia_after_scan', [$this, 'render']);
     }
 
     // ------------------------------------------------------------------- UI

@@ -1,0 +1,54 @@
+/* Freshet Unused Media — styles for the licensed surfaces. Loaded after
+   admin.css on the same screens, by the build that carries them. */
+
+/* The tier pill in the Usage screen's header */
+
+.frst-header__pill {
+    border-radius: 12px;
+    padding: 3px 10px;
+    font-weight: 600;
+    font-size: 12px;
+}
+
+.frst-header__pill--pro {
+    background: #edfaef;
+    color: #00832a;
+}
+
+.frst-header__pill--free {
+    background: #f0f0f1;
+    color: #50575e;
+}
+
+/* Used view — the complete reference list on an attachment */
+
+.freshet-unusedmedia-used {
+    margin: 8px 0 0;
+    padding-left: 24px;
+}
+
+.freshet-unusedmedia-used li {
+    margin-bottom: 6px;
+}
+
+/* What a license adds — the four-item list under the license status. The same
+   shape as the helper-text lists on the Scan and Unused tabs (admin.css), so
+   the screens do not grow a second kind of list. */
+
+.freshet-unusedmedia-adds {
+    margin: 4px 0 12px;
+    padding-left: 16px;
+    list-style: disc;
+}
+
+.freshet-unusedmedia-adds li {
+    margin-bottom: 4px;
+}
+
+.freshet-unusedmedia-license--on {
+    color: #00832a;
+}
+
+.freshet-unusedmedia-license--off {
+    color: #b32d2e;
+}

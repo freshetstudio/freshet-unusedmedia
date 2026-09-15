@@ -59,23 +59,6 @@
     font-size: 13px;
 }
 
-.frst-header__pill {
-    border-radius: 12px;
-    padding: 3px 10px;
-    font-weight: 600;
-    font-size: 12px;
-}
-
-.frst-header__pill--pro {
-    background: #edfaef;
-    color: #00832a;
-}
-
-.frst-header__pill--free {
-    background: #f0f0f1;
-    color: #50575e;
-}
-
 /* Core .nav-tab keeps its own colours; only the strip's own edges go. */
 .frst-header .nav-tab-wrapper {
     border-bottom: 0;
@@ -232,40 +215,18 @@
     margin-bottom: 0;
 }
 
-/* Used view (licensed) — the complete reference list on an attachment */
+/* The helper-text lists on the Scan and Unused tabs: the points under a lead
+   sentence, where a paragraph used to carry all of them (freshet-D119). One
+   shape, so the screens do not grow a second kind of list. */
 
-.freshet-unusedmedia-used {
-    margin: 8px 0 0;
-    padding-left: 24px;
-}
-
-.freshet-unusedmedia-used li {
-    margin-bottom: 6px;
-}
-
-/* What a license adds — the four-item list under the license status — and the
-   helper-text lists on the Scan and Unused tabs, which are the same object: the
-   points under a lead sentence, where a paragraph used to carry all of them
-   (freshet-D119). One shape, so the screens do not grow a second kind of list. */
-
-.freshet-unusedmedia-adds,
 .freshet-unusedmedia-notes {
     margin: 4px 0 12px;
     padding-left: 16px;
     list-style: disc;
 }
 
-.freshet-unusedmedia-adds li,
 .freshet-unusedmedia-notes li {
     margin-bottom: 4px;
-}
-
-.freshet-unusedmedia-license--on {
-    color: #00832a;
-}
-
-.freshet-unusedmedia-license--off {
-    color: #b32d2e;
 }
 
 /* Filter bar — above both listings, on the unused one above the delete form */
@@ -350,8 +311,8 @@
    list form. It is freshet-D82's one measure applied to both shapes of the same
    prose - not a third cap, and still nothing on the wrap, the section or a
    table. Named rather than written as ul.description, which would also re-measure
-   the License tab's tier list: nothing asked for that, and freshet-D89 (3) is
-   explicit that a pass does not restyle a screen on its own judgement. */
+   any other list carrying that class: nothing asked for that, and freshet-D89 (3)
+   is explicit that a pass does not restyle a screen on its own judgement. */
 
 .freshet-unusedmedia-wrap p.description,
 .freshet-unusedmedia-wrap ul.freshet-unusedmedia-notes {

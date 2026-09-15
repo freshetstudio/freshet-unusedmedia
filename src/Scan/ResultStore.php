@@ -106,11 +106,12 @@ final class ResultStore
 
         $counts = [self::STATUS_USED => 0, self::STATUS_UNUSED => 0, FileGroups::STATUS_UNSCANNED => 0];
 
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- aggregate over the grouped subquery; no WP API groups on _wp_attached_file.
+        // phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- aggregate over the grouped subquery; no WP API groups on _wp_attached_file. prepared() runs $wpdb->prepare() over the spliced SQL.
         $rows = Db::rows('library counts', $wpdb->get_results($this->prepared(
             FileGroups::subquery(),
             'SELECT fg.fg_status AS status, COUNT(*) AS files FROM ({{groups}}) fg GROUP BY fg.fg_status'
         ), ARRAY_A));
+        // phpcs:enable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared
 
         foreach ($rows as $row) {
             $status = (string) ($row['status'] ?? '');
@@ -120,11 +121,12 @@ final class ResultStore
             }
         }
 
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- the same aggregate over the trash set.
+        // phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- the same aggregate over the trash set.
         $trash = (int) Db::value('trash count', $wpdb->get_var($this->prepared(
             FileGroups::subquery(null, null, FileGroups::SET_TRASH),
             'SELECT COUNT(*) FROM ({{groups}}) fg'
         )));
+        // phpcs:enable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared
 
         return [
             'used' => $counts[self::STATUS_USED],
@@ -232,7 +234,7 @@ final class ResultStore
 
         $groups = FileGroups::subquery($status, $filters, $set);
 
-        // phpcs:disable WordPress.DB.DirectDatabaseQuery -- the grouped subquery; no WP API groups on _wp_attached_file.
+        // phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- the grouped subquery; no WP API groups on _wp_attached_file. prepared() runs $wpdb->prepare() over the spliced SQL.
         $ids = array_map('intval', Db::rows('listing page', $wpdb->get_col($this->prepared(
             $groups,
             // orderBySql() is a literal from ResultSort's own column map; a
@@ -245,7 +247,7 @@ final class ResultStore
             $groups,
             'SELECT COUNT(*) FROM ({{groups}}) fg'
         )));
-        // phpcs:enable WordPress.DB.DirectDatabaseQuery
+        // phpcs:enable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared
 
         return ['ids' => $ids, 'total' => $total];
     }
@@ -324,7 +326,7 @@ final class ResultStore
         $sql = str_replace('{{groups}}', $groups['sql'], $wrapper);
         $params = array_merge($groups['params'], $params);
 
-        return $params === [] ? $sql : $wpdb->prepare($sql, $params);
+        return $params === [] ? $sql : $wpdb->prepare($sql, $params); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $sql is the caller's literal with FileGroups' own literal spliced in; every value travels in $params.
     }
 
     /**
@@ -344,12 +346,13 @@ final class ResultStore
     {
         global $wpdb;
 
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- the grouped subquery; no WP API groups on _wp_attached_file.
+        // phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- the grouped subquery; no WP API groups on _wp_attached_file. prepared() runs $wpdb->prepare() over the spliced SQL.
         return array_map('intval', Db::rows('unused batch', $wpdb->get_col($this->prepared(
             FileGroups::subquery($status, $filters),
             'SELECT fg.fg_id FROM ({{groups}}) fg WHERE fg.fg_id > %d ORDER BY fg.fg_id ASC LIMIT %d',
             [$after, $limit]
         ))));
+        // phpcs:enable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared
     }
 
     /**
@@ -388,11 +391,12 @@ final class ResultStore
     {
         global $wpdb;
 
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- the grouped subquery; no WP API groups on _wp_attached_file.
+        // phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- the grouped subquery; no WP API groups on _wp_attached_file. prepared() runs $wpdb->prepare() over the spliced SQL; orderBySql() is a literal from ResultSort's own column map.
         $ids = array_map('intval', Db::rows('listing measured set', $wpdb->get_col($this->prepared(
             FileGroups::subquery($status, $filters, $set),
             'SELECT fg.fg_id FROM ({{groups}}) fg ORDER BY ' . $sort->orderBySql()
         ))));
+        // phpcs:enable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared
 
         $matched = [];
 

@@ -19,11 +19,15 @@ delete_option('freshet_unusedmedia_content_changed_at');
 delete_option('freshet_unusedmedia_reclaimed');
 delete_option('freshet_unusedmedia_orphan_sizes');
 
-// License data always goes, in every build. These options only ever exist on a
-// licensed site; deleting what was never written is free.
-delete_option('freshet_unusedmedia_license_key');
-delete_option('freshet_unusedmedia_license_last_ok');
-delete_transient('freshet_unusedmedia_license_status');
+// Whatever a build carries beyond the core plugin keeps options of its own
+// and removes them itself. Nothing loads the plugin's autoloader at uninstall,
+// so its entry point is read directly — and only where the file is there.
+$freshet_unusedmedia_extension = __DIR__ . '/src/Extension/Bootstrap.php';
+
+if (is_readable($freshet_unusedmedia_extension)) {
+    require_once $freshet_unusedmedia_extension;
+    FreshetUnusedMedia\Extension\Bootstrap::uninstall();
+}
 
 global $wpdb;
 

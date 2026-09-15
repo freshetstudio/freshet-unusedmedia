@@ -1860,6 +1860,45 @@ $toolsSource = (string) file_get_contents(ABSPATH . 'src/Admin/ToolsPage.php');
 
 check('the screen renders it as its own section', str_contains($toolsSource, '$this->renderOrphanSizes();'), true);
 
+// ------------------------------------------------- the wordpress.org build
+//
+// The directory build is the tree minus bin/release.conf's WPORG_STRIP, and
+// directory guideline 5 reads a feature that is present but switched off as
+// trialware. So the rule is stronger than "the strip removes the paid files":
+// no file that SURVIVES the strip may read a tier, name a license class, or
+// draw the tier chrome. Read off the config rather than a copy of it, so a
+// paid file added to the tree without being added to the strip fails here.
+
+preg_match('/WPORG_STRIP=\((.*?)\)/s', (string) file_get_contents(ABSPATH . 'bin/release.conf'), $stripBlock);
+preg_match_all("/'([^']+)'/", $stripBlock[1] ?? '', $stripped);
+
+check('the strip list was read', count($stripped[1]) > 0, true);
+
+$shipped = [];
+
+foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(ABSPATH . 'src', FilesystemIterator::SKIP_DOTS)) as $entry) {
+    $relative = substr((string) $entry, strlen(ABSPATH));
+
+    if (!in_array($relative, $stripped[1], true)) {
+        $shipped[] = $relative;
+    }
+}
+
+$shipped[] = 'uninstall.php';
+$shipped[] = 'assets/admin.css';
+$shipped[] = 'assets/admin.js';
+
+$tierWords = '/isPro|Licen[cs]e(?!:)|NoLicense|UsedView|EvidenceReport|SpaceTotals|PluginRow|ScanCommand|TAB_USED|TAB_LICENSE|pill--(free|pro)|upgrade|checkout/i';
+
+foreach ($shipped as $file) {
+    preg_match($tierWords, (string) file_get_contents(ABSPATH . $file), $hit);
+
+    check($file . ' ships free of tier vocabulary', $hit[0] ?? '', '');
+}
+
+check('the free ToolsPage takes nothing but the store and the scan state', preg_match('/__construct\(\s*private readonly ResultStore \$store,\s*private readonly ScanState \$state,\s*\)/', $toolsSource), 1);
+check('the free Plugin reads no tier', str_contains((string) file_get_contents(ABSPATH . 'src/Plugin.php'), 'is_readable'), false);
+
 // --------------------------------------------------------- trashed rows
 //
 // A trashed row is a deletion someone started and can still undo. Erasing the

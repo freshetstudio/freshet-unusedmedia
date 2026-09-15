@@ -46,6 +46,12 @@ final class SpaceTotals
     ) {
     }
 
+    /** Under the unused table, because it totals it. */
+    public function hooks(): void
+    {
+        add_action('freshet_unusedmedia_after_unused_list', [$this, 'render']);
+    }
+
     /**
      * The section on Media → Usage. Renders its own wrapper and nothing at all
      * without a valid key, matching EvidenceReport: an empty heading where a

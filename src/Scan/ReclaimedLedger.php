@@ -23,10 +23,10 @@ defined('ABSPATH') || exit;
  * not be sized (offloaded, no recorded size) is counted as unknown rather than
  * folded into the byte figure as zero.
  *
- * Recording lives outside the paid tier on purpose: it is four integers in one
- * option, invisible in the free build, and it never consults the license — a
- * free deletion path must not pay for a licensed screen. A site that buys a key
- * later then has a real history behind the number instead of a zero.
+ * Recording is part of the delete path on purpose: it is four integers in one
+ * option, written by every deletion, and nothing about it depends on which
+ * screen reads it back. Whatever totals it later has a real history behind the
+ * number instead of a zero.
  */
 final class ReclaimedLedger
 {

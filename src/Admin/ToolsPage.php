@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace FreshetUnusedMedia\Admin;
 
-use FreshetUnusedMedia\License\LicenseInterface;
 use FreshetUnusedMedia\Scan\FileClaims;
 use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\FileSize;
@@ -19,21 +18,28 @@ use FreshetUnusedMedia\Scan\UploadGrace;
 defined('ABSPATH') || exit;
 
 /**
- * The Media → Usage screen: the scan and what it found, the unused files with
- * their delete actions, the license, and — on a licensed site only — the used
- * files.
+ * The Media → Usage screen: the scan and what it found, and the unused files
+ * with their delete actions.
+ *
+ * The screen is extended through hooks rather than through anything it holds:
+ * `freshet_unusedmedia_tabs` adds a tab to the strip,
+ * `freshet_unusedmedia_render_tab` renders one this class does not own,
+ * `freshet_unusedmedia_header_meta` prints into the header's meta strip, and
+ * `freshet_unusedmedia_after_scan` / `freshet_unusedmedia_after_unused_list`
+ * print a section under the scan and under the unused table. The listing
+ * helpers a tab needs — the filter bar, the headings, the cells, the
+ * pagination — are public for that reason.
  */
 final class ToolsPage
 {
     public const SLUG = 'freshet-unusedmedia';
 
     public const TAB_SCAN = 'scan';
-    public const TAB_USED = 'used';
     public const TAB_UNUSED = 'unused';
-    public const TAB_LICENSE = 'license';
+
+    public const PER_PAGE = 50;
 
     private const CAP = 'manage_options';
-    private const PER_PAGE = 50;
 
     /** Read once per request; both listings and every URL on the page share it. */
     private ?ResultFilters $filters = null;
@@ -41,24 +47,9 @@ final class ToolsPage
     /** The same, for the column the listings are ordered by. */
     private ?ResultSort $sort = null;
 
-    /**
-     * $licenseSection, $report and $totals are null in the wordpress.org build,
-     * where none of those classes exists at all — the type hints resolve
-     * lazily, so passing null never reaches for a stripped file.
-     *
-     * $license is not one of them: LicenseInterface and NoLicense ship in every
-     * build, and Plugin falls back to NoLicense when the paid files are absent.
-     * That is what the header pill and the Used tab both read, so the free
-     * build can say "Free" and omit the paid listing without a single paid
-     * class existing.
-     */
     public function __construct(
         private readonly ResultStore $store,
         private readonly ScanState $state,
-        private readonly LicenseInterface $license,
-        private readonly ?LicenseSection $licenseSection = null,
-        private readonly ?EvidenceReport $report = null,
-        private readonly ?SpaceTotals $totals = null,
     ) {
     }
 
@@ -153,44 +144,42 @@ final class ToolsPage
 
         $this->renderHeader($tab);
 
-        switch ($tab) {
-            case self::TAB_USED:
-                $this->renderUsedTable();
+        if ($tab === self::TAB_UNUSED) {
+            $this->renderUnusedTable();
 
-                break;
+            /**
+             * Fires under the unused table, before the In-trash section.
+             *
+             * @param ToolsPage $page
+             */
+            do_action('freshet_unusedmedia_after_unused_list', $this);
 
-            case self::TAB_UNUSED:
-                $this->renderUnusedTable();
+            // The other set, under the unused list rather than between it
+            // and anything printed above: these files are not in that table.
+            $this->renderTrashTable();
+        } elseif ($tab === self::TAB_SCAN) {
+            $this->renderScanSection();
 
-                // Licensed, so it renders its own section or nothing at all —
-                // an empty heading where a feature is not entitled reads as a
-                // broken screen. It follows the table because it totals it.
-                $this->totals?->render();
+            /**
+             * Fires under the scan section, before the orphan-sizes listing.
+             *
+             * @param ToolsPage $page
+             */
+            do_action('freshet_unusedmedia_after_scan', $this);
 
-                // The other set, under the unused list and its total rather
-                // than between them: the total describes the table above it,
-                // and these files are not in that table or that total.
-                $this->renderTrashTable();
-
-                break;
-
-            case self::TAB_LICENSE:
-                $this->renderLicenseSection();
-
-                break;
-
-            default:
-                $this->renderScanSection();
-
-                // Same shape and the same reason as the totals above. It sits
-                // with the scan because it exports what the last scan found,
-                // used and unused alike, not just the delete list.
-                $this->report?->render();
-
-                // A by-product of the same scan, and free on every build: the
-                // size files it walked past whose original is gone. Its own
-                // section, never folded into the unused figures above it.
-                $this->renderOrphanSizes();
+            // A by-product of the same scan: the size files it walked past
+            // whose original is gone. Its own section, never folded into the
+            // unused figures above it.
+            $this->renderOrphanSizes();
+        } else {
+            /**
+             * Renders a tab registered through `freshet_unusedmedia_tabs`.
+             * currentTab() has already checked the slug is a registered one.
+             *
+             * @param string    $tab  The tab's slug.
+             * @param ToolsPage $page The screen, for its listing helpers.
+             */
+            do_action('freshet_unusedmedia_render_tab', $tab, $this);
         }
 
         echo '</div>';
@@ -202,38 +191,24 @@ final class ToolsPage
      * tab — the second tab, not the first, which is deliberate: Unused is empty
      * on a site that has never scanned.
      *
-     * Two are conditional, on two different questions, and keeping them apart
-     * is the point:
-     *
-     * - Used is the paid listing, so it appears where the site is *entitled* to
-     *   it: LicenseInterface::isPro(), the one read UsedView, SpaceTotals and
-     *   EvidenceReport already make. Remove the key and the tab is gone on the
-     *   next load, because nothing here asks a second question.
-     * - License appears where there is a license stack to show *at all* — the
-     *   wordpress.org build has none, and an empty tab is worse than no tab.
-     *
-     * Scan and Unused are free surfaces and always present. Nothing is ever
-     * rendered locked or as a teaser (directory guidelines 5 & 8): an
-     * unentitled site simply has one tab fewer.
-     *
-     * @return array<string, string>
+     * @return array<string, array{label: string, listing: bool}> Keyed by
+     *         slug; `listing` says whether the tab's URL carries the filter
+     *         and sort, which is what lets the same window be read across
+     *         listings without re-typing it.
      */
     private function tabs(): array
     {
         $tabs = [
-            self::TAB_UNUSED => __('Unused', 'freshet-unused-media'),
-            self::TAB_SCAN => __('Scan', 'freshet-unused-media'),
+            self::TAB_UNUSED => ['label' => __('Unused', 'freshet-unused-media'), 'listing' => true],
+            self::TAB_SCAN => ['label' => __('Scan', 'freshet-unused-media'), 'listing' => false],
         ];
 
-        if ($this->license->isPro()) {
-            $tabs[self::TAB_USED] = __('Used', 'freshet-unused-media');
-        }
-
-        if ($this->licenseSection !== null) {
-            $tabs[self::TAB_LICENSE] = __('License', 'freshet-unused-media');
-        }
-
-        return $tabs;
+        /**
+         * Filter the tabs on Media → Usage.
+         *
+         * @param array<string, array{label: string, listing: bool}> $tabs
+         */
+        return apply_filters('freshet_unusedmedia_tabs', $tabs);
     }
 
     /** One query arg, an allow-list, and the scan as the default. */
@@ -244,13 +219,13 @@ final class ToolsPage
         return array_key_exists($tab, $this->tabs()) ? $tab : self::TAB_SCAN;
     }
 
-    private function filters(): ResultFilters
+    public function filters(): ResultFilters
     {
         // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only listing filter; every value is validated in fromRequest().
         return $this->filters ??= ResultFilters::fromRequest(wp_unslash($_GET));
     }
 
-    private function sort(): ResultSort
+    public function sort(): ResultSort
     {
         // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only listing order; an unknown column is not a sort at all.
         return $this->sort ??= ResultSort::fromRequest(wp_unslash($_GET));
@@ -259,9 +234,9 @@ final class ToolsPage
     /**
      * The screen's own URL for one tab; the default tab carries no arg.
      *
-     * The two listings carry the filter with them, so narrowing the unused list
-     * and then crossing to the used one to check the same window is one click
-     * rather than a re-typed filter. Scan and License take no filter — there is
+     * A listing carries the filter with it, so narrowing one list and then
+     * crossing to another to check the same window is one click rather than a
+     * re-typed filter. A tab that is not a listing takes no filter — there is
      * nothing there for it to narrow.
      *
      * The sort travels the same way and for the same reason, which is what makes
@@ -269,14 +244,14 @@ final class ToolsPage
      * even when the filter is being cleared — clearing a filter widens the set,
      * it does not un-sort the column someone chose to read it by.
      */
-    private function tabUrl(string $tab, bool $filtered = true): string
+    public function tabUrl(string $tab, bool $filtered = true): string
     {
         $args = array_filter([
             'page' => self::SLUG,
             'tab' => $tab !== self::TAB_SCAN ? $tab : null,
         ]);
 
-        if ($tab === self::TAB_USED || $tab === self::TAB_UNUSED) {
+        if ($this->tabs()[$tab]['listing'] ?? false) {
             if ($filtered) {
                 $args += $this->filters()->queryArgs();
             }
@@ -297,7 +272,7 @@ final class ToolsPage
      * matters more here than on an ordinary list table, because the number in
      * the delete button is derived from it.
      */
-    private function renderFilterBar(string $tab): void
+    public function renderFilterBar(string $tab): void
     {
         $filters = $this->filters();
 
@@ -356,7 +331,7 @@ final class ToolsPage
      * filtered delete moves the "of 400" and leaves the "37" naming the set the
      * button named and the loop is still walking.
      */
-    private function listHeading(string $singular, int $shown, string $status): string
+    public function listHeading(string $singular, int $shown, string $status): string
     {
         if (!$this->filters()->isActive()) {
             return sprintf(esc_html($singular), $this->countFigure($status, $shown));
@@ -411,7 +386,7 @@ final class ToolsPage
      * neither a count nor a Delete all button is drawn — there is no set to
      * name, so there is nothing to offer an action on.
      */
-    private function renderListingFailure(string $heading): void
+    public function renderListingFailure(string $heading): void
     {
         echo '<div class="freshet-unusedmedia-section">';
         echo '<h2>' . esc_html($heading) . '</h2>';
@@ -469,7 +444,7 @@ final class ToolsPage
     }
 
     /** Said once, wherever a size filter changes which files can appear. */
-    private function sizeFilterNote(): string
+    public function sizeFilterNote(): string
     {
         return $this->filters()->hasSizeFilter()
             ? ' ' . __('While a size filter is applied, files whose size cannot be read are left out of the list.', 'freshet-unused-media')
@@ -497,21 +472,21 @@ final class ToolsPage
                 <h1 class="frst-header__title"><?php esc_html_e('Freshet Unused Media', 'freshet-unused-media'); ?></h1>
                 <span class="frst-header__version"><?php echo esc_html('v' . FRESHET_UNUSEDMEDIA_VERSION); ?></span>
                 <div class="frst-header__meta">
-                    <?php // The tier, from the license itself rather than from which files are on disk: NoLicense answers this in the free build, where nothing paid exists to ask. No link hangs off it — the directory build carries no upsell. ?>
-                    <?php if ($this->license->isPro()) : ?>
-                        <span class="frst-header__pill frst-header__pill--pro"><?php esc_html_e('Pro', 'freshet-unused-media'); ?></span>
-                    <?php else : ?>
-                        <span class="frst-header__pill frst-header__pill--free"><?php esc_html_e('Free', 'freshet-unused-media'); ?></span>
-                    <?php endif; ?>
+                    <?php
+                    /**
+                     * Fires inside the header's meta strip, before the Docs link.
+                     */
+                    do_action('freshet_unusedmedia_header_meta');
+                    ?>
                     <a href="https://freshet.studio/docs" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Docs', 'freshet-unused-media'); ?></a>
                     <a href="mailto:email@freshet.studio"><?php esc_html_e('Support', 'freshet-unused-media'); ?></a>
                 </div>
             </div>
             <nav class="nav-tab-wrapper">
-                <?php foreach ($tabs as $slug => $label) : ?>
+                <?php foreach ($tabs as $slug => $entry) : ?>
                     <a class="nav-tab<?php echo $slug === $activeTab ? ' nav-tab-active' : ''; ?>"
                        href="<?php echo esc_url($this->tabUrl($slug)); ?>">
-                        <?php echo esc_html($label); ?>
+                        <?php echo esc_html($entry['label']); ?>
                     </a>
                 <?php endforeach; ?>
             </nav>
@@ -748,9 +723,6 @@ final class ToolsPage
      * do not include. Nothing here is deletable — the listing has no attachment
      * row to corroborate it against, and being wrong about a file is worse than
      * making somebody remove it themselves.
-     *
-     * Free on every build. It reads no license: the paid tier is the four
-     * components the pricing names, and this is not one of them.
      */
     private function renderOrphanSizes(): void
     {
@@ -785,6 +757,7 @@ final class ToolsPage
                 esc_html(sprintf(
                     // The same sentence the listings use for "showing N of M",
                     // and deliberately the same msgid: one phrase, one string.
+                    /* translators: 1: number of files listed, 2: number of files in total */
                     __('%1$s of %2$s', 'freshet-unused-media'),
                     number_format_i18n(count($orphans['files'])),
                     number_format_i18n($orphans['count'])
@@ -807,97 +780,6 @@ final class ToolsPage
                 <div class="freshet-unusedmedia-progress__bar"><span></span></div>
                 <span class="freshet-unusedmedia-progress__label"></span>
               </div>';
-    }
-
-    // ------------------------------------------------------------------ used
-
-    /**
-     * The files the scan kept, and the tab that is their only listing. Every
-     * row links to post.php rather than to the media library: the library
-     * defaults to grid, the grid opens an attachment in a modal, and a modal
-     * never fires add_meta_boxes_attachment — so no usage box of any kind can
-     * render there.
-     */
-    private function renderUsedTable(): void
-    {
-        // The same read the tab strip makes, and deliberately not a different
-        // one: currentTab() already drops an unknown ?tab back to the default,
-        // so on an unentitled site this is unreachable through the URL. It is
-        // here so the listing cannot be rendered by any future caller that
-        // reaches it another way — the routing is not the entitlement.
-        if (!$this->license->isPro()) {
-            return;
-        }
-
-        $page = max(1, absint($_GET['used_page'] ?? 1)); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only pagination.
-        $filters = $this->filters();
-
-        try {
-            $list = $this->store->byStatus(ResultStore::STATUS_USED, $page, self::PER_PAGE, $filters, $this->sort());
-        } catch (QueryFailed) {
-            $this->renderListingFailure(__('Used files', 'freshet-unused-media'));
-
-            return;
-        }
-
-        echo '<div class="freshet-unusedmedia-section">';
-        echo '<h2>' . $this->listHeading( // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in listHeading().
-            /* translators: %s: number of used attachments */
-            __('Used files (%s)', 'freshet-unused-media'),
-            $list['total'],
-            'used'
-        ) . '</h2>';
-
-        $this->renderFilterBar(self::TAB_USED);
-
-        if ($list['ids'] === []) {
-            echo '<p>' . esc_html($filters->isActive()
-                ? __('No used files match this filter. Clear it to see the rest.', 'freshet-unused-media')
-                : __('No attachments are currently marked used. Run a scan first.', 'freshet-unused-media')) . '</p></div>';
-
-            return;
-        }
-
-        // The same pass as the Unused tab's notes (freshet-D119). These two
-        // sentences are already short and already direct, and two of them are
-        // not a list, so what changes is the one thing that was wrong with the
-        // block: the size filter was run on to the end of them, where it reads
-        // as part of the promise rather than as the separate qualification of
-        // which files are here that it is.
-        echo '<p class="description">' . esc_html__('Every file here was found referenced somewhere on the site, so none of them is offered for deletion. Open one to see where it is used.', 'freshet-unused-media') . '</p>';
-
-        $sizeNote = trim($this->sizeFilterNote());
-
-        if ($sizeNote !== '') {
-            echo '<p class="description">' . esc_html($sizeNote) . '</p>';
-        }
-
-        echo '<table class="widefat striped freshet-unusedmedia-table"><thead><tr>';
-
-        $this->renderColumnHeaders([
-            ResultSort::BY_FILE => __('File', 'freshet-unused-media'),
-            'type' => __('Type', 'freshet-unused-media'),
-            ResultSort::BY_DATE => __('Uploaded', 'freshet-unused-media'),
-            ResultSort::BY_SIZE => __('Size', 'freshet-unused-media'),
-            'references' => __('References', 'freshet-unused-media'),
-            'scanned' => __('Scanned', 'freshet-unused-media'),
-        ], self::TAB_USED);
-
-        echo '</tr></thead><tbody>';
-
-        foreach ($list['ids'] as $id) {
-            echo '<tr>';
-            $this->renderFileCells($id);
-            $this->renderReferencesCell($id);
-            $this->renderScannedCell($id);
-            echo '</tr>';
-        }
-
-        echo '</tbody></table>';
-
-        $this->renderPagination(self::TAB_USED, 'used_page', $page, $list['total']);
-
-        echo '</div>';
     }
 
     // ---------------------------------------------------------------- unused
@@ -926,12 +808,14 @@ final class ToolsPage
         // selection form deliberately: it is a script-driven button, not a
         // submit, so the form it would otherwise post is irrelevant to it.
         echo '<div class="freshet-unusedmedia-section__heading">';
-        echo '<h2>' . $this->listHeading( // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in listHeading().
+        // phpcs:disable WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in listHeading().
+        echo '<h2>' . $this->listHeading(
             /* translators: %s: number of unused attachments */
             __('Unused files (%s)', 'freshet-unused-media'),
             $list['total'],
             'unused'
         ) . '</h2>';
+        // phpcs:enable WordPress.Security.EscapeOutput.OutputNotEscaped
 
         if ($list['total'] > 0) {
             $this->renderDeleteAllButton($filters, $list['total']);
@@ -1097,7 +981,7 @@ final class ToolsPage
 
         printf(
             '<button type="button" class="button button-link-delete" id="freshet-unusedmedia-delete-all" data-count="%d" data-confirm="%s" data-filters="%s">%s</button>',
-            $total,
+            absint($total),
             esc_attr($confirmAll),
             esc_attr(http_build_query($filters->queryArgs())),
             esc_html($label)
@@ -1173,12 +1057,14 @@ final class ToolsPage
         }
 
         echo '<div class="freshet-unusedmedia-section">';
-        echo '<h2>' . $this->listHeading( // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in listHeading().
+        // phpcs:disable WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in listHeading().
+        echo '<h2>' . $this->listHeading(
             /* translators: %s: number of files whose every library entry is in the trash */
             __('In trash (%s)', 'freshet-unused-media'),
             $list['total'],
             'trash'
         ) . '</h2>';
+        // phpcs:enable WordPress.Security.EscapeOutput.OutputNotEscaped
 
         if ($list['ids'] === []) {
             echo '<p>' . esc_html($filters->isActive()
@@ -1312,7 +1198,7 @@ final class ToolsPage
      * @param array<string, string> $columns Column key => label; a key that is
      *                                       one of ResultSort's is sortable.
      */
-    private function renderColumnHeaders(array $columns, string $tab): void
+    public function renderColumnHeaders(array $columns, string $tab): void
     {
         $sort = $this->sort();
         $sortable = ResultSort::columns();
@@ -1381,7 +1267,7 @@ final class ToolsPage
      * entries that would be damaged rather than of places it is used. Asked
      * first, because it is the reason that does not expire.
      */
-    private function renderReferencesCell(int $id): void
+    public function renderReferencesCell(int $id): void
     {
         $data = $this->store->refs($id);
 
@@ -1397,7 +1283,7 @@ final class ToolsPage
     }
 
     /** File, type, upload date and size — identical in both listings. */
-    private function renderFileCells(int $id): void
+    public function renderFileCells(int $id): void
     {
         $file = get_attached_file($id);
         $bytes = FileSize::bytes($id) ?? 0;
@@ -1422,7 +1308,7 @@ final class ToolsPage
         echo '<td>' . esc_html((string) $size) . '</td>';
     }
 
-    private function renderScannedCell(int $id): void
+    public function renderScannedCell(int $id): void
     {
         $scannedAt = $this->store->scannedAt($id);
 
@@ -1435,21 +1321,8 @@ final class ToolsPage
             : '—') . '</td>';
     }
 
-    // --------------------------------------------------------------- license
 
-    /** Nothing at all without the license stack, which is the free build. */
-    private function renderLicenseSection(): void
-    {
-        if ($this->licenseSection === null) {
-            return;
-        }
-
-        echo '<div class="freshet-unusedmedia-section">';
-        $this->licenseSection->render();
-        echo '</div>';
-    }
-
-    private function renderPagination(string $tab, string $arg, int $page, int $total): void
+    public function renderPagination(string $tab, string $arg, int $page, int $total): void
     {
         $pages = (int) ceil($total / self::PER_PAGE);
 

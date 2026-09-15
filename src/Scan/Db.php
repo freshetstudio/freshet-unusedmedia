@@ -40,7 +40,7 @@ final class Db
         self::assertAnswered($context);
 
         if ($result === null) {
-            throw new QueryFailed($context, 'the query was not run');
+            throw new QueryFailed($context, 'the query was not run'); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- never rendered: the screen prints QueryFailed::userMessage(), a fixed string.
         }
 
         return (array) $result;
@@ -65,7 +65,7 @@ final class Db
         $error = isset($wpdb->last_error) ? trim((string) $wpdb->last_error) : '';
 
         if ($error !== '') {
-            throw new QueryFailed($context, $error);
+            throw new QueryFailed($context, $error); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- never rendered: the screen prints QueryFailed::userMessage(), a fixed string.
         }
     }
 

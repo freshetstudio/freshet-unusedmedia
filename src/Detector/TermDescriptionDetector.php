@@ -21,7 +21,7 @@ defined('ABSPATH') || exit;
  * counts: the description is in a different table, it is free content rather
  * than a stored meta value, and none of the meta detector's key-based
  * reasoning carries over — there is no ACF '_<key>' = field_… sibling to
- * upgrade a match with, because a description has no key. What the two do
+ * confirm a match with, because a description has no key. What the two do
  * share is the object they point at, so this emits the same objectType 'term'
  * and the term_id, which the Evidence report and the attachment meta box
  * already resolve to a term link.

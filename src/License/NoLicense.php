@@ -7,10 +7,9 @@ namespace FreshetUnusedMedia\License;
 defined('ABSPATH') || exit;
 
 /**
- * The wordpress.org build. It carries neither the license client nor the
- * feature that client gates — bin/release.conf strips both — so nothing in the
- * directory archive is locked and nothing upsells (directory guideline 5).
- * Used automatically when the remote-license stack is absent.
+ * A license that answers no. Not wired by default — RemoteLicense is — but a
+ * site can hand it in through the freshet_unusedmedia_license filter to hold a
+ * licensed build on the free surfaces, and the smoke tests construct it.
  */
 final class NoLicense implements LicenseInterface
 {

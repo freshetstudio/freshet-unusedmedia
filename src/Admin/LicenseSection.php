@@ -15,12 +15,18 @@ defined('ABSPATH') || exit;
  * Gating itself stays in UsedView — this is UI.
  *
  * Ported from freshet-feeds' LicenseSection. What changed: it renders inside
- * the Usage page's own card markup rather than a tab, the redirect target is
- * upload.php, the "Data" block came out (this plugin has no delete-data
- * setting), and the copy names the whole of what a license adds here.
+ * the Usage page's own card markup, the redirect target is upload.php, the
+ * "Data" block came out (this plugin has no delete-data setting), and the
+ * copy names the whole of what a license adds here.
+ *
+ * It owns its tab on the screen and the tier pill in the header, through the
+ * screen's hooks: the tab appears wherever there is a license stack to show
+ * at all, which is every build that carries this file.
  */
 final class LicenseSection
 {
+    public const TAB = 'license';
+
     private const NOTICE_ARG = 'freshet_unusedmedia_license_notice';
     private const MESSAGE_ARG = 'freshet_unusedmedia_license_message';
 
@@ -35,6 +41,47 @@ final class LicenseSection
         add_action('admin_post_freshet_unusedmedia_activate_license', [$this, 'activate']);
         add_action('admin_post_freshet_unusedmedia_deactivate_license', [$this, 'deactivate']);
         add_action('admin_notices', [$this, 'renderNotice']);
+        // Priority 20: last in the strip, after the Used tab's 10.
+        add_filter('freshet_unusedmedia_tabs', [$this, 'addTab'], 20);
+        add_action('freshet_unusedmedia_render_tab', [$this, 'renderTab']);
+        add_action('freshet_unusedmedia_header_meta', [$this, 'renderPill']);
+    }
+
+    /**
+     * Last in the strip. Takes no filter — there is nothing here to narrow.
+     *
+     * @param array<string, array{label: string, listing: bool}> $tabs
+     * @return array<string, array{label: string, listing: bool}>
+     */
+    public function addTab(array $tabs): array
+    {
+        $tabs[self::TAB] = ['label' => __('License', 'freshet-unused-media'), 'listing' => false];
+
+        return $tabs;
+    }
+
+    public function renderTab(string $tab): void
+    {
+        if ($tab !== self::TAB) {
+            return;
+        }
+
+        echo '<div class="freshet-unusedmedia-section">';
+        $this->render();
+        echo '</div>';
+    }
+
+    /**
+     * The tier, in the header's meta strip, from the license itself rather than
+     * from which files are on disk. No link hangs off it.
+     */
+    public function renderPill(): void
+    {
+        if ($this->license->isPro()) {
+            echo '<span class="frst-header__pill frst-header__pill--pro">' . esc_html__('Pro', 'freshet-unused-media') . '</span>';
+        } else {
+            echo '<span class="frst-header__pill frst-header__pill--free">' . esc_html__('Free', 'freshet-unused-media') . '</span>';
+        }
     }
 
     public function activate(): void
@@ -92,7 +139,7 @@ final class LicenseSection
         $this->back('deactivated');
     }
 
-    /** Rendered by ToolsPage inside its own card. */
+    /** The card itself; renderTab() wraps it in the screen's section markup. */
     public function render(): void
     {
         echo '<h2>' . esc_html__('License', 'freshet-unused-media') . '</h2>';
@@ -270,7 +317,7 @@ final class LicenseSection
             'page' => ToolsPage::SLUG,
             // Back to the tab the form was submitted from; without it an
             // activation lands on the scan and its notice looks unrelated.
-            'tab' => ToolsPage::TAB_LICENSE,
+            'tab' => self::TAB,
             self::NOTICE_ARG => $notice,
             self::MESSAGE_ARG => $message !== '' ? rawurlencode($message) : null,
         ]), admin_url('upload.php')));

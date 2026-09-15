@@ -4,7 +4,7 @@ Tags: media, unused media, media library, clean up, attachments
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.0.5
+Stable tag: 1.0.6
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -56,12 +56,6 @@ Thoroughness is the point rather than speed: a first full scan of a large librar
 
 Site-specific detectors can be added via the `freshet_unusedmedia_detectors` filter; `freshet_unusedmedia_is_used` gets the final say on any status; `freshet_unusedmedia_batch_size` and `freshet_unusedmedia_batch_seconds` tune scan batches; `freshet_unusedmedia_upload_grace` sets the recent-upload window in seconds (0 disables it).
 
-**Free, and what a licence adds**
-
-Scanning, detection and deletion are free, and stay free — they are the plugin. Nothing in this download is locked, limited or time-barred. A licence from [freshet.studio](https://freshet.studio) adds four things. The Used view: open any file that is in use and see every place it is used, not just the first few. A WP-CLI command — `wp freshet-unusedmedia scan` and `wp freshet-unusedmedia list` — for running the same scan across many sites without a browser and reading the result as JSON. An evidence report: export the whole library from Media → Usage as CSV or JSON, one row per file with its status, its size and the places it was found referenced, so the reasoning can be checked — or handed to whoever has to approve it — before anything is deleted. And space totals on Media → Usage: how much disk the unused files are holding now, and, separately, how much has actually been freed by the deletions made here.
-
-All four are additions rather than limits on what is here, and none of them deletes: the command scans and reports, the report exports, the totals add up, and deletion stays where it is, in the admin, behind a confirmation and the re-verification pass.
-
 Part of the Freshet plugin suite. Full documentation: [freshet.studio/docs](https://freshet.studio/docs).
 
 == Installation ==
@@ -102,9 +96,13 @@ Per site, yes. Cross-site references (another site embedding this site's file UR
 
 = Does it delete anything by itself? =
 
-Never. Scanning only reads and caches results. Deletion happens exclusively when you click a delete action, after re-verification. The licensed WP-CLI command scans and reports; there is deliberately no delete verb on the command line, so nothing can be deleted non-interactively. The licensed evidence report only writes a file to your own browser — it has no delete action either, and exporting changes nothing on the site. The licensed space totals only add up sizes; opening the page deletes nothing.
+Never. Scanning only reads and caches results. Deletion happens exclusively when you click a delete action, after re-verification. Opening the page deletes nothing.
 
 == Changelog ==
+
+= 1.0.6 =
+* **Files whose every library entry is in the trash are listed in their own "In trash" section** under the unused list, with their own count and their own checkboxes. Trashing an entry removes no file, so a binned file a page still shows is held back there rather than offered, and one the scan has not reached is shown as not scanned; erasing one from this section is the permanent half of the media trash. The unused list, its count and its delete pool are the library's and do not move.
+* The plugin no longer registers its own translation loader — WordPress loads wordpress.org language packs itself.
 
 = 1.0.5 =
 * **A folder whose name is written in a different case is now read once.** The claims index looked a directory up case-sensitively while the database folded case, so on a server that treats `2026/09` and `2026/09` as one folder the same files could be read under two scopes — and a file's own claim could be missed. One scope per folder now, however it is spelled.

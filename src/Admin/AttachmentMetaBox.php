@@ -120,7 +120,9 @@ final class AttachmentMetaBox
 
         // A row held back by a sibling may never have been scanned itself, and
         // "not scanned yet" under a badge saying the file is in use is the
-        // blank this whole panel exists to stop showing.
+        // blank this whole panel exists to stop showing. A row in the trash
+        // with every sibling is held by nothing, so it takes this branch when
+        // it was never scanned and shows its own evidence when it was.
         if ($status === null && $file['held'] === FileGroups::HELD_NONE) {
             return $html . '<p class="description">' . esc_html__('Not scanned yet.', 'freshet-unused-media') . '</p>';
         }

@@ -92,6 +92,10 @@ Longer than a scanner that only looks at the "Uploaded to" column, because it lo
 
 No. A trashed post or comment can be restored, so a reference from one keeps the file — it is reported as a possible reference rather than a confirmed one, and possible still counts as used.
 
+= What about files that are themselves in the media trash? =
+
+A file whose every library entry is in the trash is listed in its own "In trash" section under the unused list, and can be erased from there once the scan has found every entry unused — it never joins the unused list or its count, and a copy still in use is held back there too.
+
 = Does it work with multisite? =
 
 Per site, yes. Cross-site references (another site embedding this site's file URL) are not detected.

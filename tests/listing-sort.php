@@ -477,15 +477,29 @@ use FreshetUnusedMedia\Scan\ScanState;
  */
 function files(string $sql, array $params): array
 {
+    // Which of the two sets the subquery was built for: the library, or its
+    // mirror — the files whose every row is in the trash (freshet-190).
+    $trashSet = str_contains($sql, "HAVING SUM(CASE WHEN p.post_status <> 'trash' THEN 1 ELSE 0 END) = 0");
+
     $groups = [];
 
     foreach ($GLOBALS['rows'] as $id => $row) {
         $key = FileGroups::keyFor($id);
-        $groups[$key] ??= ['live' => 0, 'trash' => 0, 'used' => 0, 'unused' => 0, 'usedIds' => [], 'liveIds' => [], 'ids' => [], 'date' => null];
+        $groups[$key] ??= ['live' => 0, 'trash' => 0, 'used' => 0, 'unused' => 0, 'usedIds' => [], 'liveIds' => [], 'ids' => [], 'date' => null, 'trashUsed' => 0, 'trashUnused' => 0, 'anyDate' => null];
         $groups[$key]['ids'][] = $id;
+        $groups[$key]['anyDate'] = $groups[$key]['anyDate'] === null
+            ? $row['date']
+            : min($groups[$key]['anyDate'], $row['date']);
 
         if ($row['status'] === 'trash') {
             ++$groups[$key]['trash'];
+            $status = (string) ($GLOBALS['meta'][$id][ResultStore::META_STATUS] ?? '');
+
+            if ($status === ResultStore::STATUS_USED) {
+                ++$groups[$key]['trashUsed'];
+            } elseif ($status === ResultStore::STATUS_UNUSED) {
+                ++$groups[$key]['trashUnused'];
+            }
 
             continue;
         }
@@ -518,11 +532,19 @@ function files(string $sql, array $params): array
     $files = [];
 
     foreach ($groups as $key => $group) {
-        if ($group['live'] === 0) {
+        if (($group['live'] === 0) !== $trashSet) {
             continue;
         }
 
-        $status = FileGroups::verdict($group['live'], $group['trash'], $group['used'], $group['unused']);
+        // The trash set's date is the earliest upload of any row — it has no
+        // live row to read one from.
+        if ($trashSet) {
+            $group['date'] = $group['anyDate'];
+        }
+
+        $status = $trashSet
+            ? FileGroups::trashVerdict($group['trash'], $group['trashUsed'], $group['trashUnused'])
+            : FileGroups::verdict($group['live'], $group['trash'], $group['used'], $group['unused']);
 
         // The status literal the subquery embeds, read back the way the
         // database would apply it.

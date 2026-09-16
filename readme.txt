@@ -1,6 +1,6 @@
 === Freshet Unused Media ===
 Contributors: kristoffbertram
-Tags: media, unused media, media library, clean up, attachments
+Tags: unused media, unused images, media library, cleanup, attachments
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.1
@@ -8,13 +8,15 @@ Stable tag: 1.0.6
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Determines whether media is still in use — ACF, page builders, options and raw URLs included — and safely deletes what isn't.
+Find unused media and unused images in the WordPress media library — checks ACF, page builders, options and raw URLs — and safely delete what isn't.
 
 == Description ==
 
 WordPress' own "Uploaded to" column only tracks where a file was first attached — it says nothing about where a file is actually *used*. Files referenced from ACF fields, featured images, galleries, widgets, the customizer logo, WooCommerce product galleries or plain URLs in content all look "unattached", and genuinely unused files look no different from files your site depends on.
 
 Freshet Unused Media scans everywhere a reference can hide and tells you, per attachment, exactly where it is used — or that it provably isn't.
+
+A media library cleaner that shows its evidence: find unused images, delete or remove unused media, clean up the media library and free up disk space — without deleting a file something still shows.
 
 **What it detects**
 
@@ -77,6 +79,18 @@ What it cannot see is anything outside the tables it reads — posts, postmeta, 
 Two deliberate choices are worth knowing too. Old post revisions are not counted as usage — a file removed from a post is meant to be found — but autosaves are, because they hold edits nobody has saved yet. And the re-check before deletion is not atomic: a reference written in the instant between the re-check and the deletion is not seen. That window is a fraction of a second; the recent-upload grace period covers the realistic case (a file placed in the editor before its post is saved), and `MEDIA_TRASH` covers the rest.
 
 So: if a plugin on your site stores media in its own tables, check what it holds before deleting — and add `define( 'MEDIA_TRASH', true );` (see Installation) so a deletion can be undone.
+
+= Does it delete unused images? =
+
+Yes, once the scan has shown that nothing on the site uses them. Images, documents, audio and video are all judged the same way: every place a reference can live is read, the evidence is listed per file, and a file with no reference anywhere is offered for deletion. Deleting removes the file and every resized copy WordPress made of it, or moves the entry to the media trash when `MEDIA_TRASH` is on. Nothing is deleted until you click a delete action, and each file is re-checked in the instant before it goes.
+
+= Is it safe to bulk delete unattached media? =
+
+No. Deleting on the strength of the Unattached filter deletes files that are in use. Media deletion in WordPress is permanent unless `MEDIA_TRASH` is enabled, so the references have to be searched for before anything is removed. Run the full scan first and bulk delete from the unused list instead: every file on it has been checked everywhere a reference can hide, and is checked once more before it goes.
+
+= How is this different from the "Unattached" filter? =
+
+Unattached only means the file was not uploaded from inside a post editor. WordPress records the post you were editing at upload time and nothing else, so a file used in a custom field, a page builder, a widget or a theme setting is shown as unattached while being displayed on the site every day. This plugin reads the places a file is actually referenced from: post content, custom fields (ACF included), featured images, galleries, options and theme mods, widgets, term and user meta, comments and raw URLs. "Uploaded to" is shown as information but never counts as usage.
 
 = How long does a full scan take? =
 

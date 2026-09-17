@@ -112,6 +112,14 @@ Per site, yes. Cross-site references (another site embedding this site's file UR
 
 Never. Scanning only reads and caches results. Deletion happens exclusively when you click a delete action, after re-verification. Opening the page deletes nothing.
 
+== Screenshots ==
+
+1. The Scan tab after a full scan of 3,466 attachments: 222 used, 4 unused, none left unscanned, with the list of every place a reference is looked for.
+2. The Usage box on a used file's Edit Media screen lists the evidence: an ACF field reference counts, the upload record is shown but never counts.
+3. The Unused tab: the four files nothing on the site refers to, filters by date, filename and size, and the Delete selected and Delete all unused actions.
+4. The Media Library list view with the Usage column and the usage status filter, before a scan has run.
+5. The Usage box on an unused file's Edit Media screen: nothing refers to it, the upload record is information only, and Rescan checks it again.
+
 == Changelog ==
 
 = 1.0.6 =

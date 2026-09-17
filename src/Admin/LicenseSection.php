@@ -282,6 +282,14 @@ final class LicenseSection
                 __('%s The key was not activated and this is not a verdict on your key — try again, and contact support if it keeps happening.', 'freshet-unused-media'),
                 $detail !== '' ? $detail : __('The license server sent a response this plugin could not read.', 'freshet-unused-media')
             ),
+            // An unknown key gets the one thing the server cannot know: the
+            // paste has already been cleaned (normalizeKey), so re-pasting it
+            // will not change the answer — checking the characters will.
+            'invalid_key' => trim(sprintf(
+                /* translators: %s: the license server's own sentence about the key */
+                __('%s Spaces and invisible characters were already stripped before sending, so pasting it again will not help — compare it character by character.', 'freshet-unused-media'),
+                $detail
+            )),
             // Anything else is the server's own answer about the key; it says
             // it better than we can, so it is passed through as written.
             default => $detail !== '' ? $detail : __('Activation failed.', 'freshet-unused-media'),

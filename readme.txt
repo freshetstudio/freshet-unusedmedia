@@ -4,7 +4,7 @@ Tags: unused media, unused images, media library, cleanup, attachments
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.0.6
+Stable tag: 1.0.7
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -121,6 +121,9 @@ Never. Scanning only reads and caches results. Deletion happens exclusively when
 5. The Usage box on an unused file's Edit Media screen: nothing refers to it, the upload record is information only, and Rescan checks it again.
 
 == Changelog ==
+
+= 1.0.7 =
+* **The listing, not the scanner.** Nothing about how the plugin scans or deletes has changed since 1.0.6. This release carries the wordpress.org listing: a readme that says what the plugin does in the words people search for — find unused media and unused images, clean up the media library — with three new FAQ entries on deleting unused images, on why bulk-deleting "unattached" files is unsafe, and on how this differs from the Unattached filter; five real screenshots of the Scan tab, the Unused tab, the Usage column and the Usage box; and a Playground blueprint so the plugin can be tried in the browser from the listing.
 
 = 1.0.6 =
 * **Files whose every library entry is in the trash are listed in their own "In trash" section** under the unused list, with their own count and their own checkboxes. Trashing an entry removes no file, so a binned file a page still shows is held back there rather than offered, and one the scan has not reached is shown as not scanned; erasing one from this section is the permanent half of the media trash. The unused list, its count and its delete pool are the library's and do not move.

@@ -27,6 +27,9 @@ final class LicenseSection
 {
     public const TAB = 'license';
 
+    /** Where a customer writes when the verdict text says to; one place, used by every sentence that names it. */
+    private const SUPPORT_EMAIL = 'email@freshet.studio';
+
     private const NOTICE_ARG = 'freshet_unusedmedia_license_notice';
     private const MESSAGE_ARG = 'freshet_unusedmedia_license_message';
 
@@ -168,14 +171,18 @@ final class LicenseSection
 
         $isPro = $this->license->isPro();
 
+        // The state line says why, not only which tier: the reason is what
+        // RemoteLicense cached beside its verdict. A license handed in through
+        // the filter has only the boolean, and the line says only that.
+        $verdict = $this->license instanceof RemoteLicense ? $this->license->verdict() : ['valid' => $isPro];
+
         printf(
-            '<p>%s <code>%s…%s</code> — %s</p>',
+            '<p>%s <code>%s…%s</code> — <strong class="%s">%s</strong></p>',
             esc_html__('Key:', 'freshet-unused-media'),
             esc_html(substr($key, 0, 6)),
             esc_html(substr($key, -4)),
-            $isPro
-                ? '<strong class="freshet-unusedmedia-license--on">' . esc_html__('Active — this site is on Freshet Unused Media Pro.', 'freshet-unused-media') . '</strong>'
-                : '<strong class="freshet-unusedmedia-license--off">' . esc_html__('Invalid or expired — this site is on Free.', 'freshet-unused-media') . '</strong>'
+            $isPro ? 'freshet-unusedmedia-license--on' : 'freshet-unusedmedia-license--off',
+            esc_html($this->stateLine($verdict))
         );
 
         // The tier said once, then what it actually buys: the state line above
@@ -263,15 +270,19 @@ final class LicenseSection
      * What to tell the customer when the key was not stored. Only the license
      * server may call a key wrong: a connection that failed and a body that
      * could not be parsed say nothing whatsoever about the key, and reporting
-     * either as a rejection sends someone hunting a fault that is ours.
+     * either as a rejection sends someone hunting a fault that is ours. The
+     * verdicts themselves are told in the plugin's words (verdictText); the
+     * server's sentence is the fallback for a code this plugin does not know.
      *
-     * @param array{success?: bool, error?: string, error_code?: string} $response
+     * @param array{success?: bool, data?: array<string, mixed>, error?: string, error_code?: string} $response
      */
     private function failureMessage(array $response): string
     {
+        $code = (string) ($response['error_code'] ?? '');
         $detail = trim((string) ($response['error'] ?? ''));
+        $data = is_array($response['data'] ?? null) ? $response['data'] : [];
 
-        return match ((string) ($response['error_code'] ?? '')) {
+        return match ($code) {
             'http_error' => sprintf(
                 /* translators: %s: the connection error reported by WordPress */
                 __('Could not reach the license server, so nothing on this site changed. This is not a verdict on your key — try again in a minute. (%s)', 'freshet-unused-media'),
@@ -282,17 +293,101 @@ final class LicenseSection
                 __('%s The key was not activated and this is not a verdict on your key — try again, and contact support if it keeps happening.', 'freshet-unused-media'),
                 $detail !== '' ? $detail : __('The license server sent a response this plugin could not read.', 'freshet-unused-media')
             ),
+            default => $this->verdictText($code, $data)
+                ?? ($detail !== '' ? $detail : __('Activation failed.', 'freshet-unused-media')),
+        };
+    }
+
+    /**
+     * The plugin's own words for each verdict the license server can give —
+     * what happened, then what to do — read by the activation notice and the
+     * card's state line alike, so the two never drift and both translate. The
+     * codes are the server's contract and are matched, never rewritten; a
+     * code this map does not know returns null and the caller falls back to
+     * the server's sentence.
+     *
+     * @param array<string, mixed> $counts anything carrying activations_used / activation_limit
+     */
+    private function verdictText(string $code, array $counts = []): ?string
+    {
+        $used = $counts['activations_used'] ?? null;
+        $limit = $counts['activation_limit'] ?? null;
+
+        return match ($code) {
             // An unknown key gets the one thing the server cannot know: the
             // paste has already been cleaned (normalizeKey), so re-pasting it
             // will not change the answer — checking the characters will.
-            'invalid_key' => trim(sprintf(
-                /* translators: %s: the license server's own sentence about the key */
-                __('%s Spaces and invisible characters were already stripped before sending, so pasting it again will not help — compare it character by character.', 'freshet-unused-media'),
-                $detail
-            )),
-            // Anything else is the server's own answer about the key; it says
-            // it better than we can, so it is passed through as written.
-            default => $detail !== '' ? $detail : __('Activation failed.', 'freshet-unused-media'),
+            'invalid_key' => sprintf(
+                /* translators: %s: the support email address */
+                __('This key isn\'t one the license server knows — it may have lost a character in the paste, or belong to a different Freshet plugin. Spaces and invisible characters were already stripped before sending, so pasting it again will not help: compare it character by character with your purchase email, and if it matches, write to %s from the address you paid with.', 'freshet-unused-media'),
+                self::SUPPORT_EMAIL
+            ),
+            'expired' => sprintf(
+                /* translators: %s: the support email address */
+                __('This key\'s twelve months of updates and support have ended, so this site is on Free. The plugin keeps working — scanning, detection and deletion are the plugin — and another year is a separate purchase: write to %s from the address you paid with.', 'freshet-unused-media'),
+                self::SUPPORT_EMAIL
+            ),
+            'revoked' => sprintf(
+                /* translators: %s: the support email address */
+                __('This key was cancelled, usually after a refund or a chargeback, so this site is on Free. If that is not what you expected, write to %s from the address you paid with.', 'freshet-unused-media'),
+                self::SUPPORT_EMAIL
+            ),
+            'activation_limit_reached' => is_numeric($used) && is_numeric($limit)
+                ? sprintf(
+                    /* translators: 1: number of sites the key is active on, 2: number it is allowed on */
+                    __('This key is already active on its allowed number of sites — %1$d of %2$d. Deactivate it on a site you no longer use (that site\'s License section), or buy a second key.', 'freshet-unused-media'),
+                    (int) $used,
+                    (int) $limit
+                )
+                : __('This key is already active on its allowed number of sites. Deactivate it on a site you no longer use (that site\'s License section), or buy a second key.', 'freshet-unused-media'),
+            default => null,
+        };
+    }
+
+    /**
+     * The card's standing sentence, from the cached verdict: which tier the
+     * site is on and — when it is Free with a key stored — why, in the same
+     * words the activation notice uses. An unreachable server is the one
+     * state the notice never shows: on grace the site is still on Pro and the
+     * line says so with the date of the failed check; once the grace has run
+     * out it is on Free and the line says the server, not the key, is the
+     * reason.
+     *
+     * @param array{valid?: bool, reason?: string, checked_at?: int, message?: string, activations_used?: ?int, activation_limit?: ?int} $verdict
+     */
+    private function stateLine(array $verdict): string
+    {
+        $reason = (string) ($verdict['reason'] ?? '');
+        // The date of the failed check, in the site's own date format; only the
+        // two unreachable lines read it.
+        $checked = fn (): string => (string) wp_date((string) get_option('date_format', 'F j, Y'), (int) ($verdict['checked_at'] ?? 0));
+
+        if ($verdict['valid'] ?? false) {
+            return $reason === RemoteLicense::REASON_UNREACHABLE
+                ? sprintf(
+                    /* translators: %s: the date of the last validation attempt */
+                    __('Active — this site is still on Freshet Unused Media Pro for now, though the license server could not be reached when it last checked, on %s. Nothing about your key changed, and the check is retried automatically.', 'freshet-unused-media'),
+                    $checked()
+                )
+                : __('Active — this site is on Freshet Unused Media Pro.', 'freshet-unused-media');
+        }
+
+        return match ($reason) {
+            RemoteLicense::REASON_UNREACHABLE => sprintf(
+                /* translators: 1: the date of the last validation attempt, 2: the support email address */
+                __('The license server could not be reached when this site last checked, on %1$s, and there is no recent confirmation of the key to fall back on — so this site is on Free until the server answers again. Nothing about your key changed; if this keeps up, write to %2$s.', 'freshet-unused-media'),
+                $checked(),
+                self::SUPPORT_EMAIL
+            ),
+            'invalid_response' => sprintf(
+                /* translators: %s: the support email address */
+                __('The license server sent a response this plugin could not read, so this site is on Free for now. This is not a verdict on your key — the check is retried automatically, and if it keeps happening, write to %s.', 'freshet-unused-media'),
+                self::SUPPORT_EMAIL
+            ),
+            default => $this->verdictText($reason, $verdict)
+                ?? ((string) ($verdict['message'] ?? '') !== ''
+                    ? (string) $verdict['message']
+                    : __('This key did not validate, so this site is on Free.', 'freshet-unused-media')),
         };
     }
 

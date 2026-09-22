@@ -136,8 +136,23 @@ final class Scanner
 
         try {
             foreach ($detectors as $detector) {
-                foreach ($detector->find($ctx) as $ref) {
-                    $refs[] = $ref;
+                // The only measurement in the scan, and it is a subtraction
+                // around a call that was going to happen anyway: nothing here
+                // reads a clock per row, per query or per reference, and no
+                // verdict, count or reference is computed from it. What it
+                // buys is the run being able to say what it is doing and where
+                // its time went (freshet-286). In the `finally` so a detector
+                // that raises QueryFailed still reports the seconds it burned
+                // before failing — the slowest check on a struggling database
+                // is exactly the one worth seeing.
+                $startedAt = microtime(true);
+
+                try {
+                    foreach ($detector->find($ctx) as $ref) {
+                        $refs[] = $ref;
+                    }
+                } finally {
+                    DetectorTiming::add($detector->id(), microtime(true) - $startedAt);
                 }
             }
         } catch (QueryFailed $e) {

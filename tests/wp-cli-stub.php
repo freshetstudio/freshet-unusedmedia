@@ -60,22 +60,6 @@ namespace {
 }
 
 namespace WP_CLI\Utils {
-    /** The progress bar, which the scan only builds in its human format. */
-    function make_progress_bar(string $message, int $count, int $interval = 100): object
-    {
-        $GLOBALS['cli']['progress'][] = [$message, $count];
-
-        return new class {
-            public function tick(): void
-            {
-            }
-
-            public function finish(): void
-            {
-            }
-        };
-    }
-
     /**
      * The formatted output — the summary table of a finished scan, or the list.
      * Recorded rather than printed: whether this was reached at all is half of

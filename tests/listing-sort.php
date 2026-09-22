@@ -431,6 +431,8 @@ foreach ([
     'src/Scan/DeleteBudget.php',
     'src/Scan/ScanState.php',
     'src/Scan/SizeSiblings.php',
+    'src/Scan/DetectorTiming.php',
+    'src/Scan/ScanProgress.php',
     'src/Scan/Scanner.php',
     'src/Detector/DetectorInterface.php',
     'src/Detector/FileClaimDetector.php',

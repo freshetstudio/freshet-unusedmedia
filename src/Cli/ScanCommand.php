@@ -6,12 +6,14 @@ namespace FreshetUnusedMedia\Cli;
 
 use FreshetUnusedMedia\License\LicenseInterface;
 use FreshetUnusedMedia\Scan\Db;
+use FreshetUnusedMedia\Scan\DetectorTiming;
 use FreshetUnusedMedia\Scan\FileClaims;
 use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\FileSize;
 use FreshetUnusedMedia\Scan\OrphanSizes;
 use FreshetUnusedMedia\Scan\QueryFailed;
 use FreshetUnusedMedia\Scan\ResultStore;
+use FreshetUnusedMedia\Scan\ScanProgress;
 use FreshetUnusedMedia\Scan\Scanner;
 use FreshetUnusedMedia\Scan\ScanState;
 use FreshetUnusedMedia\Scan\SizeSiblings;
@@ -107,7 +109,6 @@ final class ScanCommand
         }
 
         $state = $this->state->current();
-        $progress = null;
 
         // The CLI twins of the two reads Ajax::scanBatch() guards, and the
         // argument is the same one (freshet-141, boarded here as freshet-152):
@@ -125,10 +126,6 @@ final class ScanCommand
                 $state = $this->state->start($total);
             }
 
-            $progress = $quiet
-                ? null
-                : Utils\make_progress_bar('Scanning media', max(0, $state['total'] - $state['done']));
-
             $batchSize = max(1, (int) apply_filters('freshet_unusedmedia_batch_size', 100));
 
             while (true) {
@@ -142,6 +139,15 @@ final class ScanCommand
                 if ($ids === []) {
                     break;
                 }
+
+                // The chunk's own clock and its own detector tally, for the
+                // line printed under it. Same two figures the browser scan
+                // records per batch and for the same reason (freshet-286):
+                // what the run has spent is what an estimate can be built on,
+                // and where it spent it is what the run can say it is doing.
+                // From the first query of the chunk, priming included.
+                $chunkStarted = microtime(true);
+                DetectorTiming::flush();
 
                 // One query for the whole chunk's sibling groups instead of one
                 // per file: FileClaimDetector asks for them, and the lookup is a
@@ -166,7 +172,6 @@ final class ScanCommand
 
                         OrphanSizes::observeAttachment($rowId);
                         ++$processed;
-                        $progress?->tick();
                     }
                 }
 
@@ -176,17 +181,31 @@ final class ScanCommand
                 // group happened to end on.
                 $last = (int) end($ids);
 
-                $state = $this->state->advance($last, $processed, $errors, SizeSiblings::takeDirectoryReads());
+                $batchTiming = DetectorTiming::take();
+                $state = $this->state->advance($last, $processed, $errors, SizeSiblings::takeDirectoryReads(), microtime(true) - $chunkStarted, $batchTiming);
+
+                // One line per chunk rather than a progress bar, and it is the
+                // sentence the Usage screen paints under its bar — the same
+                // four figures, composed by the same class, so an operator
+                // watching a terminal and a client watching a browser are
+                // reading the same run described the same way. A bar could
+                // carry two of the four and its label is fixed at
+                // construction, which is the half that matters here: what the
+                // scan is checking changes as the run moves.
+                if (!$quiet) {
+                    WP_CLI::log(ScanProgress::label(
+                        $state['done'],
+                        max($state['total'], $state['done']),
+                        $state['elapsed'],
+                        $batchTiming
+                    ));
+                }
 
                 $this->releaseBatchMemory();
             }
 
-            $progress?->finish();
-
             $counts = $this->store->counts();
         } catch (QueryFailed) {
-            $progress?->finish();
-
             // The cursor is wherever the last completed batch left it, and the
             // results already written stay written — so `--resume` picks the
             // run up rather than starting it again. Nothing is marked finished:
@@ -232,6 +251,21 @@ final class ScanCommand
             WP_CLI::warning(sprintf(
                 '%s of the upload folders could not be read from this server, so files in them were judged on what the library records about them and nothing else. A leftover thumbnail the library has stopped listing cannot be spotted there, so a page still showing one does not count as a use of the image it came from — check those before deleting.',
                 $state['dirs_read'] === 0 ? 'None' : 'Some'
+            ));
+        }
+
+        if (!$quiet && $state['elapsed'] > 0.0) {
+            // The run's own cost, in the same words the Usage screen uses once
+            // a scan finishes there (freshet-286). Its own line rather than a
+            // summary column: the shares are of the time inside the detectors,
+            // which is not the whole of the run, and a column headed "timing"
+            // would read as a budget of it.
+            $breakdown = ScanProgress::breakdown($state['timing']);
+
+            WP_CLI::log(sprintf(
+                'Took %s.%s',
+                ScanProgress::human((int) round($state['elapsed'])),
+                $breakdown === '' ? '' : ' Of the time spent checking: ' . $breakdown . '.'
             ));
         }
 

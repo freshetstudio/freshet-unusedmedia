@@ -12,6 +12,7 @@ use FreshetUnusedMedia\Scan\QueryFailed;
 use FreshetUnusedMedia\Scan\ResultFilters;
 use FreshetUnusedMedia\Scan\ResultSort;
 use FreshetUnusedMedia\Scan\ResultStore;
+use FreshetUnusedMedia\Scan\ScanProgress;
 use FreshetUnusedMedia\Scan\ScanState;
 use FreshetUnusedMedia\Scan\UploadGrace;
 
@@ -595,6 +596,39 @@ final class ToolsPage
             }
 
             echo '<p class="description">' . esc_html($note) . '</p>';
+
+            // freshet-286: what the run cost, said once it is over. The bar
+            // says it while the scan is going; this is the same two figures
+            // kept after the reload that ends one, because "how long does a
+            // scan of this library take" is a question asked before the next
+            // one is started, not during.
+            $cost = [];
+
+            if ($last['elapsed'] > 0.0) {
+                $cost[] = sprintf(
+                    /* translators: %s: how long the scan took, already worded ("4 minutes") */
+                    __('It took %s.', 'freshet-unused-media'),
+                    ScanProgress::human((int) round($last['elapsed']))
+                );
+            }
+
+            $breakdown = ScanProgress::breakdown($last['timing']);
+
+            if ($breakdown !== '') {
+                // "Of the time spent checking", not "of the scan": the cursor
+                // queries, the sibling lookups and the disk reads are outside
+                // the detectors, so these shares rank the checks against each
+                // other and are not a budget of the whole run.
+                $cost[] = sprintf(
+                    /* translators: %s: a list like "post content 41%%, custom fields 33%%" */
+                    __('Of the time spent checking: %s.', 'freshet-unused-media'),
+                    $breakdown
+                );
+            }
+
+            if ($cost !== []) {
+                echo '<p class="description">' . esc_html(implode(' ', $cost)) . '</p>';
+            }
         }
 
         // freshet-141: a query that fails comes back in the same shape as one

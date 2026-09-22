@@ -9,6 +9,7 @@ WordPress' "Uploaded to" column only records where a file was first attached. It
 - **Usage column** in the Media Library (list mode) with per-file "Check usage"
 - **Evidence meta box** on the attachment screen: exactly where the file is used, with edit links
 - **Batched full-library scan** (Media → Usage), resumable, runs in the browser
+- **Progress you can read**: attachments done / total, time spent, an estimate of what is left and the check the time is going into; a finished scan says how long it took and how the time split across the checks
 - **Safe deletion** of unused files: every file is re-verified immediately before deletion; anything that became used is skipped
 - Conservative by design: ambiguous matches count as *used*; ID matches are digit-boundary-checked (123 never matches 1234)
 - **WP-CLI** (licensed): `wp freshet-unusedmedia scan` / `list` — the same scan and the same results across many installs, in `--format=json`. It reports; it has no delete verb.
@@ -45,6 +46,9 @@ wp freshet-unusedmedia list [--fields=<fields>] [--limit=<n>] [--format=table|js
   is written after every chunk, so `--resume` picks up an interrupted run. It
   shares its Scanner, detectors, results and cursor with the admin screen — the
   two read the same numbers by construction.
+- **It prints a progress line per chunk** — the same sentence the Usage screen
+  paints under its bar, from the same `ScanProgress`, and the same breakdown
+  when it finishes. Suppressed in the machine formats (`--format=json|csv|yaml`).
 - **`list` reads the stored results**; it does not re-scan. Trashed files are
   excluded, exactly as on Media → Usage.
 - **Neither subcommand deletes anything, and there is deliberately no CLI delete

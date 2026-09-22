@@ -37,9 +37,11 @@ final class Assets
             'i18n' => [
                 'checking' => __('Checking…', 'freshet-unused-media'),
                 'error' => __('Request failed — try again.', 'freshet-unused-media'),
+                // The only scan string left here: what the bar says between the
+                // click and the first batch landing. Everything the scan says
+                // about itself after that is composed on the server and arrives
+                // with the batch reply — see ScanProgress.
                 'scanning' => __('Scanning…', 'freshet-unused-media'),
-                /* translators: 1: scanned count, 2: total count, 3: number of files the database would not answer for */
-                'scanErrors' => __('%1$s / %2$s — %3$s could not be checked (database error).', 'freshet-unused-media'),
                 'deleting' => __('Deleting…', 'freshet-unused-media'),
                 /* translators: 1: files decided so far, 2: total files in the set, 3: deleted count, 4: skipped count, 5: failed count */
                 'deleteProgress' => __('%1$s / %2$s — %3$s deleted, %4$s skipped, %5$s failed', 'freshet-unused-media'),

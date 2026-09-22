@@ -192,6 +192,11 @@ function __(string $text, string $domain = ''): string
     return $text;
 }
 
+function _n(string $single, string $plural, int $number, string $domain = ''): string
+{
+    return $number === 1 ? $single : $plural;
+}
+
 function absint(mixed $value): int
 {
     return abs((int) $value);
@@ -546,6 +551,8 @@ foreach ([
     'src/Scan/ScanState.php',
     'src/Scan/SizeSiblings.php',
     'src/Scan/OrphanSizes.php',
+    'src/Scan/DetectorTiming.php',
+    'src/Scan/ScanProgress.php',
     'src/Scan/Scanner.php',
     'src/Detector/DetectorInterface.php',
     'src/Detector/FileClaimDetector.php',

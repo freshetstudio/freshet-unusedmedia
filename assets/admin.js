@@ -114,15 +114,12 @@
         }
 
         post('freshet_unusedmedia_scan_batch', config.nonceManage).then(function (data) {
-            // A run that lost answers says so while it is still running, not
-            // only on the notice after the reload: the count is the difference
-            // between "nothing references these files" and "nobody asked".
-            updateProgress(data.done, data.total, data.errors
-                ? config.i18n.scanErrors
-                    .replace('%1$s', data.done)
-                    .replace('%2$s', data.total)
-                    .replace('%3$s', data.errors)
-                : undefined);
+            // The label arrives written. Unlike the delete loop below, whose
+            // counts exist only in this browser, everything a scan can say
+            // about itself — the figures in the site's locale, how long it has
+            // spent, what is left, which check the time is going to — is on the
+            // server, in the site's language. See ScanProgress.
+            updateProgress(data.done, data.total, data.label);
 
             if (data.finished) {
                 window.location.reload();

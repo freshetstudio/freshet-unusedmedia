@@ -6,12 +6,14 @@ namespace FreshetUnusedMedia\Admin;
 
 use FreshetUnusedMedia\Scan\Db;
 use FreshetUnusedMedia\Scan\DeleteBudget;
+use FreshetUnusedMedia\Scan\DetectorTiming;
 use FreshetUnusedMedia\Scan\FileClaims;
 use FreshetUnusedMedia\Scan\FileGroups;
 use FreshetUnusedMedia\Scan\OrphanSizes;
 use FreshetUnusedMedia\Scan\QueryFailed;
 use FreshetUnusedMedia\Scan\ResultFilters;
 use FreshetUnusedMedia\Scan\ResultStore;
+use FreshetUnusedMedia\Scan\ScanProgress;
 use FreshetUnusedMedia\Scan\Scanner;
 use FreshetUnusedMedia\Scan\ScanState;
 use FreshetUnusedMedia\Scan\SizeSiblings;
@@ -159,6 +161,13 @@ final class Ajax
             ]);
         }
 
+        // What this batch costs, from the first query it issues. Its own clock
+        // rather than the budget's below: the budget is a ceiling on the
+        // scanning loop, while this is what the batch spent altogether, and an
+        // estimate built on the smaller of the two would always run fast
+        // (freshet-286).
+        $batchStarted = microtime(true);
+
         // One query for the whole batch's sibling groups instead of one per
         // file: FileClaimDetector asks for them, and an unprimed lookup scans
         // every attached-file row in the library.
@@ -178,6 +187,11 @@ final class Ajax
         // are issued once per file in it rather than once per row standing on
         // that file (freshet-161). Each row still gets its own verdict.
         $scanned = [];
+
+        // Nothing else in this request scans, so the tally below belongs to
+        // this batch alone — cleared first all the same, because anything
+        // hooked into the admin could have run a scan of its own before it.
+        DetectorTiming::flush();
 
         foreach (FileGroups::groupsWithin($ids) as $group) {
             foreach ($this->scanner->scanGroup($group) as $rowId => $result) {
@@ -226,13 +240,42 @@ final class Ajax
         OrphanSizes::flush();
         FileClaims::flush();
 
-        $state = $this->state->advance($last, $processed, $errors, SizeSiblings::takeDirectoryReads());
+        // What this batch spent, and on what. Seconds of scanning rather than
+        // seconds on the wall: the gap between two batches is a person reading
+        // the screen, and an estimate that counted it would be an estimate of
+        // how long they read for (freshet-286).
+        $batchTiming = DetectorTiming::take();
+        $state = $this->state->advance($last, $processed, $errors, SizeSiblings::takeDirectoryReads(), microtime(true) - $batchStarted, $batchTiming);
+
+        $total = max($state['total'], $state['done']);
+
+        // The sentence arrives finished. The browser has neither the site's
+        // number formatting nor its translations, and this line carries both —
+        // see ScanProgress.
+        $label = ScanProgress::label($state['done'], $total, $state['elapsed'], $batchTiming);
+
+        if ($state['errors'] > 0) {
+            // A run that lost answers says so while it is still running, not
+            // only in the notice after the reload: the count is the difference
+            // between "nothing references these files" and "nobody asked".
+            $label .= ' ' . sprintf(
+                /* translators: %s: number of files the database would not answer for */
+                _n(
+                    '%s file could not be checked — the database returned an error.',
+                    '%s files could not be checked — the database returned an error.',
+                    $state['errors'],
+                    'freshet-unused-media'
+                ),
+                number_format_i18n($state['errors'])
+            );
+        }
 
         wp_send_json_success([
             'finished' => false,
             'done' => $state['done'],
-            'total' => max($state['total'], $state['done']),
+            'total' => $total,
             'errors' => $state['errors'],
+            'label' => $label,
         ]);
     }
 

@@ -2,22 +2,22 @@
 # This file is distributed under the GPL-2.0-or-later.
 msgid ""
 msgstr ""
-"Project-Id-Version: Freshet Unused Media 1.0.7\n"
-"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/freshet-unused-media\n"
+"Project-Id-Version: Freshet Unused Media 1.0.8\n"
+"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/freshet-unusedmedia\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2026-09-17T09:47:06+00:00\n"
+"POT-Creation-Date: 2026-09-22T11:51:35+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.12.0\n"
 "X-Domain: freshet-unused-media\n"
 
 #. Plugin Name of the plugin
 #: freshet-unusedmedia.php
-#: src/Admin/ToolsPage.php:142
-#: src/Admin/ToolsPage.php:472
+#: src/Admin/ToolsPage.php:153
+#: src/Admin/ToolsPage.php:481
 msgid "Freshet Unused Media"
 msgstr ""
 
@@ -42,18 +42,26 @@ msgstr ""
 msgid "Freshet Unused Media requires PHP 8.1 or newer. This site runs PHP %s — the plugin is inactive."
 msgstr ""
 
-#: src/Admin/Ajax.php:51
-#: src/Admin/Ajax.php:83
-#: src/Admin/Ajax.php:104
-#: src/Admin/Ajax.php:244
-#: src/Admin/Ajax.php:270
+#: src/Admin/Ajax.php:53
+#: src/Admin/Ajax.php:85
+#: src/Admin/Ajax.php:106
+#: src/Admin/Ajax.php:280
+#: src/Admin/Ajax.php:306
 #: src/Admin/DeleteController.php:47
 msgid "Not allowed."
 msgstr ""
 
-#: src/Admin/Ajax.php:57
+#: src/Admin/Ajax.php:59
 msgid "Unknown attachment."
 msgstr ""
+
+#. translators: %s: number of files the database would not answer for
+#: src/Admin/Ajax.php:256
+#, php-format
+msgid "%s file could not be checked — the database returned an error."
+msgid_plural "%s files could not be checked — the database returned an error."
+msgstr[0] ""
+msgstr[1] ""
 
 #: src/Admin/Assets.php:38
 msgid "Checking…"
@@ -63,40 +71,34 @@ msgstr ""
 msgid "Request failed — try again."
 msgstr ""
 
-#: src/Admin/Assets.php:40
+#: src/Admin/Assets.php:44
 msgid "Scanning…"
 msgstr ""
 
-#. translators: 1: scanned count, 2: total count, 3: number of files the database would not answer for
-#: src/Admin/Assets.php:42
-#, php-format
-msgid "%1$s / %2$s — %3$s could not be checked (database error)."
-msgstr ""
-
-#: src/Admin/Assets.php:43
+#: src/Admin/Assets.php:45
 msgid "Deleting…"
 msgstr ""
 
 #. translators: 1: files decided so far, 2: total files in the set, 3: deleted count, 4: skipped count, 5: failed count
-#: src/Admin/Assets.php:45
+#: src/Admin/Assets.php:47
 #, php-format
 msgid "%1$s / %2$s — %3$s deleted, %4$s skipped, %5$s failed"
 msgstr ""
 
 #. translators: 1: deleted count, 2: skipped count, 3: failed count
-#: src/Admin/Assets.php:47
+#: src/Admin/Assets.php:49
 #, php-format
 msgid "Done: %1$s deleted, %2$s skipped (found in use on re-check), %3$s failed."
 msgstr ""
 
 #. translators: 1: deleted count, 2: skipped count, 3: failed count
-#: src/Admin/Assets.php:49
+#: src/Admin/Assets.php:51
 #, php-format
 msgid "Stopped before finishing: %1$s deleted, %2$s skipped (found in use on re-check), %3$s failed."
 msgstr ""
 
 #. translators: %s: number of files the run never reached
-#: src/Admin/Assets.php:51
+#: src/Admin/Assets.php:53
 #, php-format
 msgid "Not reached: %s — untouched and still listed."
 msgstr ""
@@ -104,7 +106,7 @@ msgstr ""
 #: src/Admin/AttachmentMetaBox.php:42
 #: src/Admin/AttachmentMetaBox.php:78
 #: src/Admin/MediaColumn.php:80
-#: src/Admin/ToolsPage.php:67
+#: src/Admin/ToolsPage.php:68
 msgid "Usage"
 msgstr ""
 
@@ -266,7 +268,7 @@ msgid "ID list"
 msgstr ""
 
 #: src/Admin/AttachmentMetaBox.php:326
-#: src/Admin/ToolsPage.php:294
+#: src/Admin/ToolsPage.php:303
 msgid "Uploaded to"
 msgstr ""
 
@@ -374,115 +376,155 @@ msgstr ""
 msgid "post"
 msgstr ""
 
-#: src/Admin/LicenseSection.php:58
-#: src/Admin/LicenseSection.php:145
+#: src/Admin/LicenseSection.php:61
+#: src/Admin/LicenseSection.php:148
 msgid "License"
 msgstr ""
 
-#: src/Admin/LicenseSection.php:81
+#: src/Admin/LicenseSection.php:84
 msgid "Pro"
 msgstr ""
 
-#: src/Admin/LicenseSection.php:83
+#: src/Admin/LicenseSection.php:86
 msgid "Free"
 msgstr ""
 
-#: src/Admin/LicenseSection.php:94
+#: src/Admin/LicenseSection.php:97
 msgid "Enter a license key."
 msgstr ""
 
-#: src/Admin/LicenseSection.php:152
+#: src/Admin/LicenseSection.php:155
 msgid "Scanning, detection and deletion are free, and stay free — they are the plugin, and nothing in this download is locked or time-limited. A license adds four things:"
 msgstr ""
 
-#: src/Admin/LicenseSection.php:161
+#: src/Admin/LicenseSection.php:164
 msgid "License key"
 msgstr ""
 
-#: src/Admin/LicenseSection.php:162
+#: src/Admin/LicenseSection.php:165
 msgid "Activate"
 msgstr ""
 
-#: src/Admin/LicenseSection.php:173
+#: src/Admin/LicenseSection.php:181
 msgid "Key:"
 msgstr ""
 
-#: src/Admin/LicenseSection.php:177
-msgid "Active — this site is on Freshet Unused Media Pro."
-msgstr ""
-
-#: src/Admin/LicenseSection.php:178
-msgid "Invalid or expired — this site is on Free."
-msgstr ""
-
-#: src/Admin/LicenseSection.php:187
+#: src/Admin/LicenseSection.php:194
 msgid "Alongside the free scan, detection and deletion, your license adds these four:"
 msgstr ""
 
-#: src/Admin/LicenseSection.php:188
+#: src/Admin/LicenseSection.php:195
 msgid "Scanning, detection and deletion carry on as normal. These four are what a license adds:"
 msgstr ""
 
-#: src/Admin/LicenseSection.php:200
+#: src/Admin/LicenseSection.php:207
 msgid "Deactivate license on this site"
 msgstr ""
 
-#: src/Admin/LicenseSection.php:213
+#: src/Admin/LicenseSection.php:220
 msgid "The Used view — open any file that is in use and see every place it is used, not just the first few."
 msgstr ""
 
-#: src/Admin/LicenseSection.php:214
+#: src/Admin/LicenseSection.php:221
 msgid "A WP-CLI command — run the same scan across many sites without a browser, and read the result as JSON."
 msgstr ""
 
-#: src/Admin/LicenseSection.php:215
+#: src/Admin/LicenseSection.php:222
 msgid "An evidence report — export the whole library as CSV or JSON, one row per file with its status, size and references, before anything is deleted."
 msgstr ""
 
-#: src/Admin/LicenseSection.php:216
+#: src/Admin/LicenseSection.php:223
 msgid "Space totals — how much disk the unused files are holding now, and how much deleting here has already freed."
 msgstr ""
 
-#: src/Admin/LicenseSection.php:250
+#: src/Admin/LicenseSection.php:257
 msgid "License activated. This site is now on Freshet Unused Media Pro."
 msgstr ""
 
-#: src/Admin/LicenseSection.php:251
+#: src/Admin/LicenseSection.php:258
 msgid "License removed from this site."
 msgstr ""
 
-#: src/Admin/LicenseSection.php:252
-#: src/Admin/LicenseSection.php:295
+#: src/Admin/LicenseSection.php:259
+#: src/Admin/LicenseSection.php:297
 msgid "Activation failed."
 msgstr ""
 
 #. translators: %s: the connection error reported by WordPress
-#: src/Admin/LicenseSection.php:277
+#: src/Admin/LicenseSection.php:288
 #, php-format
 msgid "Could not reach the license server, so nothing on this site changed. This is not a verdict on your key — try again in a minute. (%s)"
 msgstr ""
 
-#: src/Admin/LicenseSection.php:278
+#: src/Admin/LicenseSection.php:289
 msgid "no response"
 msgstr ""
 
 #. translators: %s: description of the unreadable response, including the HTTP status
-#: src/Admin/LicenseSection.php:282
+#: src/Admin/LicenseSection.php:293
 #, php-format
 msgid "%s The key was not activated and this is not a verdict on your key — try again, and contact support if it keeps happening."
 msgstr ""
 
-#: src/Admin/LicenseSection.php:283
+#: src/Admin/LicenseSection.php:294
 msgid "The license server sent a response this plugin could not read."
 msgstr ""
 
-#. translators: %s: the license server's own sentence about the key
-#: src/Admin/LicenseSection.php:290
+#. translators: %s: the support email address
+#: src/Admin/LicenseSection.php:322
 #, php-format
-msgid "%s Spaces and invisible characters were already stripped before sending, so pasting it again will not help — compare it character by character."
+msgid "This key isn't one the license server knows — it may have lost a character in the paste, or belong to a different Freshet plugin. Spaces and invisible characters were already stripped before sending, so pasting it again will not help: compare it character by character with your purchase email, and if it matches, write to %s from the address you paid with."
 msgstr ""
 
-#: src/Admin/LicenseSection.php:316
+#. translators: %s: the support email address
+#: src/Admin/LicenseSection.php:327
+#, php-format
+msgid "This key's twelve months of updates and support have ended, so this site is on Free. The plugin keeps working — scanning, detection and deletion are the plugin — and another year is a separate purchase: write to %s from the address you paid with."
+msgstr ""
+
+#. translators: %s: the support email address
+#: src/Admin/LicenseSection.php:332
+#, php-format
+msgid "This key was cancelled, usually after a refund or a chargeback, so this site is on Free. If that is not what you expected, write to %s from the address you paid with."
+msgstr ""
+
+#. translators: 1: number of sites the key is active on, 2: number it is allowed on
+#: src/Admin/LicenseSection.php:338
+#, php-format
+msgid "This key is already active on its allowed number of sites — %1$d of %2$d. Deactivate it on a site you no longer use (that site's License section), or buy a second key."
+msgstr ""
+
+#: src/Admin/LicenseSection.php:342
+msgid "This key is already active on its allowed number of sites. Deactivate it on a site you no longer use (that site's License section), or buy a second key."
+msgstr ""
+
+#. translators: %s: the date of the last validation attempt
+#: src/Admin/LicenseSection.php:369
+#, php-format
+msgid "Active — this site is still on Freshet Unused Media Pro for now, though the license server could not be reached when it last checked, on %s. Nothing about your key changed, and the check is retried automatically."
+msgstr ""
+
+#: src/Admin/LicenseSection.php:372
+msgid "Active — this site is on Freshet Unused Media Pro."
+msgstr ""
+
+#. translators: 1: the date of the last validation attempt, 2: the support email address
+#: src/Admin/LicenseSection.php:378
+#, php-format
+msgid "The license server could not be reached when this site last checked, on %1$s, and there is no recent confirmation of the key to fall back on — so this site is on Free until the server answers again. Nothing about your key changed; if this keeps up, write to %2$s."
+msgstr ""
+
+#. translators: %s: the support email address
+#: src/Admin/LicenseSection.php:384
+#, php-format
+msgid "The license server sent a response this plugin could not read, so this site is on Free for now. This is not a verdict on your key — the check is retried automatically, and if it keeps happening, write to %s."
+msgstr ""
+
+#: src/Admin/LicenseSection.php:390
+msgid "This key did not validate, so this site is on Free."
+msgstr ""
+
+#: src/Admin/LicenseSection.php:411
 msgid "You are not allowed to manage the license."
 msgstr ""
 
@@ -498,14 +540,14 @@ msgstr ""
 
 #: src/Admin/MediaColumn.php:130
 #: src/Admin/StatusBadge.php:130
-#: src/Admin/ToolsPage.php:202
-#: src/Admin/ToolsPage.php:1166
+#: src/Admin/ToolsPage.php:211
+#: src/Admin/ToolsPage.php:1208
 msgid "Unused"
 msgstr ""
 
 #: src/Admin/MediaColumn.php:131
 #: src/Admin/StatusBadge.php:133
-#: src/Admin/ToolsPage.php:1168
+#: src/Admin/ToolsPage.php:1210
 msgid "Not scanned"
 msgstr ""
 
@@ -576,7 +618,7 @@ msgid "Couldn’t check"
 msgstr ""
 
 #: src/Admin/StatusBadge.php:105
-#: src/Admin/ToolsPage.php:1054
+#: src/Admin/ToolsPage.php:1096
 msgid "In trash"
 msgstr ""
 
@@ -588,384 +630,396 @@ msgid_plural "Used (%d references)"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/Admin/ToolsPage.php:66
+#: src/Admin/ToolsPage.php:67
 msgid "Media Usage"
 msgstr ""
 
 #. translators: 1: deleted count, 2: skipped count, 3: failed count
-#: src/Admin/ToolsPage.php:96
+#: src/Admin/ToolsPage.php:97
 #, php-format
 msgid "Deleted %1$d, skipped %2$d (found in use on re-check), failed %3$d."
 msgstr ""
 
 #. translators: %d: number of selected files the request had no time left for
-#: src/Admin/ToolsPage.php:109
+#: src/Admin/ToolsPage.php:110
 #, php-format
 msgid "%d selected file was not reached before the request ran out of time — it is untouched and still listed."
 msgid_plural "%d selected files were not reached before the request ran out of time — they are untouched and still listed."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/Admin/ToolsPage.php:203
-#: src/Admin/ToolsPage.php:515
+#: src/Admin/ToolsPage.php:212
+#: src/Admin/ToolsPage.php:524
 msgid "Scan"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:289
+#: src/Admin/ToolsPage.php:298
 msgid "Uploaded from"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:299
+#: src/Admin/ToolsPage.php:308
 msgid "Filename contains"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:300
+#: src/Admin/ToolsPage.php:309
 msgid "e.g. hero"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:304
+#: src/Admin/ToolsPage.php:313
 msgid "Min size (MB)"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:309
+#: src/Admin/ToolsPage.php:318
 msgid "Max size (MB)"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:314
+#: src/Admin/ToolsPage.php:323
 msgid "Filter"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:316
+#: src/Admin/ToolsPage.php:325
 msgid "Clear filters"
 msgstr ""
 
 #. translators: 1: number of matching files, 2: number of files in total
 #. translators: 1: number of files listed, 2: number of files in total
-#: src/Admin/ToolsPage.php:354
-#: src/Admin/ToolsPage.php:761
+#: src/Admin/ToolsPage.php:363
+#: src/Admin/ToolsPage.php:803
 #, php-format
 msgid "%1$s of %2$s"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:397
+#: src/Admin/ToolsPage.php:406
 msgid "The list is not shown at all rather than shown short: a list cut off by a failed query looks exactly like a complete one. Reload the page to try again."
 msgstr ""
 
 #. translators: %s: the upload grace window, e.g. "24 hours"
-#: src/Admin/ToolsPage.php:418
+#: src/Admin/ToolsPage.php:427
 #, php-format
 msgid "A file uploaded in the last %s is held back whatever the scan finds, so an editor still placing it has time to finish — it is not missing, it is being kept out of the list on purpose."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:450
+#: src/Admin/ToolsPage.php:459
 msgid "While a size filter is applied, files whose size cannot be read are left out of the list."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:481
+#: src/Admin/ToolsPage.php:490
 msgid "Docs"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:482
+#: src/Admin/ToolsPage.php:491
 msgid "Support"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:530
+#: src/Admin/ToolsPage.php:539
 msgid "The used, unused and not-scanned figures below stand at a dash rather than at zero — nothing has been counted, so nothing here says your library is clean. Reload the page; if it keeps happening, the queries are being cut short."
 msgstr ""
 
 #. translators: %s: number of used attachments
-#: src/Admin/ToolsPage.php:542
+#: src/Admin/ToolsPage.php:551
 #, php-format
 msgid "Used: %s"
 msgstr ""
 
 #. translators: %s: the number of unused attachments, or an em dash when the count could not be read
-#: src/Admin/ToolsPage.php:550
-#: src/Admin/ToolsPage.php:565
+#: src/Admin/ToolsPage.php:559
+#: src/Admin/ToolsPage.php:574
 #, php-format
 msgid "Unused: %s"
 msgstr ""
 
 #. translators: %s: number of unscanned attachments
-#: src/Admin/ToolsPage.php:555
+#: src/Admin/ToolsPage.php:564
 #, php-format
 msgid "Not scanned: %s"
 msgstr ""
 
 #. translators: 1: human time diff, 2: number of attachments scanned
-#: src/Admin/ToolsPage.php:578
+#: src/Admin/ToolsPage.php:587
 #, php-format
 msgid "Last full scan finished %1$s ago (%2$s attachments)."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:586
+#: src/Admin/ToolsPage.php:595
 msgid "Content has changed since — results may be stale."
 msgstr ""
 
+#. translators: %s: how long the scan took, already worded ("4 minutes")
+#: src/Admin/ToolsPage.php:610
+#, php-format
+msgid "It took %s."
+msgstr ""
+
+#. translators: %s: a list like "post content 41%%, custom fields 33%%"
+#: src/Admin/ToolsPage.php:624
+#, php-format
+msgid "Of the time spent checking: %s."
+msgstr ""
+
 #. translators: %s: number of attachments
-#: src/Admin/ToolsPage.php:606
+#: src/Admin/ToolsPage.php:648
 #, php-format
 msgid "The database returned an error while scanning %s file, so it has no result and appears in neither list. Run the scan again — if it keeps happening, the queries are being cut short (an execution-time limit or a dropped connection)."
 msgid_plural "The database returned an error while scanning %s files, so they have no result and appear in neither list. Run the scan again — if it keeps happening, the queries are being cut short (an execution-time limit or a dropped connection)."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/Admin/ToolsPage.php:638
+#: src/Admin/ToolsPage.php:680
 msgid "None of the upload folders this scan looked in could be read from this server — the files are stored somewhere else, on an offload or CDN service, or the folders are no longer there."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:639
+#: src/Admin/ToolsPage.php:681
 msgid "Some of the upload folders this scan looked in could not be read from this server — those files are stored somewhere else, on an offload or CDN service, or the folders are no longer there."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:640
+#: src/Admin/ToolsPage.php:682
 msgid "Those files are judged on what your library records about them and nothing else. If an old thumbnail is still sitting beside an image while your library has stopped listing it, a page still showing that thumbnail does not count as using the image — so the image can be reported as unused while a visitor can still see it. Check anything you delete from those folders against the pages you expect it on. Where the folders can be read, this is checked for you."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:649
+#: src/Admin/ToolsPage.php:691
 msgid "Every file is checked everywhere it could be referenced, not just where it was uploaded:"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:651
+#: src/Admin/ToolsPage.php:693
 msgid "Post content and blocks"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:652
+#: src/Admin/ToolsPage.php:694
 msgid "Custom fields"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:653
+#: src/Admin/ToolsPage.php:695
 msgid "Options and theme mods"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:654
+#: src/Admin/ToolsPage.php:696
 msgid "Term and user meta"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:655
+#: src/Admin/ToolsPage.php:697
 msgid "Comments and excerpts"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:659
+#: src/Admin/ToolsPage.php:701
 msgid "Anything ambiguous counts as used, so a file reaches the unused list only when nothing anywhere refers to it."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:677
+#: src/Admin/ToolsPage.php:719
 msgid "Worth running again after a cleanup — a later scan can honestly find files an earlier one did not, and that is what re-running is for:"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:679
+#: src/Admin/ToolsPage.php:721
 msgid "Deleting a file can leave others behind it unreferenced."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:680
+#: src/Admin/ToolsPage.php:722
 msgid "An optimiser or a resize tool registers its derivatives as library entries of their own."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:681
+#: src/Admin/ToolsPage.php:723
 msgid "Once the original is gone, nothing points at those any more."
 msgstr ""
 
 #. translators: 1: scanned count, 2: total count
-#: src/Admin/ToolsPage.php:699
+#: src/Admin/ToolsPage.php:741
 #, php-format
 msgid "Resume scan (%1$s / %2$s)"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:703
+#: src/Admin/ToolsPage.php:745
 msgid "Start full scan"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:704
+#: src/Admin/ToolsPage.php:746
 msgid "Stop"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:706
+#: src/Admin/ToolsPage.php:748
 msgid "Reset scan"
 msgstr ""
 
 #. translators: %s: number of files.
-#: src/Admin/ToolsPage.php:740
+#: src/Admin/ToolsPage.php:782
 #, php-format
 msgid "Sizes with no original (%s)"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:744
+#: src/Admin/ToolsPage.php:786
 msgid "Thumbnail files whose original upload is gone: nothing sits at the original's own path and no library entry names it, so no attachment is holding them and no page can be showing them. They are listed on their own — not counted as unused, not in the list above, not in any space figure — and this plugin does not delete them."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:799
+#: src/Admin/ToolsPage.php:841
 msgid "Unused files"
 msgstr ""
 
 #. translators: %s: number of unused attachments
-#: src/Admin/ToolsPage.php:814
+#: src/Admin/ToolsPage.php:856
 #, php-format
 msgid "Unused files (%s)"
 msgstr ""
 
 #. translators: 1: MEDIA_TRASH constant name, 2: the PHP line to add to wp-config.php
-#: src/Admin/ToolsPage.php:837
+#: src/Admin/ToolsPage.php:879
 #, php-format
 msgid "%1$s is not enabled — deletions are permanent. Add %2$s to wp-config.php to get a trash safety net."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:851
+#: src/Admin/ToolsPage.php:893
 msgid "No unused files match this filter. Clear it to see the rest."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:852
+#: src/Admin/ToolsPage.php:894
 msgid "No attachments are currently marked unused. Run a scan first, or enjoy the tidy library."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:869
+#: src/Admin/ToolsPage.php:911
 msgid "A file you expected here and cannot find is being held back, not overlooked:"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:871
+#: src/Admin/ToolsPage.php:913
 msgid "Something on the site still refers to it — a reference from a trashed post or comment counts as usage."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:872
+#: src/Admin/ToolsPage.php:914
 msgid "Another library entry points at the same file and is itself in use or in the trash."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:881
+#: src/Admin/ToolsPage.php:923
 msgid "Every file below is re-checked in the instant before it is deleted — anything that has become used in the meantime is skipped."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:893
-#: src/Admin/ToolsPage.php:1103
+#: src/Admin/ToolsPage.php:935
+#: src/Admin/ToolsPage.php:1145
 #: src/Extension/UsedTab.php:118
 msgid "File"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:894
-#: src/Admin/ToolsPage.php:1104
+#: src/Admin/ToolsPage.php:936
+#: src/Admin/ToolsPage.php:1146
 #: src/Extension/UsedTab.php:119
 msgid "Type"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:895
-#: src/Admin/ToolsPage.php:1105
+#: src/Admin/ToolsPage.php:937
+#: src/Admin/ToolsPage.php:1147
 #: src/Extension/UsedTab.php:120
 msgid "Uploaded"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:896
-#: src/Admin/ToolsPage.php:1106
+#: src/Admin/ToolsPage.php:938
+#: src/Admin/ToolsPage.php:1148
 #: src/Extension/UsedTab.php:121
 msgid "Size"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:897
-#: src/Admin/ToolsPage.php:1108
+#: src/Admin/ToolsPage.php:939
+#: src/Admin/ToolsPage.php:1150
 #: src/Extension/UsedTab.php:123
 msgid "Scanned"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:925
+#: src/Admin/ToolsPage.php:967
 msgid "Deleted files go to the media trash and can be restored from there."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:926
+#: src/Admin/ToolsPage.php:968
 msgid "Deletion is permanent and cannot be undone."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:932
+#: src/Admin/ToolsPage.php:974
 msgid "Each one is re-checked first; anything still in use is skipped."
 msgstr ""
 
 #. translators: %s: number of unused attachments matching the filter
-#: src/Admin/ToolsPage.php:958
+#: src/Admin/ToolsPage.php:1000
 #, php-format
 msgid "Delete all matching (%s)"
 msgstr ""
 
 #. translators: 1: number of matching attachments, 2: the filter in words
-#: src/Admin/ToolsPage.php:964
+#: src/Admin/ToolsPage.php:1006
 #, php-format
 msgid "Delete all %1$s unused attachments matching the current filter (%2$s)?"
 msgstr ""
 
 #. translators: %s: number of unused attachments
-#: src/Admin/ToolsPage.php:971
+#: src/Admin/ToolsPage.php:1013
 #, php-format
 msgid "Delete all unused (%s)"
 msgstr ""
 
 #. translators: %s: number of unused attachments
-#: src/Admin/ToolsPage.php:977
+#: src/Admin/ToolsPage.php:1019
 #, php-format
 msgid "Delete all %s unused attachments?"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:1004
+#: src/Admin/ToolsPage.php:1046
 msgid "Delete the selected attachments?"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:1006
+#: src/Admin/ToolsPage.php:1048
 msgid "Only files matching the current filter are listed, so the selection comes from that list."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:1014
+#: src/Admin/ToolsPage.php:1056
 msgid "Delete selected"
 msgstr ""
 
 #. translators: %s: number of files whose every library entry is in the trash
-#: src/Admin/ToolsPage.php:1063
+#: src/Admin/ToolsPage.php:1105
 #, php-format
 msgid "In trash (%s)"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:1071
+#: src/Admin/ToolsPage.php:1113
 msgid "No files in the trash match this filter. Clear it to see the rest."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:1072
+#: src/Admin/ToolsPage.php:1114
 msgid "No file has every one of its library entries in the trash."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:1078
+#: src/Admin/ToolsPage.php:1120
 msgid "Every file here is in the media trash with all of its library entries, so it is not in the lists above:"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:1080
+#: src/Admin/ToolsPage.php:1122
 msgid "Trashing an attachment does not remove its file — a page that still refers to it still shows it. A file scanned as still referenced is held back here rather than offered."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:1081
+#: src/Admin/ToolsPage.php:1123
 msgid "A file the scan has not reached has no verdict yet and is not offered either. Run a scan to decide it."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:1082
+#: src/Admin/ToolsPage.php:1124
 msgid "Erasing one here removes the file and its trashed entries for good — this is the permanent half of the media trash, the same as Delete Permanently there."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:1095
+#: src/Admin/ToolsPage.php:1137
 msgid "These files are already in the trash: deleting them here is permanent and cannot be undone."
 msgstr ""
 
-#: src/Admin/ToolsPage.php:1107
+#: src/Admin/ToolsPage.php:1149
 msgid "Status"
 msgstr ""
 
-#: src/Admin/ToolsPage.php:1164
+#: src/Admin/ToolsPage.php:1206
 msgid "Held back — still referenced"
 msgstr ""
 
 #. translators: Hidden accessibility text.
-#: src/Admin/ToolsPage.php:1229
+#: src/Admin/ToolsPage.php:1271
 msgid "Sort ascending."
 msgstr ""
 
 #. translators: Hidden accessibility text.
-#: src/Admin/ToolsPage.php:1231
+#: src/Admin/ToolsPage.php:1273
 msgid "Sort descending."
 msgstr ""
 
 #. translators: %s: human time diff
-#: src/Admin/ToolsPage.php:1318
+#: src/Admin/ToolsPage.php:1360
 #, php-format
 msgid "%s ago"
 msgstr ""
@@ -1018,6 +1072,46 @@ msgstr ""
 msgid "Unexpected response from the license server (HTTP %d)."
 msgstr ""
 
+#: src/Scan/DetectorTiming.php:79
+msgid "custom fields"
+msgstr ""
+
+#: src/Scan/DetectorTiming.php:80
+msgid "post content"
+msgstr ""
+
+#: src/Scan/DetectorTiming.php:81
+msgid "options and theme mods"
+msgstr ""
+
+#: src/Scan/DetectorTiming.php:82
+msgid "term meta"
+msgstr ""
+
+#: src/Scan/DetectorTiming.php:83
+msgid "term descriptions"
+msgstr ""
+
+#: src/Scan/DetectorTiming.php:84
+msgid "user meta"
+msgstr ""
+
+#: src/Scan/DetectorTiming.php:85
+msgid "comments"
+msgstr ""
+
+#: src/Scan/DetectorTiming.php:86
+msgid "recent uploads"
+msgstr ""
+
+#: src/Scan/DetectorTiming.php:87
+msgid "what a file is attached to"
+msgstr ""
+
+#: src/Scan/DetectorTiming.php:88
+msgid "other library entries on the same file"
+msgstr ""
+
 #: src/Scan/FileClaims.php:262
 msgid "Held back — deleting it would remove a file another library entry uses"
 msgstr ""
@@ -1064,23 +1158,18 @@ msgstr ""
 msgid "at most %s"
 msgstr ""
 
-#. translators: %s: number of days
-#: src/Scan/UploadGrace.php:59
+#. translators: %s: number of seconds
+#: src/Scan/ScanProgress.php:67
+#: src/Scan/UploadGrace.php:86
 #, php-format
-msgid "%s day"
-msgid_plural "%s days"
-msgstr[0] ""
-msgstr[1] ""
-
-#. translators: %s: number of hours
-#: src/Scan/UploadGrace.php:69
-#, php-format
-msgid "%s hour"
-msgid_plural "%s hours"
+msgid "%s second"
+msgid_plural "%s seconds"
 msgstr[0] ""
 msgstr[1] ""
 
 #. translators: %s: number of minutes
+#: src/Scan/ScanProgress.php:75
+#: src/Scan/ScanProgress.php:105
 #: src/Scan/UploadGrace.php:79
 #, php-format
 msgid "%s minute"
@@ -1088,11 +1177,56 @@ msgid_plural "%s minutes"
 msgstr[0] ""
 msgstr[1] ""
 
-#. translators: %s: number of seconds
-#: src/Scan/UploadGrace.php:86
+#. translators: %s: number of hours
+#: src/Scan/ScanProgress.php:94
+#: src/Scan/UploadGrace.php:69
 #, php-format
-msgid "%s second"
-msgid_plural "%s seconds"
+msgid "%s hour"
+msgid_plural "%s hours"
+msgstr[0] ""
+msgstr[1] ""
+
+#. translators: 1: hours, already worded ("2 hours"), 2: minutes, already worded ("10 minutes")
+#: src/Scan/ScanProgress.php:102
+#, php-format
+msgid "%1$s %2$s"
+msgstr ""
+
+#. translators: 1: attachments scanned, 2: attachments in total, 3: time spent so far, 4: estimated time left, 5: what the scan is checking right now
+#: src/Scan/ScanProgress.php:131
+#, php-format
+msgid "%1$s / %2$s attachments — %3$s so far, about %4$s left · checking %5$s"
+msgstr ""
+
+#. translators: 1: attachments scanned, 2: attachments in total, 3: time spent so far, 4: estimated time left
+#: src/Scan/ScanProgress.php:143
+#, php-format
+msgid "%1$s / %2$s attachments — %3$s so far, about %4$s left"
+msgstr ""
+
+#. translators: 1: attachments scanned, 2: attachments in total, 3: time spent so far, 4: what the scan is checking right now
+#: src/Scan/ScanProgress.php:154
+#, php-format
+msgid "%1$s / %2$s attachments — %3$s so far · checking %4$s"
+msgstr ""
+
+#. translators: 1: attachments scanned, 2: attachments in total, 3: time spent so far
+#: src/Scan/ScanProgress.php:164
+#, php-format
+msgid "%1$s / %2$s attachments — %3$s so far"
+msgstr ""
+
+#. translators: 1: what the scan was checking ("post content"), 2: its share of the scan's time as a percentage
+#: src/Scan/ScanProgress.php:199
+#, php-format
+msgid "%1$s %2$s%%"
+msgstr ""
+
+#. translators: %s: number of days
+#: src/Scan/UploadGrace.php:59
+#, php-format
+msgid "%s day"
+msgid_plural "%s days"
 msgstr[0] ""
 msgstr[1] ""
 

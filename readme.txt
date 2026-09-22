@@ -4,7 +4,7 @@ Tags: unused media, unused images, media library, cleanup, attachments
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.0.7
+Stable tag: 1.0.8
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -121,6 +121,12 @@ Never. Scanning only reads and caches results. Deletion happens exclusively when
 5. The Usage box on an unused file's Edit Media screen: nothing refers to it, the upload record is information only, and Rescan checks it again.
 
 == Changelog ==
+
+= 1.0.8 =
+* **Scans now show how far along they are and how long is left.** While a scan runs, the bar under Media → Usage says how many attachments it has done out of how many, how long it has been scanning, roughly how much of it is left, and which check the time is going into — "checking post content", "checking custom fields". A scan of a big library no longer looks like a screen that has stopped responding.
+* **The estimate counts only the time the scan actually spent.** Stopping a scan and resuming it tomorrow does not make it claim a week's work: the hours nobody was scanning are not in the figure.
+* **A finished scan says what it cost** — how long it took, and how the time was split across the checks ("post content 41%, custom fields 33%, …"). It stays on the screen after the scan, which is where the question is actually asked: before starting the next one.
+* The plugin's header strip on Media → Usage now sits flush at the top of the screen and runs its full width, instead of starting a short way in with a gap above it.
 
 = 1.0.7 =
 * **The listing, not the scanner.** Nothing about how the plugin scans or deletes has changed since 1.0.6. This release carries the wordpress.org listing: a readme that says what the plugin does in the words people search for — find unused media and unused images, clean up the media library — with three new FAQ entries on deleting unused images, on why bulk-deleting "unattached" files is unsafe, and on how this differs from the Unattached filter; five real screenshots of the Scan tab, the Unused tab, the Usage column and the Usage box; and a Playground blueprint so the plugin can be tried in the browser from the listing.

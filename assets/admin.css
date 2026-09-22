@@ -13,13 +13,26 @@
     display: none !important;
 }
 
-/* Brand strip (matches the Freshet Feeds header) */
+/* Brand strip (matches the Freshet Feeds header, which is the reference: it is
+   the one that renders the strip flush at the top and full width).
+
+   ToolsPage prints it before `.wrap`, so nothing insets it but #wpcontent's own
+   left padding — 20px, and 10px once the admin goes narrow. That is what these
+   two margins cancel, at both sizes. The strip has no top margin of its own:
+   .freshet-unusedmedia-wrap's 1.5em is the gap BETWEEN the strip and the panel
+   under it, not one above the strip. */
 
 .frst-header {
     background: #fff;
     border-bottom: 1px solid #dcdcde;
     margin: 0 0 0 -20px;
     padding: 16px 20px 0;
+}
+
+@media screen and (max-width: 782px) {
+    .frst-header {
+        margin-left: -10px;
+    }
 }
 
 .frst-header__row {
@@ -282,7 +295,8 @@
    it goes with it.
 
    The wrap's offset is Feeds' own 1.5em, and the first section adds nothing on
-   top of it. */
+   top of it. Since the strip is printed before `.wrap`, this is the gap under
+   the strip — the same one Feeds writes inline on its own wrap. */
 
 .freshet-unusedmedia-wrap {
     margin-top: 1.5em;

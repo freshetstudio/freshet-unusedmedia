@@ -131,18 +131,26 @@ final class ToolsPage
 
         $tab = $this->currentTab();
 
-        // WordPress relocates every `.notice` to just after `.wp-header-end`.
-        // The anchor sits ABOVE the brand strip and inside `.wrap`, so foreign
-        // notices land above our chrome instead of between the tabs and the
-        // panel they switch. `.wrap` must also carry an h1 for the admin's own
-        // heading logic; ours is visual, so this one is for screen readers.
+        // The strip is printed BEFORE `.wrap`, which is the whole of what makes
+        // it sit flush at the top and run the full width of the screen: inside
+        // `.wrap` it inherited core's `margin: 10px 20px 0 2px` on top of the
+        // plugin's own `.freshet-unusedmedia-wrap` 1.5em, which was the gap
+        // above it and the 20px gutter at its right. Freshet Feeds renders it
+        // this way (FeedsPage::renderPage()) and is the reference for all three
+        // plugins (freshet-D242).
+        $this->renderHeader($tab);
+
+        // Then the panel the strip belongs to. WordPress relocates every
+        // `.notice` to just after `.wp-header-end`, so with the anchor inside
+        // `.wrap` foreign notices land under the strip and inside the panel,
+        // rather than between the tabs and what they switch. `.wrap` must also
+        // carry an h1 for the admin's own heading logic; the strip's own title
+        // is visual, so this one is for screen readers.
         echo '<div class="wrap freshet-unusedmedia-wrap">';
         printf(
             '<h1 class="screen-reader-text">%s</h1><hr class="wp-header-end">',
             esc_html__('Freshet Unused Media', 'freshet-unused-media')
         );
-
-        $this->renderHeader($tab);
 
         if ($tab === self::TAB_UNUSED) {
             $this->renderUnusedTable();

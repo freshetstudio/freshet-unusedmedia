@@ -58,7 +58,7 @@ Thoroughness is the point rather than speed: a first full scan of a large librar
 
 Site-specific detectors can be added via the `freshet_unusedmedia_detectors` filter; `freshet_unusedmedia_is_used` gets the final say on any status; `freshet_unusedmedia_batch_size` and `freshet_unusedmedia_batch_seconds` tune scan batches; `freshet_unusedmedia_upload_grace` sets the recent-upload window in seconds (0 disables it).
 
-Part of the Freshet plugin suite. Full documentation: [freshet.studio/docs](https://freshet.studio/docs).
+Part of the Freshet plugin suite. Full documentation: [freshet.studio/docs](https://freshet.studio/docs). Questions and problems: [freshet.studio/support](https://freshet.studio/support?utm_source=plugin&utm_medium=freshet-unused-media).
 
 == Installation ==
 
@@ -111,6 +111,10 @@ Per site, yes. Cross-site references (another site embedding this site's file UR
 = Does it delete anything by itself? =
 
 Never. Scanning only reads and caches results. Deletion happens exclusively when you click a delete action, after re-verification. Opening the page deletes nothing.
+
+= Where do I get help? =
+
+Write to the address on [freshet.studio/support](https://freshet.studio/support?utm_source=plugin&utm_medium=freshet-unused-media). Support is email, read by the person who wrote the plugin — say which plugin, which version, and what you saw, and a screenshot covers most of that in one go. Questions here in the WordPress.org support forum are read too.
 
 == Screenshots ==
 

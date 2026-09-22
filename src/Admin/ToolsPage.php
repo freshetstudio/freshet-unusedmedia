@@ -42,6 +42,13 @@ final class ToolsPage
 
     private const CAP = 'manage_options';
 
+    /**
+     * Where the Support link goes: the studio's support page, one address for
+     * every plugin (freshet-D255/D256). The UTM pair names the plugin the
+     * visitor came from, so the page's traffic can be read per plugin.
+     */
+    private const SUPPORT_URL = 'https://freshet.studio/support?utm_source=plugin&utm_medium=freshet-unused-media';
+
     /** Read once per request; both listings and every URL on the page share it. */
     private ?ResultFilters $filters = null;
 
@@ -488,7 +495,7 @@ final class ToolsPage
                     do_action('freshet_unusedmedia_header_meta');
                     ?>
                     <a href="https://freshet.studio/docs" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Docs', 'freshet-unused-media'); ?></a>
-                    <a href="mailto:email@freshet.studio"><?php esc_html_e('Support', 'freshet-unused-media'); ?></a>
+                    <a href="<?php echo esc_url(self::SUPPORT_URL); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Support', 'freshet-unused-media'); ?></a>
                 </div>
             </div>
             <nav class="nav-tab-wrapper">

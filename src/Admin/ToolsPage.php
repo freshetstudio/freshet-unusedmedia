@@ -743,12 +743,10 @@ final class ToolsPage
             </p>',
             esc_attr($running !== null ? '1' : ''),
             esc_html($running !== null
-                ? sprintf(
-                    /* translators: 1: scanned count, 2: total count */
-                    __('Resume scan (%1$s / %2$s)', 'freshet-unused-media'),
-                    number_format_i18n($running['done']),
-                    number_format_i18n($running['total'])
-                )
+                // The same composer the batch reply uses, so the text the page
+                // is rendered with and the text the browser rewrites it to are
+                // one string in one place (freshet-304).
+                ? ScanProgress::resumeLabel($running['done'], $running['total'])
                 : __('Start full scan', 'freshet-unused-media')),
             esc_html__('Stop', 'freshet-unused-media'),
             $running !== null

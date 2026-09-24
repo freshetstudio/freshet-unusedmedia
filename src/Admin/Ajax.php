@@ -276,6 +276,14 @@ final class Ajax
             'total' => $total,
             'errors' => $state['errors'],
             'label' => $label,
+            // What the Resume button will say once this batch is the last one.
+            // The page printed that button's count at load and nothing in the
+            // browser could recompute it, so a scan stopped at 170 kept
+            // offering to resume from 130 until a reload (freshet-304). It
+            // rides every reply rather than a stop-only one: the stop is a flag
+            // the browser sets, the server is never told, and the count that
+            // matters is the one the last completed batch earned.
+            'resume' => ScanProgress::resumeLabel($state['done'], $total),
         ]);
     }
 

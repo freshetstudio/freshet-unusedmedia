@@ -820,8 +820,8 @@ msgstr ""
 msgid "Once the original is gone, nothing points at those any more."
 msgstr ""
 
-#. translators: 1: scanned count, 2: total count
-#: src/Admin/ToolsPage.php:741
+#. translators: 1: attachments scanned so far, 2: attachments in total
+#: src/Scan/ScanProgress.php:190
 #, php-format
 msgid "Resume scan (%1$s / %2$s)"
 msgstr ""

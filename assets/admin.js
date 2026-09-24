@@ -106,6 +106,25 @@
         });
     }
 
+    // The Resume button's count, written the same way the bar's line is: the
+    // string arrives composed, and this only puts it where it goes. Without it
+    // the button keeps the figure PHP printed at page load, so stopping a scan
+    // at 170 left a button still offering to resume from 130 until someone
+    // reloaded (freshet-304).
+    //
+    // Every batch and not only the stop: the stop is a flag in this script that
+    // the server never hears about, so the count to fall back on is whatever
+    // the last completed batch reported. It also turns a fresh run's "Start
+    // full scan" into a Resume the moment there is progress to resume from.
+    function updateResumeLabel(text) {
+        if (!startButton || !text) {
+            return;
+        }
+
+        startButton.textContent = text;
+        startButton.dataset.resume = '1';
+    }
+
     function scanLoop() {
         if (stopped) {
             startButton.disabled = false;
@@ -120,6 +139,7 @@
             // spent, what is left, which check the time is going to — is on the
             // server, in the site's language. See ScanProgress.
             updateProgress(data.done, data.total, data.label);
+            updateResumeLabel(data.resume);
 
             if (data.finished) {
                 window.location.reload();

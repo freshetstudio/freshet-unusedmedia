@@ -20,8 +20,9 @@ defined('ABSPATH') || exit;
  * the server saw them. A scan's figures are the opposite: they come off the
  * cursor option, they need the site's locale for the numbers and the site's
  * language for the detector names, and JavaScript has neither
- * `number_format_i18n()` nor the translations. So the batch reply carries a
- * finished string and admin.js writes it into the label.
+ * `number_format_i18n()` nor the translations. So the batch reply carries the
+ * finished strings and admin.js writes them where they go — the line under the
+ * bar, and the Resume button's count.
  */
 final class ScanProgress
 {
@@ -165,6 +166,30 @@ final class ScanProgress
             $counts[0],
             $counts[1],
             $counts[2]
+        );
+    }
+
+    /**
+     * What the button that restarts a stopped scan says it will resume.
+     *
+     * The same two figures as the bar, in the same locale, and here for the
+     * same reason the line under the bar is: the control is server-rendered at
+     * page load and then has to be rewritten from a batch reply, so its text
+     * has to exist in one place both surfaces can ask for rather than as a
+     * `sprintf` in the screen and a second one in the browser (freshet-304).
+     * Without that, stopping a scan at 170 leaves a button still offering to
+     * resume from 130 until someone reloads the page.
+     *
+     * `%1$s / %2$s` and not the bar's fuller sentence: a button is a label and
+     * not a report, and the count is the only part of it that can go stale.
+     */
+    public static function resumeLabel(int $done, int $total): string
+    {
+        return sprintf(
+            /* translators: 1: attachments scanned so far, 2: attachments in total */
+            __('Resume scan (%1$s / %2$s)', 'freshet-unused-media'),
+            number_format_i18n($done),
+            number_format_i18n($total)
         );
     }
 

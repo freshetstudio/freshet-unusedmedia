@@ -220,6 +220,63 @@ check('a backwards clock contributes nothing', DetectorTiming::take(), ['postmet
 check('an unknown id is its own label', DetectorTiming::label('acme-slider'), 'acme-slider');
 check('a known id is a phrase a person reads', DetectorTiming::label('file-claim'), 'other library entries on the same file');
 
+// -------------------------------------------------------- the resume label
+//
+// freshet-304. The Resume button was the one figure on the screen the browser
+// could not rewrite: PHP printed "Resume scan (130 / 3,466)" at page load, the
+// batch reply carried no text for it, and nothing in admin.js touched it — so
+// stopping a scan at 170 left a button offering to resume from 130 until
+// someone reloaded the page. The fix is the plugin's own idiom, the one this
+// file's subject already is: the sentence is composed on the server and the
+// browser only puts it where it goes.
+//
+// Four claims, and they are different. The first is the wording. The next
+// three are structural — that the one composer is what the screen prints, that
+// it rides the batch reply, and that the script writes it into the button —
+// because the defect was never in the arithmetic. Every figure was right; they
+// just never travelled.
+
+check('the button says what it will resume, in the site\'s number format', ScanProgress::resumeLabel(170, 3466), 'Resume scan (170 / 3,466)');
+
+// The moment the stop path has to be right about: a batch that finished
+// exactly on the total, and a run that has not started one. Neither is a
+// special case in the composer, and neither should read as one.
+check('a run that reached the end still reads as a count', ScanProgress::resumeLabel(3466, 3466), 'Resume scan (3,466 / 3,466)');
+check('and one that has scanned nothing', ScanProgress::resumeLabel(0, 3466), 'Resume scan (0 / 3,466)');
+
+$progressSource = (string) file_get_contents(ABSPATH . 'src/Scan/ScanProgress.php');
+$toolsSource = (string) file_get_contents(ABSPATH . 'src/Admin/ToolsPage.php');
+$ajaxSource = (string) file_get_contents(ABSPATH . 'src/Admin/Ajax.php');
+$adminScript = (string) file_get_contents(ABSPATH . 'assets/admin.js');
+
+// One msgid, in one place. A second `sprintf` of the same sentence in
+// ToolsPage is how the two halves drift apart again — and how a translator
+// ends up with two strings to translate identically.
+check(
+    'only the composer writes the sentence',
+    preg_match_all("/Resume scan \(%1\\\$s \/ %2\\\$s\)/", $progressSource . $toolsSource . $ajaxSource),
+    1
+);
+
+check(
+    'the screen renders the button from that composer',
+    preg_match('/ScanProgress::resumeLabel\(\$running\[.done.\], \$running\[.total.\]\)/', $toolsSource),
+    1
+);
+
+// The reply half of the fix: without this field there is nothing for the
+// browser to write, whatever the script does.
+check(
+    'every batch reply carries it',
+    preg_match("/'resume' => ScanProgress::resumeLabel\(/", $ajaxSource),
+    1
+);
+
+// And the browser half: the field is read, and it lands on the button the
+// server rendered — not on the progress label, which was never the defect.
+check('the script reads it off the reply', preg_match('/updateResumeLabel\(data\.resume\)/', $adminScript), 1);
+check('and writes it onto the Resume button', preg_match('/function updateResumeLabel\(text\).+startButton\.textContent = text;/sU', $adminScript), 1);
+
 // ------------------------------------------------------------------ report
 
 foreach ($failures as $failure) {

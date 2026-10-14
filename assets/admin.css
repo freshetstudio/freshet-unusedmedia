@@ -1,0 +1,397 @@
+/* Freshet Unused Media — admin styles */
+
+/* The `hidden` attribute has to be restored on our own screens. The UA sheet's
+   `[hidden] { display: none }` is beaten by core's author rule
+   `.wp-core-ui .button { display: inline-block }` (wp-includes/css/buttons.css),
+   so a control carrying the attribute still renders at full size — the Scan tab
+   offered a Stop button with nothing to stop. Scoped to the plugin's own
+   containers rather than to one id, so every control hidden this way is covered. */
+
+.freshet-unusedmedia-wrap [hidden],
+.freshet-unusedmedia-box [hidden],
+.frst-header [hidden] {
+    display: none !important;
+}
+
+/* Brand strip (matches the Freshet Feeds header, which is the reference: it is
+   the one that renders the strip flush at the top and full width).
+
+   ToolsPage prints it before `.wrap`, so nothing insets it but #wpcontent's own
+   left padding — 20px, and 10px once the admin goes narrow. That is what these
+   two margins cancel, at both sizes. The strip has no top margin of its own:
+   .freshet-unusedmedia-wrap's 1.5em is the gap BETWEEN the strip and the panel
+   under it, not one above the strip. */
+
+.frst-header {
+    background: #fff;
+    border-bottom: 1px solid #dcdcde;
+    margin: 0 0 0 -20px;
+    padding: 16px 20px 0;
+}
+
+@media screen and (max-width: 782px) {
+    .frst-header {
+        margin-left: -10px;
+    }
+}
+
+.frst-header__row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 14px;
+}
+
+.frst-header__mark {
+    width: 28px;
+    height: 28px;
+    flex: none;
+}
+
+.frst-header__title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #1d2327;
+    margin: 0;
+    padding: 0;
+}
+
+.frst-header__version {
+    font-size: 11px;
+    color: #646970;
+    background: #f0f0f1;
+    border-radius: 10px;
+    padding: 2px 8px;
+}
+
+.frst-header__meta {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 13px;
+}
+
+/* Core .nav-tab keeps its own colours; only the strip's own edges go. */
+.frst-header .nav-tab-wrapper {
+    border-bottom: 0;
+    padding: 0;
+    margin: 0;
+}
+
+.freshet-unusedmedia-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.6;
+    white-space: nowrap;
+}
+
+.freshet-unusedmedia-badge--used {
+    background: #edfaef;
+    color: #00832a;
+}
+
+.freshet-unusedmedia-badge--unused {
+    background: #fcf0f1;
+    color: #b32d2e;
+}
+
+.freshet-unusedmedia-badge--unknown {
+    background: #f0f0f1;
+    color: #50575e;
+}
+
+/* A file being protected rather than offered. It carries a sentence rather
+   than a word, so it is the one badge that may wrap — nowrap here would push
+   the Usage column wide enough to squeeze the rest of the media list. */
+.freshet-unusedmedia-badge--held {
+    background: #fcf9e8;
+    color: #7d5b02;
+    white-space: normal;
+}
+
+/* Content sections, and they are sections rather than surfaces: Feeds and the
+   WordPress admin both put a list table straight onto the page background at the
+   full width of the content column, so there is nothing here to draw
+   (freshet-D81). No background, no border, no radius, no padding - and above all
+   no width cap, which is what kept the tables off the full width. What is left
+   is the vertical rhythm between one section and the next. */
+
+.freshet-unusedmedia-section {
+    margin-top: 24px;
+}
+
+.freshet-unusedmedia-section h2 {
+    margin-top: 0;
+}
+
+/* The boundary between the unused set and the trashed one (freshet-D280 (3)).
+   Core's own hr does the drawing - this adds nothing but the rhythm, so the
+   rule sits at the same 24px the sections do rather than at the browser's
+   half-em, where it reads as attached to whichever section it is nearer. */
+
+.freshet-unusedmedia-rule {
+    margin: 24px 0 0;
+}
+
+/* The Scan tab's headline (freshet-D119 (1)). The three figures are the reason
+   the screen exists, and at body size between two paragraphs of helper text they
+   read as a footnote - "it gets lost in a lot of text". They now open the
+   section and carry a heading's weight.
+
+   Typography and order only: no background, no border, no padding and no width
+   cap, so freshet-D81's unboxing stands and this is not the restyle freshet-D89
+   (3) refused to open. */
+
+.freshet-unusedmedia-counts {
+    margin: 0 0 4px;
+    font-size: 18px;
+    line-height: 1.5;
+    font-weight: 600;
+    color: #1d2327;
+}
+
+/* "Unused files (400) [Delete all]" - the destructive control on the heading row. */
+.freshet-unusedmedia-section__heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.freshet-unusedmedia-section__heading h2 {
+    margin-bottom: 0;
+}
+
+.freshet-unusedmedia-warning {
+    background: #fcf9e8;
+    border-left: 4px solid #dba617;
+    padding: 8px 12px;
+}
+
+.freshet-unusedmedia-progress {
+    max-width: 480px;
+    margin: 12px 0;
+}
+
+.freshet-unusedmedia-progress__bar {
+    background: #f0f0f1;
+    border-radius: 8px;
+    height: 12px;
+    overflow: hidden;
+}
+
+.freshet-unusedmedia-progress__bar span {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: #1122ff;
+    border-radius: 8px;
+    transition: width 0.3s ease;
+}
+
+.freshet-unusedmedia-progress__label {
+    display: inline-block;
+    margin-top: 4px;
+    color: #646970;
+    font-size: 12px;
+}
+
+/* The file cell is core's media row and core styles it: the table carries
+   `media` and the cell carries `column-title`, so
+   `table.media .column-title .media-icon` (wp-admin/css/list-tables.css) floats
+   the thumbnail left and the title and filename sit beside it. The plugin's own
+   rule used to set vertical-align: middle and a right margin on that image,
+   which is what put the filename on a line *below* the thumbnail — so it is gone
+   rather than adjusted (freshet-320). Only the crop is ours: core's media list
+   shows whole images and these rows want a square tile, and object-fit is the one
+   thing core's rule does not cover.
+
+   Nothing sets the thumbnail's own size here. wp_get_attachment_image() asks for
+   60×60 the way core does and core's `max-width: 60px; height: auto` finishes it,
+   so a non-square image keeps its ratio inside the 60px column instead of being
+   stretched into it. */
+
+.freshet-unusedmedia-table .freshet-unusedmedia-file .media-icon img {
+    object-fit: cover;
+}
+
+/* "Delete all unused (400)" on the heading row (freshet-320). Core has no filled
+   destructive button — button-link-delete is a red text link and button-primary
+   is the blue affirmative one — so this is core's .button metrics with core's own
+   destructive red (#b32d2e, the same value .button-link-delete uses) painted in.
+   Filled, so it is findable; red, so it never reads as the affirmative action.
+
+   Every selector is written `.wp-core-ui .button.<ours>` on purpose. Core paints
+   the button through `.wp-core-ui .button` (wp-includes/css/buttons.css), which
+   is two classes; a rule of ours carrying one class loses on specificity and the
+   button renders in core's white-and-blue whatever colours we declare. That is
+   not a hypothetical — it is what the first cut of this did. */
+
+.wp-core-ui .button.freshet-unusedmedia-button--delete,
+.wp-core-ui .button.freshet-unusedmedia-button--delete:hover,
+.wp-core-ui .button.freshet-unusedmedia-button--delete:focus,
+.wp-core-ui .button.freshet-unusedmedia-button--delete:active {
+    background: #b32d2e;
+    border-color: #b32d2e;
+    color: #fff;
+    text-decoration: none;
+    text-shadow: none;
+}
+
+.wp-core-ui .button.freshet-unusedmedia-button--delete:hover,
+.wp-core-ui .button.freshet-unusedmedia-button--delete:focus,
+.wp-core-ui .button.freshet-unusedmedia-button--delete:active {
+    background: #8a2424;
+    border-color: #8a2424;
+}
+
+.wp-core-ui .button.freshet-unusedmedia-button--delete:focus {
+    box-shadow: 0 0 0 1px #fff, 0 0 0 3px #b32d2e;
+    outline: 2px solid transparent;
+}
+
+/* Disabled is the state a delete-all run spends minutes in, so it has to read as
+   "running", not as a second colour of button. */
+.wp-core-ui .button.freshet-unusedmedia-button--delete:disabled,
+.wp-core-ui .button.freshet-unusedmedia-button--delete[disabled] {
+    background: #b32d2e;
+    border-color: #b32d2e;
+    color: #fff;
+    opacity: 0.55;
+}
+
+.freshet-unusedmedia-refs {
+    margin: 8px 0;
+    padding-left: 16px;
+    list-style: disc;
+}
+
+.freshet-unusedmedia-refs li {
+    margin-bottom: 4px;
+}
+
+/* Possible matches — the numbers that could be this file's ID and could be
+   something else. Collapsed, because there can be hundreds of them on an old
+   library and they are not the evidence anyone came for; the summary carries
+   the count and the caveat. */
+
+.freshet-unusedmedia-possible {
+    margin: 8px 0;
+}
+
+.freshet-unusedmedia-possible > summary {
+    cursor: pointer;
+    color: #646970;
+}
+
+.freshet-unusedmedia-possible[open] > summary {
+    margin-bottom: 4px;
+}
+
+.column-freshet_unusedmedia {
+    width: 130px;
+}
+
+/* Usage panel in the media modal. Core renders the compat fields as a
+   two-column table with a narrow label column; the reference list needs the
+   whole width, so this one row stacks instead. */
+
+.compat-field-freshet-unusedmedia-usage th.label,
+.compat-field-freshet-unusedmedia-usage td.field {
+    display: block;
+    width: auto;
+    padding-left: 0;
+}
+
+.compat-field-freshet-unusedmedia-usage .freshet-unusedmedia-refs {
+    margin-bottom: 0;
+}
+
+/* Filter bar — above both listings, on the unused one above the delete form */
+
+.freshet-unusedmedia-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+    margin: 12px 0 16px;
+    padding: 12px;
+    background: #f6f7f7;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+}
+
+.freshet-unusedmedia-filters label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: #50575e;
+}
+
+.freshet-unusedmedia-filters input[type="number"] {
+    width: 100px;
+}
+
+.freshet-unusedmedia-filters__actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* Scan controls — Resume and Stop are buttons, Reset is a link, so the row is
+   laid out rather than left to baseline alignment: a link-button has no padding
+   and would otherwise sit on the buttons' text baseline. */
+
+.freshet-unusedmedia-scan-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+}
+
+/* The join between the tab strip and the content it switches (freshet-D81 (3)).
+   There is no panel left to meet, so the join is core's own and needs no help:
+   .nav-tab-active carries margin-bottom: -1px and a bottom border in the page
+   background colour, so the active tab breaks the strip's rule line and opens
+   onto the same surface its content sits on. freshet-088 had to paint that tab
+   white because a white card started where the strip ended; with the card gone
+   the override would leave the active tab the only white thing on the screen, so
+   it goes with it.
+
+   The wrap's offset is Feeds' own 1.5em, and the first section adds nothing on
+   top of it. Since the strip is printed before `.wrap`, this is the gap under
+   the strip — the same one Feeds writes inline on its own wrap. */
+
+.freshet-unusedmedia-wrap {
+    margin-top: 1.5em;
+}
+
+.freshet-unusedmedia-wrap > .freshet-unusedmedia-section:first-child {
+    margin-top: 0;
+}
+
+/* Running prose gets a reading measure; the tables do not (freshet-D82). The
+   unboxing left the descriptive paragraphs running the full width of the admin
+   content column alongside the list tables, and a 1238px line of text is not
+   readable. The cap therefore lands on the paragraphs themselves rather than on
+   .freshet-unusedmedia-wrap or .freshet-unusedmedia-section, either of which
+   would narrow the tables again and undo freshet-D81.
+
+   p.description, not .description: the cap is for running prose only, and a
+   table cell is not that. (The file column used to render the filename in a
+   <span class="description"> inside a <td>, which is why the distinction was
+   drawn here; since freshet-320 it is core's own <p class="filename">, so the
+   rule has one less thing to dodge and the reason for it is unchanged.) 70ch is
+   a measure rather than a pixel width so it tracks the admin font. Scoped under
+   the wrap, so the attachment meta box - already a narrow column - is
+   untouched. */
+
+.freshet-unusedmedia-wrap p.description {
+    max-width: 70ch;
+}

@@ -4,7 +4,7 @@ Tags: unused media, unused images, media library, cleanup, attachments
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.2.1
+Stable tag: 1.3.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -36,7 +36,7 @@ A media library cleaner that shows its evidence: find unused images, delete or r
 
 * A **Usage column** in the Media Library (list mode) with a per-file "Check usage" action
 * A **Usage meta box** on the attachment screen showing the evidence: which post, which field, which option — with edit links
-* A **full-library scan** (Media → Usage) that batches through your library in the browser, resumable at any time
+* A **full-library scan** on the plugin's own **Unused Media** screen, directly below Media in the admin menu, that batches through your library in the browser and can be stopped and picked up later
 * **Safe deletion**: delete selected or all unused files, each one re-checked before it goes
 
 **Why the answer can be trusted**
@@ -47,23 +47,36 @@ Deleting media is destructive, so the scan is built to be wrong in one direction
 * **Every file is re-checked in the instant before it is deleted.** Anything that became used between the scan and your click is skipped rather than deleted, and the result tells you how many were skipped.
 * **A reference in the trash still counts.** A trashed post or comment can be restored, so the files it uses are kept.
 * **Files uploaded in the last 24 hours count as in use** — an editor may still be placing them — so a clean-up never removes work in progress.
-* **The evidence is shown, not summarised.** Every reference is listed with the object it lives in, the field or option it was found in, and a link to go and look: you can check the reasoning before you act on it.
+* **The evidence is shown, not summarised.** Each reference is listed with the object it lives in, the field or option it was found in, and a link to go and look, so you can check the reasoning before you act on it. A scan stores the first twenty per file, confirmed ones first, and the badge above the list carries the number of confirmed places found — so a heavily-referenced file says how many there are rather than letting twenty stand in for the total.
+* **The reading is dated, and the screen says so.** A scan reads the site's content once and then answers file by file out of that reading, which on a large library takes hours. So the unused list describes the site as the scan read it rather than as it is this second, and both tabs print the moment it was read. A reference written while the scan was still walking the library is picked up by the next scan — and in the meantime the re-check above is what refuses to delete the file.
 * **The blind spot is written down.** References kept inside a plugin's own custom database tables cannot be found by any query-based scanner, and the FAQ below names that limit rather than leaving you to discover it.
+
+**How it stays safe**
+
+The list above is what a reader can check for themselves. Underneath it are the parts that cost a file if they are wrong.
+
+* **A database that stops answering is never read as "no references".** A failed query raises instead of returning an empty result, so the file keeps whatever status it had and the screen says the check could not be made. The quiet short answer is the one that deletes a file somebody needs.
+* **The unit of work is the file on disk, not the library entry.** Several entries can point at one file — a duplicate import, a translation copy — and the file goes only once every entry standing on it is unused.
+* **Files that collide by name are held apart.** An upload whose own name is already size-shaped, or a scaled upload whose original is some other entry's file: both are cases WordPress unlinks by name without checking, including names that differ only in case. Those relations are read before anything is removed.
+* **The disk is read, not only the database.** A generated size that has dropped out of an attachment's stored metadata — after a theme change, an import, a thumbnail rebuild — is still one of that file's names, and a page can still be showing it. Backup sizes, the sources behind WebP and AVIF copies and encoded filenames are read the same way.
+* **Size files whose original is gone are listed and never deleted.** There is no library entry to corroborate them against, so they are reported for a person to judge rather than swept.
+* **The plugin's own bookkeeping is outside what it reads.** Its cursor, tallies and notes live in the same tables the scan searches, and a file was once reported used on the strength of the scan's own numbers.
+* **A delete run is bounded by the clock, and the re-check is not what gives way.** A deletion is one request with no second half, so it stops and hands the rest on while there is still time to tell you what it did — rather than being killed part-way having reported nothing. Nothing about the re-verification is skipped to fit a budget.
 
 The "Uploaded to" relation itself is shown as informational evidence but never counts as usage — that unreliable signal is exactly what this plugin replaces.
 
-Thoroughness is the point rather than speed: a first full scan of a large library can take hours rather than minutes. It runs in batches that stop before the PHP time limit and resume where they left off, so a scan always makes progress and never has to be started over.
+Thoroughness is the point rather than speed: a first full scan of a large library can take hours rather than minutes. It runs in batches that stop before the PHP time limit and resume where they left off, so a scan always makes progress and can be stopped and picked up later. Two limits on that are worth saying out loud. **Every scan is a full scan** — there is no incremental mode, so the second scan of a library costs what the first one did. And a scan left idle for more than a day reads the site's content again when you resume it, rather than finishing a listing onto a reading that old; that window is configurable, below.
 
 **Extensible**
 
-Site-specific detectors can be added via the `freshet_unusedmedia_detectors` filter, with a complete worked example — a detector reading a plugin's own custom table — in `README.md` in the plugin's source repository; `freshet_unusedmedia_is_used` gets the final say on any status; `freshet_unusedmedia_batch_size` and `freshet_unusedmedia_batch_seconds` tune scan batches; `freshet_unusedmedia_upload_grace` sets the recent-upload window in seconds (0 disables it).
+Site-specific detectors can be added via the `freshet_unusedmedia_detectors` filter, with a complete worked example — a detector reading a plugin's own custom table — in `README.md` in the plugin's source repository; `freshet_unusedmedia_is_used` gets the final say on any status; `freshet_unusedmedia_batch_size` and `freshet_unusedmedia_batch_seconds` tune scan batches; `freshet_unusedmedia_upload_grace` sets the recent-upload window in seconds (0 disables it); `freshet_unusedmedia_index_max_age` sets how long a scan's reading of the site may sit idle before resuming it reads the site again instead (default 24 hours, 0 disables the check).
 
 Part of the Freshet plugin suite. Full documentation: [freshet.studio/docs](https://freshet.studio/docs). Questions and problems: [freshet.studio/support](https://freshet.studio/support?utm_source=plugin&utm_medium=freshet-unused-media).
 
 == Installation ==
 
 1. Upload the plugin and activate it.
-2. Go to **Media → Usage** and run a full scan.
+2. Go to **Unused Media**, directly below Media in the admin menu, and run a full scan.
 3. Review the unused list, then delete selected files or all unused ones.
 
 Tip: add `define( 'MEDIA_TRASH', true );` to `wp-config.php` so deletions go to trash instead of being permanent.
@@ -94,7 +107,7 @@ Unattached only means the file was not uploaded from inside a post editor. WordP
 
 = How long does a full scan take? =
 
-Longer than a scanner that only looks at the "Uploaded to" column, because it looks everywhere else as well. On a large library the first full scan is measured in hours, not minutes. It runs in batches from the Media → Usage screen, each batch stops before the PHP time limit and the next one resumes from the last completed file, so the scan always makes progress and can be stopped and picked up later. Nothing runs on a schedule — a scan happens when you start one.
+Longer than a scanner that only looks at the "Uploaded to" column, because it looks everywhere else as well. On a large library the first full scan is measured in hours, not minutes. It runs in batches from the **Unused Media** screen, each batch stops before the PHP time limit and the next one resumes from the last completed file, so the scan always makes progress and can be stopped and picked up later. Every scan is a full scan: the stored results are what the lists are drawn from, but a new scan reads the whole library again rather than only what has changed since, so a second scan costs what the first one did. Nothing runs on a schedule — a scan happens when you start one.
 
 = Does a file referenced from the trash get deleted? =
 
@@ -106,7 +119,7 @@ A file whose every library entry is in the trash is listed in its own "In trash"
 
 = Does it work with multisite? =
 
-Per site, yes. Cross-site references (another site embedding this site's file URL) are not detected.
+Untested, so treat a network install as unsupported for now. There is no multisite-specific code here: each site's library would be scanned from that site's own admin, which is how it is expected to behave, but nothing in this plugin proves that and the uninstall routine clears the current site only. Cross-site references — another site of the network embedding this site's file URL, network-wide options included — are not detected in any case.
 
 = Does it delete anything by itself? =
 
@@ -127,6 +140,13 @@ Write to the address on [freshet.studio/support](https://freshet.studio/support?
 
 == Changelog ==
 
+= 1.3.0 =
+* **A file is no longer offered for deletion on the strength of an old reading.** A scan reads the site's content once and then answers file by file out of that reading, and nothing checked how old it was. A scan resumed days later finished onto it, a Reset left the previous scan's unused files ticked and ready, and **Check usage** and the check made in the instant before a delete answered out of it too — so a file put on a page since could read unused and go. Now a scan left idle for more than a day reads the site again when you resume it (`freshet_unusedmedia_index_max_age` sets the window), a file whose reading was reset shows what it is waiting for instead of a checkbox, a file uploaded after the reading was taken is asked of the site, **Check usage** and the re-check before a delete always ask the site itself, and both tabs say when the reading was taken.
+* **Sizes with no original are now figures you can act on, and a list you can keep.** The Scan tab used to print their filenames — a hundred from any one folder at most and five hundred in all, with no sizes and no way to tell whether a page still showed one. It now says how many there are, how much space they take, and how many are used in post content against how many are referenced nowhere, with an **Export CSV** button that downloads every one of them: its path, its size, whether post content uses it and which posts do. The content check runs once, at the end of a scan, and reads post content the same way the rest of the scan does.
+* **A thumbnail made from the scaled copy of a large image is no longer reported as having no original.** WordPress keeps a reduced `-scaled` copy beside a very large upload, and regenerating thumbnails can cut a second set of sizes from that copy. Those sizes were being listed as sizes with no original while their original sat in the same folder. On one long-lived library that was every file in the section.
+* **A zero no longer reads as "none exist" on a site whose uploads live elsewhere.** These files are found by reading the upload folders on this server, so a folder it cannot open contributes nothing. Where that happens the section now says *None found on this server's disk*, and that folders it could not read were not counted.
+* **A file WordPress could not delete from disk is now said, not passed over.** When the uploads folder is read-only, or an offload plugin refuses, WordPress removes the library entry and leaves the file where it was — and reports success either way. The delete notice now checks, and names those files as *left on disk*, so you know the space was not freed and where to look.
+
 = 1.2.1 =
 * **A scan that will not start now tells you what the server said.** The screen had one answer for every failure — *Request failed — try again* — whether the plugin knew exactly what had gone wrong or PHP had simply stopped. It had been writing an account of the refusal all along; the screen was fetching that account and throwing it away. You now read the plugin's own sentence instead, so a scan refused by the database says *The database did not answer one of the usage queries*, which is a thing you can act on. Resetting a scan was worse again — its button had nothing to report with at all and just looked broken when it was refused; it reports now too.
 * **A failure with nothing to say names its status and where the cause is written down.** When PHP stops outright — out of memory, out of time — there is no message to show, because nothing got as far as writing one. Rather than the generic line, the screen now says which status came back and that the reason is recorded in this site's PHP error log, which is the only place it exists. That is the whole diagnosis on a server whose log you can read, and on one you cannot it is exactly what to ask the host for.
@@ -136,7 +156,7 @@ Write to the address on [freshet.studio/support](https://freshet.studio/support?
 * **A file is no longer reported as used hundreds of times by numbers that are not its ID.** On a long-lived site a low ID — 7, 12, 40 — is a number the database is full of: a reading time in minutes, a form ID, a cache plugin's hourly quota, the eighth entry of a stored list. All of those were being read as uses of the file with that ID, and one image on a fifteen-year-old library reported 212 of them, six of which it called confirmed. Not one was real. Four things changed. Keys whose number is documented to be something else — Yoast's reading time and word count, W3 Total Cache's own records, form IDs, WordPress's own screen settings — are no longer read as IDs at all, while those same plugins' image fields still are. A number inside stored data is now checked where it actually sits, so the position of an item in a list is no longer mistaken for the list naming file 7. A custom field is only treated as pointing at a file if the field is one that holds files — an image, a file, a gallery, or a link to the media library — which it asks the field's own definition rather than assuming; a number field or a dropdown of form IDs is not. And the screens now separate the two kinds of evidence: the count beside **Used** is the number of **places** the file actually appears, and anything that merely might be the file is listed under it as a possible match, with its own count, worded so you can judge it. A file whose only evidence is possible is still **kept** — this plugin keeps anything it is unsure about — but it now says *Held back — nothing confirmed, only possible matches* rather than claiming a figure nobody could check. What can change is below the list of changes.
 * **The plugin's own notes are no longer read as uses of a file, and two scans of a library nobody touched now agree.** The scan keeps a few records of its own in the database — where it got to, how many references it has found, how many bytes it has reclaimed, which stray size files it noticed. Those records sat in the same place the scan searches, so the numbers in them were being read as file IDs and the filenames in them as filenames: a file could be reported as used on the strength of the scan's own tally. It also meant the tally was part of what was being counted, so the same library could come out one reference different depending on where a scan was interrupted and resumed — two scans of content nobody had changed, disagreeing. Everything this plugin writes is now out of what it reads, so the answer is the library's and the library's only.
 * **A first scan that used to take hours now takes minutes, and a large library that could not finish one now can.** The scan used to ask the database about every file in turn, so a library of a few thousand files meant a few thousand passes over the same content. It now reads the content once, writes down every reference it finds, and then answers per file from that. On the largest library this was measured against — 41,452 files — a scan that would have taken an estimated seventeen hours now finishes in about four minutes. Nothing about what counts as a reference has changed: files were checked against the old scan as well as the new one, and the two agree on every verdict and on every line of evidence.
-* **A scan no longer runs out of memory on a library with a very large number of distinct filenames.** On a 27,000-file library it needed around 199 MB where PHP was allowed 128 MB, and the request died. It now finishes the same library inside 105 MB. If a scan ever does hit a wall it falls back to the previous method rather than stopping, so the result is slower, never missing.
+* **A scan no longer runs out of memory on a library with a very large number of distinct filenames.** On a 27,000-file library it needed around 199 MB where PHP was allowed 128 MB, and the request died. It now finishes the same library inside 105 MB. A scan that still cannot get through stops and says what refused it, with its cursor where the last completed batch left it, so resuming carries on rather than starting again — and nothing is reported unused on the strength of a read that failed.
 * **A scan of a very large library now gets started at all.** A scan works in short bursts, so the browser is never left waiting on one long request — and every burst was rebuilding the library's whole list of resized copies from scratch before it read anything. On a 27,000-file library that rebuild alone took longer than a burst is allowed to last, so no burst ever reached the files and the screen ended on an error instead of a result. That list is now worked out once per folder rather than once per file: the same 263,632 names, in 0.67 seconds where it had been 16.33, and the old way and the new one were checked against each other on every single name before this shipped. The preparation for a library that size now finishes inside the first burst and the scan runs to the end. Nothing about what counts as a reference has changed, and the files on disk are still what the answer is read from.
 * **The screen has moved out of Media and now has its own entry in the admin menu**, directly below Media, called *Unused Media*. It was *Media → Usage*. Same screen, same tabs, same address on the page — only the way you get to it is different, so a bookmark to the old one will need taking again.
 * **A scan that finished in under a second says so**, instead of reporting "It took 0 seconds" and reading like a clock that had stopped.

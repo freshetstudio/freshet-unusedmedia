@@ -59,6 +59,8 @@ final class Assets
                 'deleteStopped' => __('Stopped before finishing: %1$s deleted, %2$s skipped (found in use on re-check), %3$s failed.', 'freshet-unused-media'),
                 /* translators: %s: number of files the run never reached */
                 'deleteNotReached' => __('Not reached: %s — untouched and still listed.', 'freshet-unused-media'),
+                /* translators: %s: number of files WordPress could not remove from disk */
+                'deleteLeftOnDisk' => __('Left on disk: %s — removed from the library, but WordPress could not delete the file, so no space was freed. Check that the uploads folder is writable, or what your offload plugin reports.', 'freshet-unused-media'),
             ],
         ];
 

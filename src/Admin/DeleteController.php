@@ -58,7 +58,7 @@ final class DeleteController
         // those files kept their stored verdict, so they are still listed and
         // ticking them again is the whole of the resume.
         $result = $ids === []
-            ? ['deleted' => 0, 'skipped' => 0, 'failed' => 0, 'remaining' => []]
+            ? ['deleted' => 0, 'skipped' => 0, 'failed' => 0, 'left_on_disk' => 0, 'remaining' => []]
             : $this->deleteVerified($ids, DeleteBudget::forRequest());
 
         wp_safe_redirect(add_query_arg([
@@ -68,6 +68,7 @@ final class DeleteController
             'freshet_unusedmedia_deleted' => $result['deleted'],
             'freshet_unusedmedia_skipped' => $result['skipped'],
             'freshet_unusedmedia_failed' => $result['failed'],
+            'freshet_unusedmedia_left_on_disk' => $result['left_on_disk'],
             'freshet_unusedmedia_remaining' => count($result['remaining']),
         ], admin_url('admin.php')));
 
@@ -111,6 +112,14 @@ final class DeleteController
      * The counts returned are files. So is the bookkeeping: each file is sized
      * once, before it goes, because afterwards there is nothing left to measure.
      *
+     * **Core returning a post is not proof the file left the disk**
+     * (freshet-436). wp_delete_attachment() hands the post back even when its
+     * unlink failed — a read-only uploads folder, an offload stream wrapper
+     * that refuses — so the measured path is looked at again afterwards, and a
+     * file still standing there is credited nothing. Its rows are gone, so it
+     * is not a failure either: it is counted in `deleted` and again in
+     * `left_on_disk`, which is what the screen says it in plain words from.
+     *
      * **A budget stops this between files, never inside one** (freshet-150).
      * The decision on a file — expand to its rows, ask who else claims them,
      * re-scan every one, then delete or not — is indivisible, so the loop's
@@ -122,13 +131,14 @@ final class DeleteController
      * rather than a partial one. With no budget passed, nothing stops.
      *
      * @param int[] $ids Representative attachment IDs, one per file.
-     * @return array{deleted: int, skipped: int, failed: int, remaining: int[]}
+     * @return array{deleted: int, skipped: int, failed: int, left_on_disk: int, remaining: int[]}
      */
     public function deleteVerified(array $ids, ?DeleteBudget $budget = null): array
     {
         $deleted = 0;
         $skipped = 0;
         $failed = 0;
+        $leftOnDisk = 0;
 
         $freedBytes = 0;
         $freedFiles = 0;
@@ -293,7 +303,19 @@ final class DeleteController
             // it once was 94% of what this request spent (freshet-155). Every
             // row still gets its own verdict below — the group shares the broad
             // reads, never the answer.
-            foreach ($this->scanner->scanGroup($rows) as $result) {
+            //
+            // **`useIndex: false` is what makes the sentence above true**
+            // (freshet-419). The reference index is as current as the pass that
+            // built it and nothing judges a *finished* one's age, so a library
+            // scanned a fortnight ago still reads `complete` — and seven of the
+            // ten detectors would answer this re-verification out of that
+            // fortnight-old reading rather than out of the site. "Fresh" has to
+            // mean the site, on the one check standing between a stale verdict
+            // and a file that cannot be brought back. The cost is the broad
+            // passes for one sibling group per file deleted, which is exactly
+            // what a delete over an incomplete index has always cost; the
+            // sharing those passes get is untouched.
+            foreach ($this->scanner->scanGroup($rows, useIndex: false) as $result) {
                 if ($result['status'] === Scanner::STATUS_ERROR) {
                     ++$unresolved;
                 } elseif ($result['status'] === ResultStore::STATUS_USED) {
@@ -328,6 +350,14 @@ final class DeleteController
             // rows point at it. Null means it could not be sized at all — an
             // offloaded file with no recorded size — which is unknown, not zero.
             $bytes = FileSize::bytes($id);
+
+            // The path too, and whether it was there: once the rows are gone
+            // the meta that names it is gone with them. A file that was never
+            // on this disk (offloaded, sized from metadata) has nothing here
+            // to look at afterwards.
+            $path = get_attached_file($id);
+            $wasOnDisk = is_string($path) && $path !== '' && file_exists($path);
+
             $removed = true;
 
             foreach ($rows as $rowId) {
@@ -362,6 +392,11 @@ final class DeleteController
                 // reclaimed would be the inflated number this figure exists to
                 // avoid.
                 ++$trashed;
+            } elseif ($wasOnDisk && self::stillThere($path)) {
+                // The rows went and the file did not: core could not unlink
+                // it. Not freed, so not credited — and said, rather than
+                // left for the reclaimed figure to quietly overstate.
+                ++$leftOnDisk;
             } elseif ($bytes === null) {
                 ++$freedUnsized;
             } else {
@@ -375,7 +410,25 @@ final class DeleteController
         // that finished would lose every short one.
         ReclaimedLedger::add($freedBytes, $freedFiles, $freedUnsized, $trashed);
 
-        return ['deleted' => $deleted, 'skipped' => $skipped, 'failed' => $failed, 'remaining' => $remaining];
+        return [
+            'deleted' => $deleted,
+            'skipped' => $skipped,
+            'failed' => $failed,
+            'left_on_disk' => $leftOnDisk,
+            'remaining' => $remaining,
+        ];
+    }
+
+    /**
+     * Whether a file is still on disk after core was asked to remove it. The
+     * stat cache is dropped first: it may hold the answer from before the
+     * delete, and that answer is the one this exists not to trust.
+     */
+    private static function stillThere(string $path): bool
+    {
+        clearstatcache(true, $path);
+
+        return file_exists($path);
     }
 
     /** @param int[] $rows */

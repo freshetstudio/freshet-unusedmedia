@@ -249,11 +249,13 @@ final class AttachmentContext
      * Split out so the disk half can be told from the metadata half by running
      * the same settling over the metadata names alone — which is what the
      * `false` call does, to the character, without a second read of the meta.
+     * Public because OrphanReferences searches content for a size file's name
+     * in the same forms, and a second copy of this list would drift.
      *
      * @param string[] $names
      * @return string[]
      */
-    private static function settle(array $names): array
+    public static function settle(array $names): array
     {
         $names = array_values(array_unique(array_filter($names)));
 

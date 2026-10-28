@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Freshet Unused Media
  * Description:       Determines whether media is still in use — ACF fields, page builders, options, galleries and raw URLs included — and safely deletes what isn't.
- * Version:           1.2.1
+ * Version:           1.3.0
  * Requires at least: 6.5
  * Requires PHP:      8.1
  * Author:            Freshet Studio
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('FRESHET_UNUSEDMEDIA_VERSION', '1.2.1');
+define('FRESHET_UNUSEDMEDIA_VERSION', '1.3.0');
 define('FRESHET_UNUSEDMEDIA_FILE', __FILE__);
 define('FRESHET_UNUSEDMEDIA_DIR', plugin_dir_path(__FILE__));
 define('FRESHET_UNUSEDMEDIA_URL', plugin_dir_url(__FILE__));
@@ -50,11 +50,13 @@ spl_autoload_register(static function (string $class): void {
     }
 });
 
-// The reference index's table (freshet-290). Activation is the right moment and
-// not the only one: a site updated rather than activated never fires this, so the
-// scan creates the table too if it finds it missing.
+// The reference index's table (freshet-290), and the table of size files with no
+// original (freshet-438). Activation is the right moment and not the only one: a
+// site updated rather than activated never fires this, so the scan creates both
+// tables too if it finds them missing.
 register_activation_hook(__FILE__, static function (): void {
     FreshetUnusedMedia\Scan\ReferenceIndex::install();
+    FreshetUnusedMedia\Scan\OrphanStore::install();
 });
 
 FreshetUnusedMedia\Plugin::boot();

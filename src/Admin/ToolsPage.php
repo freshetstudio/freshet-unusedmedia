@@ -10,11 +10,13 @@ use FreshetUnusedMedia\Scan\FileSize;
 use FreshetUnusedMedia\Scan\OrphanSizes;
 use FreshetUnusedMedia\Scan\PossibleOnly;
 use FreshetUnusedMedia\Scan\QueryFailed;
+use FreshetUnusedMedia\Scan\ReadingInForce;
 use FreshetUnusedMedia\Scan\ResultFilters;
 use FreshetUnusedMedia\Scan\ResultSort;
 use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\ScanProgress;
 use FreshetUnusedMedia\Scan\ScanState;
+use FreshetUnusedMedia\Scan\StaleIndex;
 use FreshetUnusedMedia\Scan\UploadGrace;
 
 defined('ABSPATH') || exit;
@@ -112,6 +114,7 @@ final class ToolsPage
         $skipped = absint($_GET['freshet_unusedmedia_skipped'] ?? 0);
         $failed = absint($_GET['freshet_unusedmedia_failed'] ?? 0);
         $remaining = absint($_GET['freshet_unusedmedia_remaining'] ?? 0);
+        $leftOnDisk = absint($_GET['freshet_unusedmedia_left_on_disk'] ?? 0);
         // phpcs:enable WordPress.Security.NonceVerification.Recommended
 
         // C3 (freshet-323): the same msgid the delete-all loop's own alert
@@ -137,9 +140,20 @@ final class ToolsPage
             );
         }
 
+        // Counted among the deleted, because their library entries are gone;
+        // said separately, because the file is not (freshet-436). Same msgid
+        // as the delete-all loop's alert ('deleteLeftOnDisk').
+        if ($leftOnDisk > 0) {
+            $message .= ' ' . sprintf(
+                /* translators: %s: number of files WordPress could not remove from disk */
+                __('Left on disk: %s — removed from the library, but WordPress could not delete the file, so no space was freed. Check that the uploads folder is writable, or what your offload plugin reports.', 'freshet-unused-media'),
+                number_format_i18n($leftOnDisk)
+            );
+        }
+
         printf(
             '<div class="notice %s is-dismissible frst-notice"><p>%s</p></div>',
-            $failed > 0 || $remaining > 0 ? 'notice-warning' : 'notice-success',
+            $failed > 0 || $remaining > 0 || $leftOnDisk > 0 ? 'notice-warning' : 'notice-success',
             esc_html($message)
         );
     }
@@ -467,6 +481,30 @@ final class ToolsPage
             : '';
     }
 
+    /**
+     * Which moment the verdicts on this screen describe (freshet-423).
+     *
+     * On both tabs, because both of them print verdicts: the Scan tab prints
+     * them as three figures, the Unused tab as a list with a delete control
+     * attached. Nothing said it on either, and on a library whose file phase
+     * runs for hours "Unused: 400" reads as a statement about now.
+     *
+     * Silent where nothing dates the reading — no index, or one written before
+     * `built_at` existed. A line that cannot name the moment is worse than no
+     * line: it tells a reader the answers are as-of something and leaves them
+     * with no way to say what.
+     */
+    private function renderReadingDate(): void
+    {
+        $readAt = StaleIndex::takenAt($this->state);
+
+        if ($readAt <= 0) {
+            return;
+        }
+
+        echo '<p class="description">' . esc_html(StaleIndex::asReadAt($readAt)) . '</p>';
+    }
+
     /** Said once, wherever a size filter changes which files can appear. */
     public function sizeFilterNote(): string
     {
@@ -616,6 +654,27 @@ final class ToolsPage
             echo '<p class="description">' . esc_html__('A scan is part-way through, so these figures are what is known so far.', 'freshet-unused-media') . '</p>';
         }
 
+        // And which moment they are figures about, which is a different
+        // sentence from the one above it: that one is about how much of the
+        // library has been answered for, this one about when the site those
+        // answers describe was read (freshet-423).
+        $this->renderReadingDate();
+
+        // freshet-413: the scan running right now may be one the plugin started
+        // itself, because what the last one was resuming onto was a reading of
+        // the site too old to answer a deletion from. Said here rather than
+        // only in the progress line the browser gets, which is replaced by the
+        // next batch's a second later — and said for as long as that scan is
+        // the one in progress, which is exactly how long the figures above are
+        // the ones it has thrown away and rebuilt. Nothing stores it: the
+        // cursor carries why it exists, so it is forgotten with the run.
+        if ($running !== null && $running['stale_from'] !== 0) {
+            printf(
+                '<div class="notice notice-warning inline frst-notice"><p>%s</p></div>',
+                esc_html(StaleIndex::statement($running['stale_from']))
+            );
+        }
+
         if ($last !== null) {
             $note = sprintf(
                 // Attachments, not files: the scan walks rows, and several rows
@@ -630,7 +689,17 @@ final class ToolsPage
 
             $changedAt = (int) get_option('freshet_unusedmedia_content_changed_at', 0);
 
-            if ($changedAt > $last['finished_at']) {
+            // **Against the reading, not against the finish** (freshet-423).
+            // The verdicts answer out of the content read at phase one, and the
+            // file phase can run for hours after it — so a post saved while the
+            // scan was still walking the library changed the site the answers
+            // describe, and comparing it to `finished_at` called that fresh. The
+            // earlier of the two dates is the one the answers stand on; the
+            // finish is only when the last of them was written down.
+            $readAt = StaleIndex::takenAt($this->state);
+            $standsOn = $readAt > 0 ? min($readAt, $last['finished_at']) : $last['finished_at'];
+
+            if ($changedAt > $standsOn) {
                 $note .= ' ' . __('Content has changed since — this may be stale.', 'freshet-unused-media');
             }
 
@@ -764,19 +833,46 @@ final class ToolsPage
      * Generated size files the last scan found with no original behind them —
      * no file at the original's own path, and no library entry naming it.
      *
-     * Deliberately its own section rather than a row in the unused list. Those
-     * files belong to no attachment, so they have no row, no group, no verdict
-     * and no bytes in the space figure; presenting them as unused *files* would
-     * put a number on screen that the delete path cannot act on and the totals
-     * do not include. Nothing here is deletable — the listing has no attachment
-     * row to corroborate it against, and being wrong about a file is worse than
-     * making somebody remove it themselves.
+     * Its own section rather than a row in the unused list, still: those files
+     * belong to no attachment, so they have no row, no group, no verdict and no
+     * bytes in the space figure, and folding them into the unused files would
+     * put a number on screen the totals above do not include.
+     *
+     * Figures, not filenames (freshet-D371). A production library listed 465 of
+     * them, and a page of 465 paths is a list nobody reads and nobody can act on
+     * from here; what a reader acts on is how many, how large, and whether a page
+     * still shows any of them. The list itself is the CSV, every row of it.
+     *
+     * Whether a page shows one is read from post content only, which is what
+     * the sentence says rather than "anywhere" — see OrphanReferences. There is
+     * no delete on this screen. Where a delete exists, it does not act on these
+     * stored answers: it re-runs the absence tests and asks post content again,
+     * for each file, at the moment it deletes (OrphanSizes::recheck(),
+     * OrphanReferences::postsNaming()), and a file that fails either is kept.
+     *
+     * A zero means "none on this server's disk" and nothing more: the files are
+     * found by listing upload folders, so a folder that could not be read —
+     * offloaded, or not on this server — contributes none, and the section says
+     * so rather than printing a reassuring zero (freshet-406).
      */
     private function renderOrphanSizes(): void
     {
-        $orphans = OrphanSizes::read();
+        try {
+            $orphans = OrphanSizes::read();
+        } catch (QueryFailed) {
+            $this->renderListingFailure(__('Sizes with no original', 'freshet-unused-media'));
 
-        if ($orphans['count'] === 0) {
+            return;
+        }
+
+        // The same tally the scan section reads, and the running figures win
+        // over the finished ones for the same reason they do there.
+        $running = $this->state->current();
+        $last = $this->state->lastScan();
+        $dirsUnread = (int) ($running['dirs_unread'] ?? ($last['dirs_unread'] ?? 0));
+        $dirsRead = (int) ($running['dirs_read'] ?? ($last['dirs_read'] ?? 0));
+
+        if ($orphans['count'] === 0 && $dirsUnread === 0) {
             return;
         }
 
@@ -789,28 +885,52 @@ final class ToolsPage
                 number_format_i18n($orphans['count'])
             ))
         );
-        echo '<p class="description">' . esc_html__('Thumbnail files whose original upload is gone: nothing sits at the original\'s own path and no library entry names it. They are not counted as unused, and this plugin does not delete them.', 'freshet-unused-media') . '</p>';
+        echo '<p class="description">' . esc_html__('Thumbnail files whose original upload is gone: nothing sits at the original\'s own path and no library entry names it. They are not counted as unused.', 'freshet-unused-media') . '</p>';
 
-        echo '<ul class="freshet-unusedmedia-orphans">';
-
-        foreach ($orphans['files'] as $file) {
-            echo '<li><code>' . esc_html($file) . '</code></li>';
-        }
-
-        echo '</ul>';
-
-        if ($orphans['truncated']) {
+        if ($orphans['count'] === 0) {
+            echo '<p>' . esc_html__('None found on this server\'s disk.', 'freshet-unused-media') . '</p>';
+        } else {
             printf(
-                '<p class="description">%s</p>',
+                '<p class="freshet-unusedmedia-orphan-figures">%s<br>%s</p>',
                 esc_html(sprintf(
-                    // The same sentence the listings use for "showing N of M",
-                    // and deliberately the same msgid: one phrase, one string.
-                    /* translators: 1: number of files shown, 2: number of files in total */
-                    __('%1$s of %2$s', 'freshet-unused-media'),
-                    number_format_i18n(count($orphans['files'])),
-                    number_format_i18n($orphans['count'])
+                    /* translators: 1: number of files, 2: their combined size, e.g. "12 MB" */
+                    _n('%1$s file, %2$s in total.', '%1$s files, %2$s in total.', $orphans['count'], 'freshet-unused-media'),
+                    number_format_i18n($orphans['count']),
+                    size_format($orphans['bytes'])
+                )),
+                esc_html(sprintf(
+                    /* translators: 1: number of files post content uses, 2: number of files nothing uses */
+                    __('Used in post content: %1$s. Referenced nowhere: %2$s.', 'freshet-unused-media'),
+                    number_format_i18n($orphans['referenced']),
+                    number_format_i18n($orphans['unreferenced'])
                 ))
             );
+
+            if ($orphans['unchecked'] > 0) {
+                printf(
+                    '<p class="description">%s</p>',
+                    esc_html(sprintf(
+                        /* translators: %s: number of files */
+                        __('%s not checked against post content yet — the scan does that once it has read every file.', 'freshet-unused-media'),
+                        number_format_i18n($orphans['unchecked'])
+                    ))
+                );
+            }
+        }
+
+        // One line, and only where it applies: the count above cannot see a
+        // folder this server could not open.
+        if ($dirsUnread > 0) {
+            printf(
+                '<p class="description">%s</p>',
+                esc_html($dirsRead === 0
+                    ? __('None of the upload folders could be read from this server, so sizes with no original stored elsewhere (an offload or CDN service) are not counted here.', 'freshet-unused-media')
+                    : __('Some upload folders could not be read from this server, so sizes with no original stored there (an offload or CDN service) are not counted here.', 'freshet-unused-media'))
+            );
+        }
+
+        if ($orphans['count'] > 0) {
+            OrphanExport::renderButton();
         }
 
         echo '</div>';
@@ -849,6 +969,14 @@ final class ToolsPage
             return;
         }
 
+        // Which verdicts on this page still stand on the reading of the site
+        // that is in force (freshet-415). Zero — no reading discarded, or a
+        // scan finished since the one that was — is every page load but the
+        // ones between a Reset and the end of the scan after it, and it is the
+        // fast path through every check below: the listing is then rendered
+        // exactly as it was before this existed.
+        $watermark = ReadingInForce::watermark($this->state);
+
         echo '<div class="freshet-unusedmedia-section">';
 
         // freshet-D75 (8): the heading row carries the destructive control on
@@ -865,7 +993,14 @@ final class ToolsPage
         ) . '</h2>';
         // phpcs:enable WordPress.Security.EscapeOutput.OutputNotEscaped
 
-        if ($list['total'] > 0) {
+        // Withheld while a replaced reading is still the one some of these
+        // verdicts were computed from: this button names a *set* and a count,
+        // and the set it would walk is part answers from a reading nothing
+        // stands behind any more (freshet-415). The per-file checkboxes below
+        // are the finer instrument — they come back one by one as the scan
+        // re-judges each file — and this one is back, unchanged, the moment a
+        // scan has read the library to the end.
+        if ($list['total'] > 0 && $watermark === 0) {
             $this->renderDeleteAllButton($filters, $list['total']);
         }
 
@@ -875,8 +1010,27 @@ final class ToolsPage
         // page. A delete-all is minutes long and the only other thing it changes
         // in view is the button greying out, so a bar a full page of rows below
         // it is a screen that reads as having stopped responding (freshet-159).
-        if ($list['total'] > 0) {
+        // It is that run's own bar, so it goes where the button goes.
+        if ($list['total'] > 0 && $watermark === 0) {
             $this->renderProgress();
+        }
+
+        // Which moment this list describes (freshet-423). Above the rows rather
+        // than in them: it is one fact about every verdict in the table, and
+        // the one the heading's count is also an answer as of. Printed on an
+        // empty list too — "nothing is unused" is as much an as-of claim as a
+        // page of files is.
+        $this->renderReadingDate();
+
+        // The sentence behind every "Awaiting re-check" below, said once here
+        // rather than fifty times down the table — and only where there is a
+        // listing for it to be about: an empty list has its own line, and
+        // explaining a withheld offer over nothing offered is noise.
+        if ($list['total'] > 0 && $watermark > 0) {
+            printf(
+                '<div class="notice notice-warning inline frst-notice"><p>%s</p></div>',
+                esc_html(ReadingInForce::statement())
+            );
         }
 
         if (!(defined('MEDIA_TRASH') && MEDIA_TRASH)) {
@@ -916,6 +1070,15 @@ final class ToolsPage
         // filter can narrow — sizeFilterNote() is public so each of them appends
         // the same sentence. Neither is on the Scan tab any more (freshet-D287).
 
+        // Primed once for the page rather than looked up per row, the way the
+        // In-trash listing does it: each row below asks how old the oldest
+        // verdict on its file is, which is a sibling lookup. Only where there
+        // is something to ask — an unprimed page costs nothing when every
+        // verdict stands on the reading in force.
+        if ($watermark > 0) {
+            FileGroups::prime($list['ids']);
+        }
+
         echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" id="freshet-unusedmedia-delete-form">';
         wp_nonce_field('freshet_unusedmedia_delete_selected');
         echo '<input type="hidden" name="action" value="freshet_unusedmedia_delete_selected">';
@@ -936,7 +1099,7 @@ final class ToolsPage
         echo '</tr></thead><tbody>';
 
         foreach ($list['ids'] as $id) {
-            $this->renderUnusedRow($id);
+            $this->renderUnusedRow($id, $watermark);
         }
 
         echo '</tbody></table>';
@@ -1074,12 +1237,31 @@ final class ToolsPage
         );
     }
 
-    private function renderUnusedRow(int $id): void
+    /**
+     * One unused file, and the one thing that can keep it from being offered:
+     * a verdict computed from a reading of the site that has since been
+     * replaced (freshet-415). The row is drawn either way — nothing is hidden
+     * and no count moves — and where the box is not drawn the Scanned column
+     * says what the row is waiting for.
+     *
+     * `$watermark` is 0 on all but the page loads between a Reset and the end
+     * of the scan after it, and ReadingInForce::holds() is then a return
+     * statement: every row keeps its box.
+     */
+    private function renderUnusedRow(int $id, int $watermark = 0): void
     {
+        $offered = ReadingInForce::holds($id, $this->store, $watermark);
+
         echo '<tr>';
-        printf('<th scope="row" class="check-column"><input type="checkbox" name="attachments[]" value="%d"></th>', (int) $id);
+
+        if ($offered) {
+            printf('<th scope="row" class="check-column"><input type="checkbox" name="attachments[]" value="%d"></th>', (int) $id);
+        } else {
+            echo '<th scope="row" class="check-column"></th>';
+        }
+
         $this->renderFileCells($id);
-        $this->renderScannedCell($id);
+        $this->renderScannedCell($id, $offered ? null : ReadingInForce::label());
         echo '</tr>';
     }
 
@@ -1169,8 +1351,13 @@ final class ToolsPage
 
         echo '</tr></thead><tbody>';
 
+        // The same reading-in-force question the unused listing asks, and it
+        // matters more here: a deletion from this section is permanent, there
+        // being no trash left for these files to go to (freshet-415).
+        $watermark = ReadingInForce::watermark($this->state);
+
         foreach ($list['ids'] as $id) {
-            $this->renderTrashRow($id);
+            $this->renderTrashRow($id, $watermark);
         }
 
         echo '</tbody></table>';
@@ -1186,11 +1373,13 @@ final class ToolsPage
     /**
      * One binned file: a checkbox only where every row was scanned unused,
      * and the reason in words where not — the held sentence for a file
-     * something still refers to (freshet-D95), and "Not scanned" for one
-     * nobody has judged. The verdict is the file's, read through the same
+     * something still refers to (freshet-D95), "Not scanned" for one nobody
+     * has judged, and "Awaiting re-check" for one judged from a reading of the
+     * site that has since been replaced (freshet-415). The verdict is the
+     * file's, read through the same
      * bridge the Media Library badge uses, never the representative row's own.
      */
-    private function renderTrashRow(int $id): void
+    private function renderTrashRow(int $id, int $watermark = 0): void
     {
         $unavailable = false;
 
@@ -1206,6 +1395,13 @@ final class ToolsPage
         // A file restored to the library between the read and the render is
         // not in this set any more, and is not offered from it.
         $offered = $file['set'] === FileGroups::SET_TRASH && $file['status'] === ResultStore::STATUS_UNUSED;
+
+        // Nor is one whose verdict was computed from a reading of the site that
+        // has since been replaced (freshet-415). Separate from `$offered`
+        // because the row says something different about it: the file is unused
+        // as far as anyone knows, it is the knowing that is out of date.
+        $awaiting = $offered && !ReadingInForce::holds($id, $this->store, $watermark);
+        $offered = $offered && !$awaiting;
 
         echo '<tr>';
 
@@ -1224,6 +1420,8 @@ final class ToolsPage
             // an edit to the pattern reaches all five (freshet-D95). Which of
             // them applies here is this listing's call, not the row's.
             echo '<td>' . esc_html(FileGroups::heldBackReason(FileGroups::HELD_REFERENCED)) . '</td>';
+        } elseif ($awaiting) {
+            echo '<td>' . esc_html(ReadingInForce::label()) . '</td>';
         } elseif ($offered) {
             echo '<td>' . esc_html__('Unused', 'freshet-unused-media') . '</td>';
         } else {
@@ -1426,7 +1624,18 @@ final class ToolsPage
         echo '<td>' . esc_html((string) $size) . '</td>';
     }
 
-    public function renderScannedCell(int $id): void
+    /**
+     * When this row was last judged — and, under it, what the row is waiting
+     * for where something is (`$note`).
+     *
+     * The note is a second line in this cell rather than a column of its own
+     * because it is about the date beside it: the verdict is that old, and that
+     * is why it is not being offered (ReadingInForce). The Unused listing has
+     * no Status column to put it in, and adding one for a state that is absent
+     * from every other page load would move the table about under a person who
+     * had nothing to do with it.
+     */
+    public function renderScannedCell(int $id, ?string $note = null): void
     {
         $scannedAt = $this->store->scannedAt($id);
 
@@ -1436,7 +1645,13 @@ final class ToolsPage
                 __('%s ago', 'freshet-unused-media'),
                 human_time_diff($scannedAt)
             )
-            : '—') . '</td>';
+            : '—');
+
+        if ($note !== null) {
+            echo '<br><span class="description">' . esc_html($note) . '</span>';
+        }
+
+        echo '</td>';
     }
 
 

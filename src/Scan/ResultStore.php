@@ -151,6 +151,29 @@ final class ResultStore
     }
 
     /**
+     * Drop every stored verdict in the library.
+     *
+     * What a reading of the site going stale takes with it (StaleIndex): the
+     * verdicts were computed from that reading and do not outlive it. Three
+     * deletes rather than a walk of the library, because the library is the
+     * thing that does not fit in a request.
+     *
+     * `delete_metadata()` with `$delete_all` rather than the one `DELETE`
+     * uninstall.php issues, and the difference is the object cache. A raw
+     * statement leaves every one of those rows in `post_meta` for the rest of
+     * the request — and on a site with a persistent cache, for longer — so the
+     * scan that starts next would read the verdicts this is deleting. Core's
+     * function runs the same statement and then invalidates what it removed.
+     * Uninstall can use the raw one: nothing reads afterwards.
+     */
+    public function forgetAll(): void
+    {
+        foreach ([self::META_STATUS, self::META_REFS, self::META_SCANNED_AT] as $key) {
+            delete_metadata('post', 0, $key, '', true);
+        }
+    }
+
+    /**
      * How many *files* the library holds, and what the last scan made of them.
      *
      * Files, not attachment rows: several rows can point at one path, and the

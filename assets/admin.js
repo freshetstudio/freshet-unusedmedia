@@ -247,7 +247,7 @@
     // ------------------------------------------------------ delete all
 
     var deleteAllButton = document.getElementById('freshet-unusedmedia-delete-all');
-    var totals = { deleted: 0, skipped: 0, failed: 0 };
+    var totals = { deleted: 0, skipped: 0, failed: 0, leftOnDisk: 0 };
 
     // The filter the button was labelled with, and the cursor the server hands
     // back. Both travel with every batch: the count in the button described a
@@ -294,6 +294,12 @@
             message += ' ' + config.i18n.deleteNotReached.replace('%s', String(left));
         }
 
+        // Already among the deleted — their library entries are gone — and
+        // named apart, because their files are not (freshet-436).
+        if (totals.leftOnDisk > 0) {
+            message += ' ' + config.i18n.deleteLeftOnDisk.replace('%s', String(totals.leftOnDisk));
+        }
+
         return message;
     }
 
@@ -320,6 +326,7 @@
             totals.deleted += data.deleted;
             totals.skipped += data.skipped;
             totals.failed += data.failed;
+            totals.leftOnDisk += data.left_on_disk || 0;
 
             // Before the finished branch, so the last batch moves the number
             // too — the loop is not the only thing on the screen that changed.
@@ -354,7 +361,7 @@
                 return;
             }
 
-            totals = { deleted: 0, skipped: 0, failed: 0 };
+            totals = { deleted: 0, skipped: 0, failed: 0, leftOnDisk: 0 };
             deleteFilters = deleteAllButton.getAttribute('data-filters') || '';
             deleteCursor = 0;
             deleteTotal = parseInt(count, 10) || 0;

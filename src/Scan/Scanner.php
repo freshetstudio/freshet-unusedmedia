@@ -97,10 +97,12 @@ final class Scanner
      *
      * @param int[] $rowIds Attachment rows standing on one file — every one of
      *                      them, or the ones this caller holds.
+     * @param bool  $useIndex Whether the reference index may answer for the
+     *                        seven detectors it holds; see scan().
      * @return array<int, array{status: string, refs: Reference[], error?: string}>
      *         Keyed by row id, in the order given.
      */
-    public function scanGroup(array $rowIds): array
+    public function scanGroup(array $rowIds, bool $useIndex = true): array
     {
         SharedReads::open($rowIds);
 
@@ -108,7 +110,7 @@ final class Scanner
             $results = [];
 
             foreach ($rowIds as $rowId) {
-                $results[(int) $rowId] = $this->scan((int) $rowId);
+                $results[(int) $rowId] = $this->scan((int) $rowId, $useIndex);
             }
 
             return $results;
@@ -140,9 +142,13 @@ final class Scanner
      * scan that has since failed; with the meta gone the file reads as not yet
      * scanned, which puts it in neither list and in no delete batch.
      *
+     * @param bool $useIndex Whether the reference index may answer for the seven
+     *        detectors it holds. True — the default, and every scan path — reads
+     *        the index on a library whose index is complete. False is the delete
+     *        path: see the note above it.
      * @return array{status: string, refs: Reference[], error?: string}
      */
-    public function scan(int $attachmentId): array
+    public function scan(int $attachmentId, bool $useIndex = true): array
     {
         // A failure of ours has to still be there when we look for it, so the
         // slate is wiped once, here — never between two of this scan's own
@@ -177,7 +183,30 @@ final class Scanner
         // fallback below is the scan this plugin has always run — same
         // detectors, same verifiers — so an incomplete index costs time and
         // never an answer.
-        $indexed = ($this->state ?? new ScanState())->indexIsComplete();
+        //
+        // **And whether this caller will accept that answer at all.** A scan
+        // reads the index; a re-verification about to delete the file does not,
+        // because a complete index is only as current as the pass that built it
+        // and nothing dates a *finished* one (StaleIndex::isStale() answers
+        // false once the cursor is gone, which is what finishing it does). A
+        // library scanned a fortnight ago still reads `complete`, so seven of
+        // the ten detectors would answer a deletion out of a fortnight-old
+        // reading — and a post written since that names the file would be
+        // invisible to the one check standing between a stale verdict and a
+        // file that is gone (freshet-419). $useIndex is how that caller says so.
+        //
+        // **And whether the reading covers this file at all** (freshet-423).
+        // The reading's id universe is the library as it stood when phase one
+        // read it, and the file phase runs for hours after that on a large
+        // library — so a file uploaded meanwhile is one the reading holds
+        // nothing for, and seven of the ten detectors would read that silence
+        // as "no references found". Those files are asked live, which is the
+        // same fallback an incomplete index already takes; StaleIndex::covers()
+        // carries the rest of it.
+        $state = $this->state ?? new ScanState();
+        $indexed = $useIndex
+            && $state->indexIsComplete()
+            && StaleIndex::covers($attachmentId, $state);
 
         try {
             foreach ($detectors as $detector) {

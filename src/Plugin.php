@@ -8,6 +8,7 @@ use FreshetUnusedMedia\Admin\Ajax;
 use FreshetUnusedMedia\Admin\AttachmentMetaBox;
 use FreshetUnusedMedia\Admin\DeleteController;
 use FreshetUnusedMedia\Admin\MediaColumn;
+use FreshetUnusedMedia\Admin\OrphanExport;
 use FreshetUnusedMedia\Admin\OwnScreenNotices;
 use FreshetUnusedMedia\Admin\ToolsPage;
 use FreshetUnusedMedia\Scan\ResultStore;
@@ -31,6 +32,7 @@ final class Plugin
         if (is_admin()) {
             (new ToolsPage($store, $state))->hooks();
             (new MediaColumn($store))->hooks();
+            (new OrphanExport())->hooks();
             $metaBox->hooks();
             (new Ajax($scanner, $store, $state, $deleter, $metaBox))->hooks();
             $deleter->hooks();

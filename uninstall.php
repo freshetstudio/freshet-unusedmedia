@@ -16,6 +16,7 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
 delete_option('freshet_unusedmedia_scan');
 delete_option('freshet_unusedmedia_index');
 delete_option('freshet_unusedmedia_last_scan');
+delete_option('freshet_unusedmedia_reading_dropped');
 delete_option('freshet_unusedmedia_content_changed_at');
 delete_option('freshet_unusedmedia_reclaimed');
 delete_option('freshet_unusedmedia_orphan_sizes');
@@ -46,3 +47,8 @@ $wpdb->query($wpdb->prepare(
 // than read through the class: nothing loads the autoloader at uninstall.
 // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared -- DDL takes no placeholders; the name is built from $wpdb->prefix.
 $wpdb->query('DROP TABLE IF EXISTS ' . $wpdb->prefix . 'freshet_unusedmedia_refs');
+
+// The size files with no original the last scan found (freshet-438) — the same
+// kind of table, holding nothing a scan would not find again.
+// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared -- DDL takes no placeholders; the name is built from $wpdb->prefix.
+$wpdb->query('DROP TABLE IF EXISTS ' . $wpdb->prefix . 'freshet_unusedmedia_orphans');

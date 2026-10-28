@@ -9,7 +9,9 @@ use FreshetUnusedMedia\Scan\DeleteBudget;
 use FreshetUnusedMedia\Scan\DetectorTiming;
 use FreshetUnusedMedia\Scan\FileClaims;
 use FreshetUnusedMedia\Scan\FileGroups;
+use FreshetUnusedMedia\Scan\OrphanReferences;
 use FreshetUnusedMedia\Scan\OrphanSizes;
+use FreshetUnusedMedia\Scan\OrphanStore;
 use FreshetUnusedMedia\Scan\QueryFailed;
 use FreshetUnusedMedia\Scan\ReferenceIndex;
 use FreshetUnusedMedia\Scan\ReferenceIndexer;
@@ -18,7 +20,9 @@ use FreshetUnusedMedia\Scan\ResultStore;
 use FreshetUnusedMedia\Scan\ScanProgress;
 use FreshetUnusedMedia\Scan\Scanner;
 use FreshetUnusedMedia\Scan\ScanState;
+use FreshetUnusedMedia\Scan\ScanSuperseded;
 use FreshetUnusedMedia\Scan\SizeSiblings;
+use FreshetUnusedMedia\Scan\StaleIndex;
 
 defined('ABSPATH') || exit;
 
@@ -46,7 +50,25 @@ final class Ajax
         add_action('admin_post_freshet_unusedmedia_check_single', [$this, 'checkSingleFallback']);
     }
 
-    /** Single on-demand check (row action, meta box rescan). */
+    /**
+     * Single on-demand check (row action, meta box rescan).
+     *
+     * **`useIndex: false`, for the same reason the delete path refuses it**
+     * (freshet-421, after freshet-419). This is the button the documentation
+     * points people at when they want to confirm one file before deleting it,
+     * and the word on it is "Check usage" — a promise about the site now, not
+     * about the pass that read it. Nothing dates a *finished* reference index
+     * (StaleIndex::isStale() answers false once the cursor is gone, which is
+     * what finishing leaves behind), so a library scanned a fortnight ago still
+     * reads `complete` and seven of the ten detectors would answer this click
+     * out of that fortnight-old reading. An image put on a page yesterday would
+     * read "Unused" today, under a button that had just been pressed to ask.
+     *
+     * The cost is the broad passes for one attachment, which is what this
+     * endpoint cost on every library before there was an index at all, and it
+     * happens because someone asked for it. The library scan keeps the index —
+     * see scanBatch() — because one pass over the corpus is what it bought.
+     */
     public function check(): void
     {
         check_ajax_referer('freshet_unusedmedia_ajax');
@@ -61,7 +83,7 @@ final class Ajax
             wp_send_json_error(['message' => __('Unknown attachment.', 'freshet-unused-media')], 400);
         }
 
-        $result = $this->scanner->scan($id);
+        $result = $this->scanner->scan($id, useIndex: false);
 
         // A check that could not read the database has not found this file
         // unused — it has found nothing. Answering with a verdict-shaped reply
@@ -80,7 +102,13 @@ final class Ajax
         ]);
     }
 
-    /** No-JS fallback for the media row action: scan, then bounce back. */
+    /**
+     * No-JS fallback for the media row action: scan, then bounce back.
+     *
+     * It is the same button as check() for someone with JavaScript off, so it
+     * asks the site rather than the index for the same reason — see the note
+     * above check(). The two must not disagree about how current the answer is.
+     */
     public function checkSingleFallback(): void
     {
         if (!current_user_can('upload_files')) {
@@ -92,7 +120,7 @@ final class Ajax
         $id = absint($_GET['attachment'] ?? 0);
 
         if ($id !== 0 && get_post_type($id) === 'attachment') {
-            $this->scanner->scan($id);
+            $this->scanner->scan($id, useIndex: false);
         }
 
         wp_safe_redirect(wp_get_referer() ?: admin_url('upload.php'));
@@ -112,6 +140,21 @@ final class Ajax
 
         $state = $this->state->current();
 
+        // What a resume stands on, asked before it is resumed. A scan is a
+        // reading of the site taken at a moment, and this one may have been
+        // taken a fortnight ago with the tab left open — in which case
+        // finishing it would list files as unused on evidence that old
+        // (freshet-413). The reading is taken again instead and the verdicts
+        // standing on it go with it; `$state` is left null so the block below
+        // sizes and starts the fresh scan exactly as it does for a scan
+        // somebody asked for.
+        $staleFrom = 0;
+
+        if ($state !== null && StaleIndex::isStale($this->state)) {
+            $staleFrom = StaleIndex::rebuild($this->state, $this->store);
+            $state = null;
+        }
+
         // Both of these are guarded for the same reason the detectors are: a
         // failed count sizes the scan at zero and a failed cursor query comes
         // back as an empty batch, which this method reads as "finished". A
@@ -121,7 +164,6 @@ final class Ajax
             if ($state === null) {
                 // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- simple count to size the scan.
                 $total = (int) Db::value('library size', $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'attachment'"));
-                $state = $this->state->start($total);
 
                 // A fresh scan describes the library as it is now, so last time's
                 // orphaned sizes go with the old results rather than outliving them.
@@ -130,7 +172,18 @@ final class Ajax
                 // And so does the reference index: it is a reading of the site's
                 // content at a moment, and this scan is a reading of now
                 // (freshet-290).
+                //
+                // **Before the run starts, not after it.** resetIndex() dates
+                // the discard, finish() compares that date against the run's
+                // `started_at` to decide whether this run is entitled to
+                // release the verdicts it is holding back (freshet-422), and a
+                // mark dated one second *after* the run it belongs to would
+                // hold the whole library back for ever. Two statements whose
+                // order carries a meaning, so they are in the order that means
+                // what is true: the reading went, and then this run began.
                 $this->state->resetIndex();
+
+                $state = $this->state->start($total, $staleFrom);
             }
 
             // Phase one, and it comes before the first attachment is asked
@@ -161,7 +214,8 @@ final class Ajax
                         'total' => $total,
                         'percent' => ScanProgress::percent($progress['total_rows'], $progress['corpus_rows']),
                         'errors' => $state['errors'],
-                        'label' => ScanProgress::indexLabel($progress['total_rows'], $progress['total_entries'], $progress['corpus_rows']),
+                        'label' => $this->rebuiltStatement($staleFrom)
+                            . ScanProgress::indexLabel($progress['total_rows'], $progress['total_entries'], $progress['corpus_rows']),
                         'resume' => ScanProgress::resumeLabel($state['done'], $total),
                     ]);
                 }
@@ -175,12 +229,44 @@ final class Ajax
                 $state['cursor'],
                 $batchSize
             ))));
+        } catch (ScanSuperseded) {
+            // Somebody else is building the index and this request has been
+            // writing into their pass. Nothing is wrong with the scan that is
+            // still running — it is the one with the answers — so this is a
+            // 409 and a sentence, and the loop in the browser stops on it
+            // (freshet-424; the JS surfaces the body of any refusal).
+            wp_send_json_error(['message' => ScanSuperseded::userMessage()], 409);
         } catch (QueryFailed) {
             wp_send_json_error(['message' => QueryFailed::userMessage()], 500);
         }
 
         if ($ids === []) {
             try {
+                // The file pass is over, so every size with no original has
+                // been found, and one pass over the content now says which of
+                // them a page still names (OrphanReferences). Its own replies
+                // until it is done, like phase one: on a large library it may
+                // not fit one request, and the run is not finished until it is.
+                if (!OrphanReferences::advance($this->batchBudget())) {
+                    $orphans = OrphanStore::summary();
+                    $checked = $orphans['count'] - $orphans['unchecked'];
+
+                    wp_send_json_success([
+                        'finished' => false,
+                        'done' => $state['done'],
+                        'total' => $state['total'],
+                        'percent' => ScanProgress::percent($checked, $orphans['count']),
+                        'errors' => $state['errors'],
+                        'label' => sprintf(
+                            /* translators: 1: number of size files checked so far, 2: number of size files in total */
+                            __('Checking sizes with no original against post content: %1$s of %2$s.', 'freshet-unused-media'),
+                            number_format_i18n($checked),
+                            number_format_i18n($orphans['count'])
+                        ),
+                        'resume' => ScanProgress::resumeLabel($state['done'], $state['total']),
+                    ]);
+                }
+
                 $unused = $this->store->counts()['unused'];
             } catch (QueryFailed) {
                 // The scan itself did finish — the cursor read past the end of
@@ -299,7 +385,8 @@ final class Ajax
         // The sentence arrives finished. The browser has neither the site's
         // number formatting nor its translations, and this line carries both —
         // see ScanProgress.
-        $label = ScanProgress::label($state['done'], $total, $state['elapsed'], $batchTiming);
+        $label = $this->rebuiltStatement($staleFrom)
+            . ScanProgress::label($state['done'], $total, $state['elapsed'], $batchTiming);
 
         if ($state['errors'] > 0) {
             // A run that lost answers says so while it is still running, not
@@ -352,9 +439,36 @@ final class Ajax
         // behind would mean the next scan answered every file from a reading of
         // the site taken before whatever the person reset the scan to re-check
         // (freshet-290).
+        //
+        // **The verdicts stay, and are dated instead** (freshet-415). They are
+        // post meta on every attachment in the library, so this is the one
+        // question Reset cannot settle in a request anyway — and the person who
+        // pressed it may still be reading the list it produced. What resetIndex()
+        // records on its way out is *when* the reading went, which is what
+        // closes the delete offer on every verdict older than that until the
+        // new scan reaches its file. Nothing is destroyed to achieve it, which
+        // is the half of this StaleIndex::rebuild() has no use for: there the
+        // plugin decided, not the person, and the verdicts go.
         $this->state->resetIndex();
 
         wp_send_json_success();
+    }
+
+    /**
+     * The statement a rebuilt scan's first reply carries, ready to sit in front
+     * of whichever progress line that reply would have sent — and '' for every
+     * other reply, which is all of them but one.
+     *
+     * It rides the progress line because that is the only thing the person is
+     * looking at: pressing Resume reloads nothing, so a screen-rendered notice
+     * would not be read until the scan finishes, which is hours on the
+     * libraries this matters on. The same sentence is also rendered by
+     * ToolsPage for anyone who opens the page while this scan is still running
+     * — one composer, two surfaces (StaleIndex::statement()).
+     */
+    private function rebuiltStatement(int $staleFrom): string
+    {
+        return $staleFrom !== 0 ? StaleIndex::statement($staleFrom) . ' ' : '';
     }
 
     /**
@@ -407,7 +521,7 @@ final class Ajax
 
         if ($batch['ids'] === []) {
             wp_send_json_success(array_merge(
-                ['finished' => true, 'deleted' => 0, 'skipped' => 0, 'failed' => 0, 'remaining' => 0, 'cursor' => 0],
+                ['finished' => true, 'deleted' => 0, 'skipped' => 0, 'failed' => 0, 'left_on_disk' => 0, 'remaining' => 0, 'cursor' => 0],
                 $this->unusedFigure()
             ));
         }
@@ -434,6 +548,7 @@ final class Ajax
             'deleted' => $result['deleted'],
             'skipped' => $result['skipped'],
             'failed' => $result['failed'],
+            'left_on_disk' => $result['left_on_disk'],
             'remaining' => count($result['remaining']),
             'cursor' => $cursor,
         ], $this->unusedFigure()));

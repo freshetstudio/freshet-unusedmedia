@@ -7,21 +7,24 @@ namespace FreshetUnusedMedia\Scan;
 defined('ABSPATH') || exit;
 
 /**
- * Size files whose original is gone — reported, never deleted.
+ * Size files whose original is gone — found here, never deleted here.
  *
  * A generated size has no attachment row and no `_wp_attached_file` value, so
  * it is outside this plugin's unit of work by design (FileGroups): it belongs
  * to its original and is swept with it. That reasoning runs out when the
  * original is not there any more. A `hero-300x200.jpg` with no `hero.*` beside
- * it and no row naming it belongs to nothing, is displayed by nothing, and is
- * the one derivative that can be judged on its own.
+ * it and no row naming it belongs to nothing in the library, and is the one
+ * derivative that can be judged on its own.
  *
- * It is *listed* here and nothing more. There is no row to corroborate the
- * finding against, so the two absence tests below are the only thing standing
- * between this list and a live thumbnail — and a listing that is wrong costs a
- * reader a second look, while a delete button that is wrong costs a file.
+ * This class finds them and records them (OrphanStore); whether post content
+ * still names one is OrphanReferences' answer, taken once at the end of the
+ * scan. There is no row to corroborate the finding against, so the two absence
+ * tests below are the only thing standing between the record and a live
+ * thumbnail — which is why recheck() exists: anything that acts on a recorded
+ * file runs the same two tests again, on that one file, at the moment it acts,
+ * and never trusts what the scan wrote down.
  *
- * Both tests must fail for a file to be listed:
+ * Both tests must fail for a file to be recorded:
  *
  * - **No file at the stem's own path.** Anything named `hero.*`, `hero-scaled.*`
  *   or `hero-rotated.*` in the same directory means the original is there.
@@ -55,19 +58,15 @@ defined('ABSPATH') || exit;
  */
 final class OrphanSizes
 {
+    /**
+     * Where the finding lived until it moved to OrphanStore's table: at most a
+     * hundred paths a directory and five hundred in all, with no sizes. Kept so
+     * a reset and an uninstall still remove what an earlier version left.
+     */
     public const OPTION = 'freshet_unusedmedia_orphan_sizes';
 
     /** Where core records the sizes it generated. FileGroups owns the other key. */
     private const META_DATA = '_wp_attachment_metadata';
-
-    /** Paths recorded for one directory. Enough to act on; the count is exact regardless. */
-    private const MAX_FILES_PER_DIR = 100;
-
-    /** Paths recorded in total. The option is read on a page render, so it stays small. */
-    private const MAX_FILES_STORED = 500;
-
-    /** Directories recorded. A month-per-folder tree never approaches this. */
-    private const MAX_DIRS = 500;
 
     /** @var array<string, true> Directories already examined in this request. */
     private static array $seen = [];
@@ -102,24 +101,7 @@ final class OrphanSizes
             return;
         }
 
-        // Split the directory into the originals it holds and the generated
-        // sizes it holds. An original is anything that is not size-shaped, read
-        // through the same stem strip, so `hero.jpg`, `hero-scaled.jpg` and a
-        // `hero.webp` alternate all say the same thing: hero is still here.
-        $present = [];
-        $sizes = [];
-
-        foreach ($listing as $entry) {
-            $stem = SizeSiblings::sizeStem($entry);
-
-            if ($stem === '') {
-                $present[SizeSiblings::stem($entry)] = true;
-
-                continue;
-            }
-
-            $sizes[$entry] = $stem;
-        }
+        [$present, $sizes] = self::split($listing);
 
         $candidates = [];
 
@@ -176,7 +158,77 @@ final class OrphanSizes
             return;
         }
 
-        self::record($dir, array_keys($candidates));
+        // One stat per file that survived both tests — the byte figure is the
+        // only thing the record needs that the listing did not already say.
+        $files = [];
+
+        foreach (array_keys($candidates) as $entry) {
+            $bytes = @filesize(dirname($absolute) . '/' . $entry);
+            $files[$entry] = $bytes === false ? 0 : $bytes;
+        }
+
+        ksort($files, SORT_STRING);
+
+        // A write that fails loses this directory's finding and nothing else:
+        // the attachment verdicts this scan exists for are not in this table,
+        // and a database that refuses this write is refusing the scan's own
+        // reads too, which the scan counts and reports as errors.
+        try {
+            OrphanStore::replaceDirectory($dir, $files);
+        } catch (QueryFailed) {
+            return;
+        }
+    }
+
+    /**
+     * Is the file at $relative still what the scan recorded it as?
+     *
+     * The same two absence tests observeAttachment() applies to a directory,
+     * applied to one file and read fresh: the directory is listed again rather
+     * than taken from SizeSiblings' memo, and both attachment reads are issued
+     * again. Null when the file is still a size with no original and no row;
+     * otherwise the reason it is not, as one of `not-a-size`, `original` or
+     * `attachment`.
+     *
+     * A read that does not answer raises QueryFailed (through Db) rather than
+     * coming back as "no row names it" — for a caller about to act on the
+     * answer, silence and absence must not be the same thing.
+     *
+     * @param string $relative Path under the uploads directory.
+     * @param string $absolute The same file on disk.
+     * @throws QueryFailed
+     */
+    public static function recheck(string $relative, string $absolute): ?string
+    {
+        $relative = trim(str_replace('\\', '/', $relative), '/');
+        $entry = wp_basename($relative);
+        $stem = SizeSiblings::sizeStem($entry);
+
+        if ($stem === '') {
+            return 'not-a-size';
+        }
+
+        $listing = @scandir(dirname($absolute), SCANDIR_SORT_NONE);
+        [$present] = self::split(is_array($listing) ? array_diff($listing, ['.', '..']) : []);
+
+        if (self::anyPresent($stem, $present)) {
+            return 'original';
+        }
+
+        $dir = self::directoryOf($relative);
+        $attached = self::attachedIn($dir);
+
+        Db::assertAnswered('orphan recheck');
+
+        if (isset($attached['paths'][$relative]) || self::anyPresent($stem, $attached['stems'])) {
+            return 'attachment';
+        }
+
+        $named = self::namedStemsIn($dir);
+
+        Db::assertAnswered('orphan recheck');
+
+        return self::anyPresent($stem, $named) ? 'attachment' : null;
     }
 
     /** Forget which directories this request has examined. Called per batch. */
@@ -185,45 +237,85 @@ final class OrphanSizes
         self::$seen = [];
     }
 
-    /** Start again: a new scan describes the library as it is now. */
+    /**
+     * Start again: a new scan describes the library as it is now. Creates the
+     * table where an update rather than an activation left none.
+     */
     public static function reset(): void
     {
         self::$seen = [];
         delete_option(self::OPTION);
+
+        OrphanStore::install();
+        OrphanStore::clear();
     }
 
     /**
-     * What the last scan found, as paths relative to the uploads directory.
+     * What the last scan found, in figures: how many, how many bytes, and how
+     * many post content names and does not. The files themselves are read a
+     * page at a time from OrphanStore, never all at once.
      *
-     * `count` is every file found, `files` the ones recorded — the two differ
-     * only on a library far past the point where a longer list would help.
+     * All zeroes where no scan has made the table yet.
      *
-     * @return array{files: string[], count: int, truncated: bool}
+     * @return array{count: int, bytes: int, referenced: int, unreferenced: int, unchecked: int}
+     * @throws QueryFailed
      */
     public static function read(): array
     {
-        $data = get_option(self::OPTION);
-        $dirs = is_array($data) && is_array($data['dirs'] ?? null) ? $data['dirs'] : [];
-
-        $files = [];
-        $count = 0;
-
-        foreach ($dirs as $dir => $entry) {
-            $count += (int) ($entry['count'] ?? 0);
-
-            foreach ((array) ($entry['files'] ?? []) as $file) {
-                $files[] = $dir === '' ? (string) $file : $dir . '/' . $file;
-            }
+        if (!OrphanStore::exists()) {
+            return ['count' => 0, 'bytes' => 0, 'referenced' => 0, 'unreferenced' => 0, 'unchecked' => 0];
         }
 
-        sort($files);
+        return OrphanStore::summary();
+    }
 
-        return [
-            'files' => $files,
-            'count' => $count,
-            'truncated' => (bool) (is_array($data) ? ($data['truncated'] ?? false) : false)
-                || count($files) < $count,
-        ];
+    /**
+     * A listing, split into the originals it holds and the generated sizes it
+     * holds. An original is anything that is not size-shaped, read through the
+     * same stem strip, so `hero.jpg`, `hero-scaled.jpg` and a `hero.webp`
+     * alternate all say the same thing: hero is still here.
+     *
+     * **And every name also stands for its own path** (freshet-438). The strip
+     * reads `hero-scaled.jpg` as `hero` and nothing else, so a size cut *from
+     * the scaled file* — `hero-scaled-1024x683.jpg`, which is what regenerating
+     * thumbnails from an attachment whose file is the scaled copy writes — found
+     * no `hero-scaled` here and was recorded as having no original, while its
+     * original sat beside it. On one production library that was every one of
+     * the 465 files recorded. A file at the stem's own path is the first absence
+     * test as this class states it, so both readings of each name count; reading
+     * an original into a name too readily is the harmless direction.
+     *
+     * @param iterable<string> $listing
+     * @return array{0: array<string, true>, 1: array<string, string>} [stems present, size entry => stem]
+     */
+    private static function split(iterable $listing): array
+    {
+        $present = [];
+        $sizes = [];
+
+        foreach ($listing as $entry) {
+            $entry = (string) $entry;
+            $present[self::bare($entry)] = true;
+            $stem = SizeSiblings::sizeStem($entry);
+
+            if ($stem === '') {
+                $present[SizeSiblings::stem($entry)] = true;
+
+                continue;
+            }
+
+            $sizes[$entry] = $stem;
+        }
+
+        return [$present, $sizes];
+    }
+
+    /** A name without its last extension: `hero-scaled.jpg` is `hero-scaled`. */
+    private static function bare(string $basename): string
+    {
+        $dot = strrpos($basename, '.');
+
+        return $dot === false ? $basename : substr($basename, 0, $dot);
     }
 
     /**
@@ -304,10 +396,12 @@ final class OrphanSizes
 
             $paths[$path] = true;
 
-            $stem = SizeSiblings::stem(wp_basename($path));
-
-            if ($stem !== '') {
-                $stems[$stem] = true;
+            // Both readings, as split() reads the disk: a row standing on
+            // `hero-scaled.jpg` carries `hero` and `hero-scaled` alike.
+            foreach ([SizeSiblings::stem(wp_basename($path)), self::bare(wp_basename($path))] as $stem) {
+                if ($stem !== '') {
+                    $stems[$stem] = true;
+                }
             }
         }
 
@@ -378,43 +472,5 @@ final class OrphanSizes
         }
 
         return $stems;
-    }
-
-    /**
-     * Write one directory's finding, replacing whatever it said before, so a
-     * directory spanning several batches records the same answer each time
-     * rather than accumulating it.
-     *
-     * @param string[] $files
-     */
-    private static function record(string $dir, array $files): void
-    {
-        $data = get_option(self::OPTION);
-        $data = is_array($data) ? $data : [];
-        $dirs = is_array($data['dirs'] ?? null) ? $data['dirs'] : [];
-
-        if (!isset($dirs[$dir]) && count($dirs) >= self::MAX_DIRS) {
-            $data['truncated'] = true;
-            update_option(self::OPTION, $data, false);
-
-            return;
-        }
-
-        unset($dirs[$dir]);
-        sort($files);
-
-        $stored = 0;
-
-        foreach ($dirs as $entry) {
-            $stored += count((array) ($entry['files'] ?? []));
-        }
-
-        $room = max(0, min(self::MAX_FILES_PER_DIR, self::MAX_FILES_STORED - $stored));
-
-        $dirs[$dir] = ['count' => count($files), 'files' => array_slice($files, 0, $room)];
-        $data['dirs'] = $dirs;
-        $data['updated_at'] = time();
-
-        update_option(self::OPTION, $data, false);
     }
 }

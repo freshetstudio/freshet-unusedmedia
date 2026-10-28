@@ -65,6 +65,17 @@ defined('ABSPATH') || exit;
  * committed page left it, `complete` is never set, and nothing answers a file
  * from an incomplete index — so an interrupted pass means *not yet scanned*, not
  * *unused* (freshet-141, one level up).
+ *
+ * **One pass at a time, and the pass itself is what enforces it.** Two requests
+ * building this index at once corrupt it rather than merely duplicating work:
+ * the rewind each read opens with deletes whatever is past the cursor, so the
+ * slower request deletes rows the faster one has written and the faster one
+ * stamps `complete` over the gap. Every write that can do that is therefore a
+ * compare-and-swap against the stored cursor — `ScanState::indexToken()` holds
+ * the shape of it — and the request that loses is refused with
+ * `ScanSuperseded` rather than allowed to finish into somebody else's index
+ * (freshet-424). It is not a lock: nothing is held, nothing expires, and a
+ * request killed by `max_execution_time` blocks nothing.
  */
 final class ReferenceIndexer
 {
@@ -160,6 +171,16 @@ final class ReferenceIndexer
      */
     private static array $diskNames = [];
 
+    /**
+     * The cursor this request last saw, as `ScanState::indexToken()` writes it.
+     *
+     * Per request and never static: it is the answer to "am I still the one
+     * building this index", and two admins pressing Start are two requests
+     * (freshet-424). Re-read after every write, because every write moves the
+     * cursor and the next guard compares against where the pass is now.
+     */
+    private string $token = '';
+
     public function __construct(private readonly ScanState $state)
     {
     }
@@ -190,6 +211,7 @@ final class ReferenceIndexer
      *
      * @return array{complete: bool, read: string, rows: int, entries: int, elapsed: float, total_rows: int, total_entries: int, corpus_rows: int}
      * @throws QueryFailed A read that did not answer; see the class note.
+     * @throws ScanSuperseded Another pass took the index over; see the class note.
      */
     public function advance(float $budgetSeconds = 0.0, ?callable $onPage = null): array
     {
@@ -213,6 +235,8 @@ final class ReferenceIndexer
             $cursor = $this->state->startIndex($this->corpusRows($reads));
         }
 
+        $this->token = ScanState::indexToken($cursor);
+
         if ($cursor['complete']) {
             return $this->report($cursor, true, 0, 0, 0.0);
         }
@@ -233,6 +257,7 @@ final class ReferenceIndexer
                 ReferenceIndex::install();
                 ReferenceIndex::truncate();
                 $cursor = $this->state->startIndex($this->corpusRows($reads));
+                $this->token = ScanState::indexToken($cursor);
                 $position = 0;
             } else {
                 $after = $cursor['pk'];
@@ -255,17 +280,30 @@ final class ReferenceIndexer
             $partialRow = $offset > 0;
 
             if (!$partialRow) {
-                ReferenceIndex::forgetAfter($read['read'], $after);
+                $this->rewind($read['read'], $after);
             }
 
             while (true) {
+                // Before a page's work, not only after it. The guards on the
+                // writes keep a superseded request from *corrupting* the index;
+                // this one keeps it from adding to it. A page's references are
+                // committed row by row and only then is the cursor written, so
+                // without this a request that was taken over between two pages
+                // would index a whole page into somebody else's pass — rows
+                // nothing will ever rewind past, which is a duplicate evidence
+                // line on every file in them. What is left exposed is a
+                // supersede that lands *inside* a page, and duplicate evidence
+                // is the safe direction (freshet-D116) where the hole this task
+                // closes was not.
+                $this->state->assertIndexToken($this->token);
+
                 $page = $this->page($read, $after);
 
                 if ($page === []) {
                     // An offset into a row the source table no longer has. The
                     // row is gone, so are its references, and so is the offset.
                     if ($partialRow) {
-                        ReferenceIndex::forgetAfter($read['read'], $after);
+                        $this->rewind($read['read'], $after);
                     }
 
                     break;
@@ -277,7 +315,7 @@ final class ReferenceIndexer
                 if ($partialRow) {
                     $partialRow = false;
 
-                    ReferenceIndex::forgetAfter($read['read'], (int) $page[0]->frst_pk);
+                    $this->rewind($read['read'], (int) $page[0]->frst_pk);
                 }
 
                 if ($workStartedAt === null) {
@@ -317,7 +355,7 @@ final class ReferenceIndexer
                         // so the resume picks the row up rather than repeating it
                         // — see ScanState::indexCursor() for the 370-second row
                         // this exists for.
-                        $cursor = $this->state->advanceIndex(
+                        $cursor = $this->advanceCursor(
                             $read['read'],
                             $after,
                             $pageRows,
@@ -346,7 +384,7 @@ final class ReferenceIndexer
 
                 $rows += $pageRows;
 
-                $cursor = $this->state->advanceIndex($read['read'], $after, $pageRows, $pageEntries, microtime(true) - $startedAt);
+                $cursor = $this->advanceCursor($read['read'], $after, $pageRows, $pageEntries, microtime(true) - $startedAt);
                 $startedAt = microtime(true);
 
                 if ($onPage !== null) {
@@ -369,14 +407,60 @@ final class ReferenceIndexer
             $next = $reads[$position + 1]['read'] ?? '';
 
             if ($next !== '') {
-                $cursor = $this->state->advanceIndex($next, 0, 0, 0, microtime(true) - $startedAt);
+                $cursor = $this->advanceCursor($next, 0, 0, 0, microtime(true) - $startedAt);
                 $startedAt = microtime(true);
             }
         }
 
-        $cursor = $this->state->finishIndex();
+        $cursor = $this->state->finishIndex($this->token);
 
         return $this->report($cursor, true, $rows, $entries, microtime(true) - $requestStartedAt);
+    }
+
+    /**
+     * Forget what a read wrote past a primary key — but only if this request
+     * is still the one building the index.
+     *
+     * The rewind is the destructive half of freshet-424 and the half that
+     * cannot guard itself: `ReferenceIndex` holds no cursor, so it has no way
+     * to know whose rows it is deleting. A request that has been superseded
+     * deletes the rows the *current* pass has written for that read, and the
+     * current pass — which has no idea anything was taken from under it — goes
+     * on to stamp the index complete over the gap.
+     *
+     * The guard is a read of the stored cursor and the delete is a second
+     * statement, so there is a window of microseconds between them that
+     * nothing here closes. What it buys is that a request superseded at any
+     * point before that window stops rather than carrying on for the rest of a
+     * pass doing this eight more times, and the two that matter —
+     * advanceIndex() and finishIndex() — are the same guard on a write that is
+     * itself the compare.
+     *
+     * @throws ScanSuperseded Somebody else is driving the pass.
+     */
+    private function rewind(string $read, int $afterPk): void
+    {
+        $this->state->assertIndexToken($this->token);
+
+        ReferenceIndex::forgetAfter($read, $afterPk);
+    }
+
+    /**
+     * Move the cursor, and remember where it now is.
+     *
+     * One place, because the token has to be re-read after every write and
+     * four call sites each remembering to do it is four chances to forget —
+     * and forgetting means the *next* guard compares against a cursor two
+     * writes old and refuses this request's own pass.
+     *
+     * @throws ScanSuperseded Somebody else is driving the pass.
+     */
+    private function advanceCursor(string $read, int $pk, int $rows, int $entries, float $elapsed, int $offset = 0): array
+    {
+        $cursor = $this->state->advanceIndex($this->token, $read, $pk, $rows, $entries, $elapsed, $offset);
+        $this->token = ScanState::indexToken($cursor);
+
+        return $cursor;
     }
 
     /** Drop the per-request structures once a pass is finished with. */

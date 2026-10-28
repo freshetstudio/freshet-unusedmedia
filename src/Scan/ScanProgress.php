@@ -34,8 +34,11 @@ final class ScanProgress
      * tomorrow; the seconds between those requests are not seconds the scan
      * spent, and an estimate built on them would tell someone resuming an
      * overnight scan that a thousand files will take a week. ScanState
-     * accumulates the time inside batches for exactly this, and nothing else
-     * reads it.
+     * accumulates the time inside batches for exactly this, and the one other
+     * reader it has since freshet-413 wants it for the same distinction from
+     * the other side: the wall clock *minus* this is how long a scan has sat
+     * untouched, which is what decides whether what it stands on is still worth
+     * resuming onto (StaleIndex).
      *
      * Null rather than zero where there is nothing to divide by: a scan that
      * has not finished a batch has not earned an estimate, and the label has a
